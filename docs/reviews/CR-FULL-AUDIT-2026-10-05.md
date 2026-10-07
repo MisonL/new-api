@@ -600,14 +600,12 @@ coze `conversation.chat.completed`、tencent 尾包 `FinishReason=stop`、zhipu 
 cohere `is_finished=true`、ollama `done` 帧（该渠道本就对缺帧返回错误，只在成功路径补记录）。
 
 **同类缺陷未覆盖**（记录待办，均为代码级核对、未修复）：
-- `aws/converse.go`：成功路径已强制要求 `message_stop`+`metadata`，但 `AwsClient` 是具体类型
-  `*bedrockruntime.Client`，写回归测试需要事件流 fake；仅缺一行 `SetEndReason`。
-- `xunfei`：WebSocket 读取器在消费端无法区分「收到 status=2 终止帧」与「读错误」，两者都走
-  `stopChan`，修复需要跨 goroutine 传递终止标志。
 - `palm`：`palmStreamHandler(c, resp)` 没有 `RelayInfo` 参数，无法写 `StreamStatus`；
   且 PaLM API 已下线。
 - `openai/relay_responses_synthetic_compact.go`：合成流写出 `response.completed` 后结束，
   没有上游可截断，属另一类。
+
+`aws` 与 `xunfei` 已在 §11 修复。
 
 ### 10.3 已核验但未由本会话修复的发现
 
@@ -642,4 +640,33 @@ cohere `is_finished=true`、ollama `done` 帧（该渠道本就对缺帧返回�
   修复是根本不 mock 真实 store，而不是把 mock 补全。
 - **测试文件间的隐藏耦合**：`api.get` 去重表是模块级状态，一个用例在断言失败提前退出后
   会把 in-flight 表项留给下一个用例；每个用例使用独立 URL 隔离。
+
+
+## 11. 2026-10-07 自建扫描器渠道收尾：xunfei 与 aws
+
+§10.2 待办清单里的两个渠道已修复，均为 TDD（先 RED、再实现、扰动反向验证）后提交。
+
+### 11.1 修复清单
+
+| 提交 | 内容 | 反向验证 |
+| --- | --- | --- |
+| `51f7f7a67` | xunfei：WebSocket 读取器把「status==2 终止帧」与「读错误」都走同一条 `stopChan`，消费者无从区分且从不写 `StreamStatus`。改为带类型的 `xunfeiStreamResult{endedNormally}`，消费者经 `helper.RecordStreamEnd` 分类。为让 handler 拿到 `info` 且可用本地 WS 上游测试，`xunfeiStreamHandler` 改收 `*RelayInfo` 与调用方预构建的 domain/authUrl（adaptor 经 `getXunfeiAuthUrl` 构建） | 撤分类：两条用例均 FAIL（`EndReason=""`）；扰动 `endedNormally` 恒真：反向对照 FAIL |
+| `6b4486923` | aws：ConverseStream 成功路径已强制要求 `message_stop`（Claude 另有 metadata）却从不写 `StreamStatus`。终止校验与收尾帧提取为 `finishConverseStream`，成功返回前经 `helper.RecordStreamEnd` 记录；能到达该返回点即意味着见过两个终止事件，标记恒真 | 撤分类：两条成功路径用例 FAIL；`aws` 包全绿 |
+
+测试方式：xunfei 用 `httptest` + gorilla `Upgrader` 起本地 WebSocket 上游，驱动真实
+读取/消费/分类链路（终止帧收尾 → 正常成功；无终止帧断开 → 中断）；aws 的 handler 需要
+具体 `*bedrockruntime.Client`，测试直接驱动提取出的 `finishConverseStream`（OpenAI 与
+Claude 两条成功路径 + 缺 `message_stop` 的反向对照）。
+
+### 11.2 提交边界
+
+两个提交都以 HEAD 为基线、只叠加本次改动：工作区里 `relay-xunfei.go` 与其他文件的
+`encoding/json -> common.*` 迁移属其他会话的在途改动，未纳入提交（`git show <commit>:<file>`
+计数 0 处 `common.Marshal` 对 3 处 `json.Marshal` 可复核）。
+
+### 11.3 剩余同类未覆盖
+
+- `palm`：`palmStreamHandler(c, resp)` 无 `RelayInfo` 参数；PaLM API 已下线，不投入。
+- `openai/relay_responses_synthetic_compact.go`：合成流无上游可截断，属另一类。
+
 
