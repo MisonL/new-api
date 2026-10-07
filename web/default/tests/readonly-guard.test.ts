@@ -33,7 +33,13 @@ const {
   IS_READONLY_FRONTEND,
   READONLY_FRONTEND_MESSAGE,
   isReadonlyBlockedRequest,
+  installReadonlyFetchGuard,
 } = await import('../src/lib/readonly-guard')
+
+// 本文件可能不是进程里第一个加载 @/lib/api 的测试文件（bun 在同一进程按
+// 文件顺序执行，模块只求值一次）。若别的文件先加载，守卫已安装在当时的
+// fetch 上；上面把 fetch 换成了 spy，必须让守卫重新包住它。
+installReadonlyFetchGuard()
 
 beforeAll(() => {
   expect(IS_READONLY_FRONTEND).toBe(true)

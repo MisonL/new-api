@@ -2,6 +2,7 @@ import axios from 'axios'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { markToastShown } from '@/lib/handle-server-error'
 import {
   applyReadonlyRequestGuard,
   installReadonlyFetchGuard,
@@ -107,14 +108,20 @@ api.interceptors.response.use(
         console.error('Auth reset failed:', resetError)
       }
       if (!skip) {
+        markToastShown(error)
         toast.error(i18next.t('Session expired!'))
       }
     } else if (!skip) {
-      // Other errors: show error message from response or default
+      // Other errors: show error message from response or default.
+      // 304 carries no body, so axios' status text would surface verbatim;
+      // give it the specific not-modified wording instead.
       const msg =
-        error?.response?.data?.message ||
-        error?.message ||
-        i18next.t('Request failed')
+        status === 304
+          ? i18next.t('Content not modified!')
+          : error?.response?.data?.message ||
+            error?.message ||
+            i18next.t('Request failed')
+      markToastShown(error)
       toast.error(msg)
     }
     return Promise.reject(error)

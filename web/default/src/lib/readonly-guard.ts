@@ -189,7 +189,11 @@ function rejectReadonlyRequest(): never {
   throw new Error(READONLY_FRONTEND_MESSAGE)
 }
 
-let fetchGuardInstalled = false
+// The wrapper currently installed on globalThis.fetch, if any. Kept so the
+// guard can tell "already installed" apart from "someone replaced fetch after
+// the guard was installed" -- the latter silently disables the read-only layer,
+// so the install must run again over the new function.
+let installedFetchWrapper: typeof globalThis.fetch | null = null
 
 /**
  * Installs the guard on the global `fetch`.
@@ -205,16 +209,21 @@ let fetchGuardInstalled = false
  * target) and local blob/data URLs keep working.
  */
 export function installReadonlyFetchGuard(): void {
-  if (!IS_READONLY_FRONTEND || fetchGuardInstalled) {
+  if (!IS_READONLY_FRONTEND) {
     return
   }
   if (typeof globalThis.fetch !== 'function') {
     return
   }
-  fetchGuardInstalled = true
+  if (
+    installedFetchWrapper !== null &&
+    globalThis.fetch === installedFetchWrapper
+  ) {
+    return
+  }
 
   const originalFetch = globalThis.fetch.bind(globalThis)
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  const wrapper = ((input: RequestInfo | URL, init?: RequestInit) => {
     const method =
       init?.method ??
       (typeof Request !== 'undefined' && input instanceof Request
@@ -231,6 +240,8 @@ export function installReadonlyFetchGuard(): void {
     }
     return originalFetch(input, init)
   }) as typeof globalThis.fetch
+  globalThis.fetch = wrapper
+  installedFetchWrapper = wrapper
 }
 
 /**

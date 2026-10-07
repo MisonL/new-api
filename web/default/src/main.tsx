@@ -15,7 +15,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { getStatus } from '@/lib/api'
 import '@/lib/dayjs'
 import { applyFaviconToDom } from '@/lib/dom-utils'
-import { handleServerError } from '@/lib/handle-server-error'
+import { handleServerError, wasToastShown } from '@/lib/handle-server-error'
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
 import { ThemeProvider } from './context/theme-provider'
@@ -46,12 +46,6 @@ const queryClient = new QueryClient({
     mutations: {
       onError: (error) => {
         handleServerError(error)
-
-        if (error instanceof AxiosError) {
-          if (error.response?.status === 304) {
-            toast.error(i18next.t('Content not modified!'))
-          }
-        }
       },
     },
   },
@@ -59,13 +53,17 @@ const queryClient = new QueryClient({
     onError: (error) => {
       if (error instanceof AxiosError) {
         if (error.response?.status === 401) {
-          toast.error(i18next.t('Session expired!'))
+          if (!wasToastShown(error)) {
+            toast.error(i18next.t('Session expired!'))
+          }
           useAuthStore.getState().auth.reset()
           const redirect = `${router.history.location.href}`
           router.navigate({ to: '/sign-in', search: { redirect } })
         }
         if (error.response?.status === 500) {
-          toast.error(i18next.t('Internal Server Error!'))
+          if (!wasToastShown(error)) {
+            toast.error(i18next.t('Internal Server Error!'))
+          }
           router.navigate({ to: '/500' })
         }
       }
