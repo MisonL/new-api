@@ -923,6 +923,32 @@ if from == to || to == types.RelayFormatGemini ||
 - **「部分正确」的清单最难抓**：上游 6 调用点里 4 个在本地恰好也有同名文件，清单因此在「检查是否可解析」的意义上几乎全对——只有逐条问「这行在**声明的 ref** 上是什么」才暴露。**ref 身份（前缀）比可解析性更根本。**
 - **计数段落是门禁的自盲区**：检查器描述段里的「34 处」「15 个单测」滞后了 8 轮，因为**它们描述的是门禁本身，而门禁不检查文档对自己的描述**。工具自述也列入每次改动的同步清单。
 
+**第三十七轮（2026-10-07）——让外部模型（Codex）独立复核：它的 2 个 P1 全部成立、1 个 P2 成立但被低估，而复核过程本身又牵出 3 处比 P1 更硬的缺口**：本轮不是自查，是把整份规格连同「只用 `git show <ref>:<path>`、不得改动工作区」的约束交给 Codex 独立走查，再由我逐条复现它的每条结论。**外部复核的价值不在「多一双眼睛」，而在它不受我前 36 轮的思路惯性约束**——它一上来就查了三个我从未作为整体查过的对象。
+
+Codex 的报告与我的逐条复现：
+
+1. **P1-1（成立）阶段归属冲突**：阶段 5 行把包装层 / `RecordConversionDiagnostics` / 流式 `ResponseStreamState` 写成自己的落地内容，而 §12.20.1 与处置清单第 16 项把它们归给阶段 4。**同一批产物被两个阶段同时认领，且阶段 5 的判据还要求「核验」它们**——若真按阶段 5 落地，阶段 4 的判据（4 个门控快照逐字节一致）就已经隐含要求过它们，届时会出现「阶段 4 未落地但判据已通过」的假绿。已把阶段 5 行改为**只核验不落地**，并给处置清单第 16 项加注「阶段归属第 37 轮钉死」。
+2. **P1-2（成立，且比 Codex 说的更受限）无法产生 error**：Codex 指出 `reasonmap.OpenAIFinishReasonToClaudeStopReason` 无 error 通道。**我复现后把范围扩大**：不仅该函数返回裸 `string`，调用它的 `oai_chat` 本地助手 `stopReasonOpenAI2Claude`（`:501`）与 3 个上游函数（`StreamResponseOpenAI2Claude:111`、`FinalizeStreamResponseOpenAI2Claude:420`、`ResponseOpenAI2Claude:449`）**全部无 error 返回**，4 个调用点（`:220`/`:406`/`:429`/`:459`）都在它们体内。**故 12.11.3 的「选项 A（布尔钩子）」从设计上就不可能实现**——布尔只能选分支，错误无处可去。已拆为 **A1**（改 3 个函数签名，真分叉）/ **A2**（钩子只选分支、报错由宿主前置校验，实为 B 的变体）/ **B**（纯宿主 5 处前置校验），同步处置清单 9、§12.18 第 31 行、§10 收尾 12、本地改动清单第 12 行。
+3. **P2（成立，且实际是 9 个不是 6 个）**：4.5.5 写「与 relaykit 重复的 4 组（6 个函数）」。**逐名核对后是 9 个**——漏了 `StreamResponseClaude2OpenAIWithError`、`streamResponseGeminiChat2OpenAI`、`streamResponseGeminiChat2OpenAIWithError`。同时**该表的「30 个 / 17 个通道包」用任何单一命令都复现不出来**（我试了 8 种正则，得到 26/16、27/17、39/18、42/18、45/20、49/20 等），已换成一个**写出命令**的口径：函数名含 `<字母>2<字母>` 且含 `request`/`response`（不分大小写）= **45 个 / 20 个包**。阶段 6 判据的名单 6→9。
+4. **Codex 自己的「确认无误」项里有一处抽查是错的**：它用 `git show dbfbc096f:service/convert.go | sed -n '240,270p'` 核对 4.5.5 第 1 行，报「Claude 入向函数在 `service/convert.go:255`」——**`:255` 是 `relay/channel/claude/relay-claude.go` 的行号，`service/convert.go:255` 是 `sourceType := strings.ToLower(...)`**。**外部复核的「确认无误」与「发现问题」需要同等的复现义务**（同 [[subagent-audit-claims-need-independent-verification]]），本轮我逐条复现了它的每个 P 级结论，它的「确认无误」项也抽检了 6 条，仅此 1 处有误。
+
+**复核过程中我自己牵出的 3 处缺口（均未被 Codex 提及，且都比它的 P1 更硬）**：
+
+5. **`relay/channel/aws/converse.go`（1206 行）从未进入任何盘点**：这是本地独有的 Bedrock Converse 双向转换（33 个顶层函数），**上游从未有此文件**（`git log upstream/main -- relay/channel/aws/converse.go` 为空，上游 `relay/channel/aws/` 只有 5 个文件），上游全仓 `Converse` 标识符只出现在一个 URL 字符串里。它与本迁移有 3 个交互点（`:113` 调 `service.ClaudeToOpenAIRequest`、`:696` 调 `claude.ResponseClaude2OpenAIWithError`、`:412` 调 `service.GetBase64Data`），**但 §4.5 各小节、§12.20.1 的 C 表、阶段 6 的删除清单全都没提到它**。已补入 4.5.5 末段与阶段 6 行。
+6. **通道级的 5 个生产调用点 + 6 个测试调用点同样未被任何清单认领**：`relay-claude.go:1167,1273`、`relay-gemini.go:1605,1768`、`aws/converse.go:696` 调用 4 个通道级 `*WithError` 函数，**而 12.20.1 的生产表只列了 `service/convert.go` 的 9 处**。更关键的是**这 5 处的「删掉 err 分支」不是机械改写**：上游对 `:1273`/`:1605`/`:1768` 用无 error facade，对 `:1167` 却用 `state.ConvertChunk`（**有** error 返回）——**同一批调用点，上游的处理方式并不一致**，逐处实测后写入。测试侧同理：`relay/channel/claude/relay_claude_test.go`（18 处）、`relay/channel/gemini/protocol_conversion_test.go`（4 处）与 12.16.1 的「4 文件 82 处」是**两套互不重叠的测试面**，且 HEAD 已增至 30 处（新增两个基线不存在的文件）。
+7. **通道级响应转换器自己的一套严格性（9 条）与反方向 stop_reason 严格校验（6 条）都无盘点**：12.16.1 与 9.1/9.2 只覆盖 `service/convert.go` 的映射层，**而 4.5.5 那 9 个函数被替换时会丢掉另一套独立的错误路径**——新增 §9.2.1（9 条，含 1 条 **nil pointer panic**：上游流式 facade 在 `:84` 直接解引用 `*Delta.PartialJson`，而本地 `:779` 有守卫、非流式 `ConvertChunk:188` 也有守卫）与 §9.2.2（6 条反方向差异，含 `pause_turn` 本地 `stop` vs 上游 `length` 的**语义分歧**）。**§9.2.1 第 9 条不是「严格性丢失」而是输出内容变化**：`signature_delta` 本地返回 `nil,nil` 丢弃，上游 `:87-88` 产出 `ReasoningContent="\n"`——而真实 Claude 流每个 thinking 块结束都会发 `signature_delta`，本地测试正钉在相反语义上。
+
+**门禁与反向验证**：新增引用后 `relaykit-citation-check.py` 三组全绿（**50/50** relaykit、**103/103** 宿主、**24/24** upstream 全路径；第 36 轮为 47/98/21）；单测 25 个通过；`relaykit-dto-compat.sh --strict` 通过（`fieldSet=33 tag=5 type=6 embed=0 order=4 sig=12 equiv=21`）。**反向验证 5 次扰动全部退出码 1**（本轮新增的两类锚点各验一次：relaykit `to_oai_chat_resp.go:99999`、`reasonmap.go:99999`；宿主 `relay_claude_test.go:99999`；upstream 全路径 `claude/adaptor.go:99999`；以及 §9.2.1/§9.2.2 最初写成裸 `:NN` 简写时**不被门禁覆盖**——当场改成全路径后进入门禁）。顺带同步检查器自述段的 3 处计数（47→50、98→103、21→24）。
+
+**教训**：
+
+- **外部复核的「确认无误」与「发现问题」有同等的复现义务**。本轮它的 3 个 P 级结论全部成立（P2 还被低估），但它的 1 条「确认无误」抽查指向了错误的文件——**不能只复现它的失败项、把它的通过项当既成事实**。
+- **「无 error 通道」类结论必须逐签名核到函数体**。Codex 报的是最外层函数无 error 返回；真正的约束是**从报错点到最近的 error 返回点之间的整条调用链**——本轮因此把「选项 A 不可实现」的范围从 1 个函数扩到 4 个函数。
+- **同一批产物的阶段归属冲突，用「可逆性」判而不只是「谁先谁后」**：阶段 4 是唯一被要求单点可逆的切换点，凡与该切换耦合的产物（包装层、diagnostics、流式状态）都必须在阶段 4 落地——否则阶段 5 单独落地会让阶段 4 的判据在「产物尚不存在」时通过。
+- **一个文件从未出现在任何盘点里，往往不是「无关」而是「没人查过」**。`converse.go` 1206 行、33 个函数、上游零覆盖，却因为「不在 §4.5 的分类框架里」而 36 轮无人提及——**分类框架本身会制造盲区**（同 12.5 的「需实测」无 owner）。
+- **同一批调用点里，上游的处理方式可能不一致**。`:1167` 用带 error 的 `ConvertChunk`，`:1273`/`:1605`/`:1768` 用无 error 的 facade——**不能按「同一族函数」批量推断改写方式，必须逐处打开上游对应位置**。
+- **替换一套函数时，它自带的错误路径要单独盘点，不能只盘「正常路径的语义差异」**。9.1/9.2 盘了 15 条语义差异，却漏掉了被替换函数自己的 9 条错误路径与 6 条反方向差异——**「语义对齐清单」的覆盖面应按被删函数的全集反推，而不是按输出类型反推**。
+
 ## 边界与未验证项
 
 - 本记录及设计文档**未修改任何生产代码**。第十八轮起已实际运行 `go test ./service -run TestGolden` 与全包 `go test ./service`（见该轮），但「编译失败」类结论仍未逐条 `go build` 复现
@@ -982,4 +1008,5 @@ if from == to || to == types.RelayFormatGemini ||
 | （本轮·第三十轮） | 核 §12.16.2/12.16.3，从「9.1/9.2 的 13 处」这一个聚合计数查出 **8 处错误**：计数 5 处（13→15；「6 个调用点」实为 6 函数/8 调用点；12.0.8 的「全部 15 处」实为 tag 5 + 类型 6 = 11；12.0.6 的「等价拼写 15 处」实为 21；类别 C「3 类型 4 字段」实为 4 类型 5 字段）、事实 2 处（`mustUnmarshalFixture` 并非「同签名」——上游 `(raw string, out any)` vs 本地 `(t, raw, v)`，决定阶段 6 合并须改本地 8 处调用；「与 15 处差异无一重叠」不成立，至少 3 处重叠，结论仍成立但理由应改为「重叠的几处是 struct 值空操作」）、死代码 1 处（2 个 fixture 常量零引用）。**根因是工具门禁漏掉一整个维度**：`--strict` 期望数组 5 项而工具打印 6 组，等价拼写组从未进 gate——已加 `wantEquiv=21` 并反向验证（改 20 → 退出码 1）。另核实 IDE 报的 `main.go:50` embed 诊断与本轮无关（HEAD 原样、前端未构建） |
 | （本轮·第二十九轮） | 核 §12.11（`reasonmap` 宽松 default）：原文写「严格化在宿主调用点做」，**实测该落点在阶段 6 后不存在**——严格校验的两个唯一调用点（`service/convert.go:738`、`:1057`）都在阶段 6 删除的文件内，宿主 5 个 Claude 方向调用点全部只做错误转发，relaykit 侧 `reasonmap.OpenAIFinishReasonToClaudeStopReason` 是纯包级函数、零钩子（与 12.4 的 `Options` 钩子、12.15.4 的 `MediaResolver` 不同）。且差异被少算：实际 **5 条**（未知值报错、`""`、`TrimSpace`、`function_call`、`content_filter` 无差异），其中 3 条是行为回归；`""` 那条因 `stop_reason` 带 `omitempty` 会整字段消失，且两条 golden 基线都测不到。`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 调用的函数阶段 4 即删，是「编译失败」而非「失败得其所」——12.16.1 的第二个例外。§12.11 重写为 12.11.1/12.11.2/12.11.3（二选一：A 加钩子 / B 宿主 5 处前置校验），同步 9.1 第 1 条、处置清单 9、§10 收尾 12、§12.17 第 12 行、阶段表第 4 行判据、本地改动清单第 12 行、未决项 31。引用 34→40，门禁 40/40，反向验证通过 |
 
-文档当前 1879 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
+| （本轮·第三十七轮） | 让外部模型（Codex）独立复核，再逐条复现其结论：**P1×2 与 P2 全部成立**——①阶段 5 行与 §12.20.1/处置清单 16 争抢同一批产物（包装层、diagnostics、流式状态）→ 阶段 5 改「只核验不落地」；②12.11.3「选项 A 布尔钩子」**不可实现**（`reasonmap` + `oai_chat` 3 个函数全无 error 返回）→ 拆 A1（改 3 个签名）/ A2（钩子选分支+宿主校验）/ B；③4.5.5「4 组 6 个」实为 **9 个**（漏 3 个），且「30 个 / 17 包」无命令可复现 → 换为可复现口径 **45 个 / 20 包**，阶段 6 名单 6→9。**它自己的 1 条「确认无误」抽查指错了文件**（把 `relay-claude.go:255` 说成 `service/convert.go:255`）→ 外部复核的通过项也须复现。**复核中另牵出 3 处更硬的缺口**：④`relay/channel/aws/converse.go`（1206 行、33 函数、上游零覆盖）从未进入任何盘点；⑤通道级 5 个生产 + 6 个测试调用点未被认领，且**上游对这批调用点处理不一致**（`:1167` 用带 error 的 `ConvertChunk`，另 3 处用无 error facade）；⑥被替换的 9 个函数自带的**另一套严格性**无盘点 → 新增 §9.2.1（9 条，含 1 条 nil pointer panic、1 条 `signature_delta` 输出变化）与 §9.2.2（6 条反方向 stop_reason，含 `pause_turn` 的 stop/length 语义分歧）。引用 47→50（宿主 98→103、upstream 全路径 21→24），门禁三组全绿 + 反向验证 5 次扰动全 exit 1 |
+文档当前 1933 行，位于 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`。
