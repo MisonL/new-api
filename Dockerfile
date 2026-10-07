@@ -93,7 +93,7 @@ RUN --mount=type=cache,id=new-api-go-mod,target=/go/pkg/mod,sharing=locked \
     if [ -z "$VERSION_VALUE" ] || [ "$VERSION_VALUE" = "unknown" ]; then echo "EFFECTIVE_APP_VERSION or APP_VERSION build arg is required" >&2; exit 1; fi; \
     go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${VERSION_VALUE}' -X 'github.com/QuantumNous/new-api/common.BuildCommit=${VCS_REF}' -X 'github.com/QuantumNous/new-api/common.BuildDate=${BUILD_DATE}' -X 'github.com/QuantumNous/new-api/common.BuildSource=${SOURCE_URL}'" -o new-api
 
-FROM alpine:3.22.2@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1
+FROM alpine:3.22.6@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 
 ARG APP_VERSION=unknown
 ARG EFFECTIVE_APP_VERSION=${APP_VERSION}
@@ -108,7 +108,8 @@ LABEL org.opencontainers.image.title="new-api" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${EFFECTIVE_APP_VERSION}"
 
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache ca-certificates tzdata \
     && update-ca-certificates
 
 COPY --from=builder2 /build/new-api /
