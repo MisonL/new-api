@@ -1018,3 +1018,77 @@ $ bun run build         # built in 2m22s，Safari 兼容检查通过
 - `@ai-sdk/provider-utils` 的 override 是跨 minor 强升（4.0.23 → 4.0.33），
   依赖方 `ai` / `@ai-sdk/gateway` 声明的是精确版本；构建与测试通过，
   但未做该 SDK 的运行时功能验证。
+
+## 17. 2026-10-07 依赖与 CI 供应链收尾：Rust 与 action 钉版（第八批）
+
+### 17.1 触发的维度
+
+§16 覆盖了 Go 与两个前端。本节补最后两个未审计维度：桌面端 Tauri 的
+Rust 依赖（`cargo-audit`），以及 GitHub Actions 的版本钉法一致性。
+
+### 17.2 桌面端 Rust 依赖（已修 `029fa4f65`）
+
+`cargo install cargo-audit --locked` 后对 `desktop/tauri-app/src-tauri/Cargo.lock`
+（558 个 crate）审计，报 3 条：
+
+| crate | 版本 | 严重度 | 修复版本 | 依赖链 |
+| --- | --- | --- | --- | --- |
+| quick-xml | 0.38.4 | high | >=0.41.0 | `plist -> tauri`（macOS bundle 构建） |
+| quick-xml | 0.38.4 | high | >=0.41.0 | 同上（另一条 advisory） |
+| rkyv | 0.7.46 | - | >=0.8.17 | `byte-unit -> rust_decimal`（optional feature） |
+
+两条 quick-xml 分别是 NsReader 无界命名空间分配（内存耗尽 DoS）与
+起始标签重复属性名的二次复杂度。处置：
+
+```console
+$ cargo update -p plist
+      Updating plist v1.8.0 -> v1.10.1
+      Updating quick-xml v0.38.4 -> v0.42.0
+$ cargo update -p rust_decimal --precise 1.43.0
+    Removing ahash / bitvec / bytecheck / bytecheck_derive / funty / ptr_meta ...
+```
+
+关键判断：`plist 1.8.0` 声明的是 `version = "0.38.0"`（caret 范围，允许
+0.42.0），所以这是 lock 陈旧，只需更新 lockfile，不动 Cargo.toml。
+`rkyv` 是 `rust_decimal` 的 optional feature 且无人启用（`cargo tree -i rkyv`
+报 "nothing to print"），升 rust_decimal 到 1.43.0 即连带移除 rkyv 及
+bitvec/bytecheck/funty/ptr_meta/ahash。
+
+复扫 `cargo-audit`：**exit 0，0 漏洞**；剩 11 条 unmaintained/unsound 警告
+（fxhash、proc-macro-error、unic-*、glib、rand、anyhow、event-listener），
+全为传递依赖且无修复版本。`cargo check` 通过。
+
+### 17.3 GitHub Actions 供应链钉版（已修 `6ed820493`）
+
+审计发现 8 个工作流的钉法不一致：
+
+| 工作流 | 改前 | 改后 |
+| --- | --- | --- |
+| docker-build / docker-image-alpha / release | 已 SHA 钉（9-12 处） | 不变 |
+| docker-image-nightly / pr-check / tauri-build / tauri-release | 浮动 tag（共 21 处） | 全部 SHA 钉 |
+
+浮动 tag（`@v4`、`@v6`、`@v0.6.2` 等）可被强制移动到不同提交，构建不可复现。
+21 处逐一改为其 tag 当前指向的 commit SHA，并保留 `# vX` 尾注以便阅读。
+
+解析方法（本沙箱 `api.github.com` 返回 403，`git ls-remote` 可用）：
+
+```console
+$ git ls-remote https://github.com/actions/checkout.git refs/tags/v4
+11d5960a326750d5838078e36cf38b85af677262  refs/tags/v4
+```
+
+交叉验证：`oven-sh/setup-bun@v2` 解析出的 SHA 与仓库既有钉版
+（`0c5077e5...`）完全一致，证明解析方法可靠。
+
+唯一保留浮动的是 `dtolnay/rust-toolchain@stable`：其 README 说明 SHA 钉版
+只适用于 master 历史内的提交，且 toolchain 选择默认"匹配 @rev"——该 action
+的 @rev 本身就是 toolchain 规格，改为 SHA 会破坏语义。
+
+### 17.4 边界
+
+- 未重建镜像、容器或桌面端产物；改动只影响后续构建。
+- 桌面端 `bun audit`（12 包）0 漏洞，无需改动。
+- cargo-audit 的 11 条 unmaintained 警告未处理：无修复版本，且多为
+  tauri/glib 等上游传递依赖，需等上游升级。
+- action 钉版未在真实 CI 运行验证（本地无 CI 运行环境）；SHA 由 `git ls-remote`
+  解析并做了一致性交叉验证，但工作流本身未触发。
