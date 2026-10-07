@@ -435,7 +435,7 @@ const (
 
 **版本锚定（必须做，否则本文档全部行号失效）**：本文档所有 `relaykit/...` 行号均以 `upstream/main` = **`789c97019`**（2026-09-28）为准。拷贝后必须把该 commit 记入 `relaykit/VERSION` 或等价文件。
 
-**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档 relaykit 行引用现为 **47 处唯一**（第 28 轮时 34 处：18 全路径 + 23 简写 − 7 重叠；此后 29–35 轮陆续新增，本段计数此前未随批次更新——**第 36 轮修正**）。除 relaykit 外，第 36 轮起**宿主路径也进门禁**：裸宿主引用 **98 处**（在本地基线 `dbfbc096f` 解析）+ `upstream/main:<宿主路径>:NN` 全路径 **15 处**（在 `upstream/main` 解析）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
+**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档 relaykit 行引用现为 **47 处唯一**（第 28 轮时 34 处：18 全路径 + 23 简写 − 7 重叠；此后 29–35 轮陆续新增，本段计数此前未随批次更新——**第 36 轮修正**）。除 relaykit 外，第 36 轮起**宿主路径也进门禁**：裸宿主引用 **98 处**（在本地基线 `dbfbc096f` 解析）+ `upstream/main:<宿主路径>:NN` 全路径 **21 处**（在 `upstream/main` 解析）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
 
 ```bash
 scripts/relaykit-citation-check.py            # 校验，漂移时退出码 1
@@ -443,7 +443,7 @@ scripts/relaykit-citation-check.py --ref <ref>  # 换锚点复核
 python3 scripts/relaykit-citation-check.test.py # 25 个单测
 ```
 
-它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。当前实测三组全绿：**47/47**（`ref=upstream/main`）、**宿主 98/98**（`baseline=dbfbc096f`）、**upstream 全路径 15/15**。已做**反向验证**（五次扰动全部退出码 1）：relaykit 全路径 `:99999` → `out of range`；改文件名 → `file not found`；简写路径 `:99999`；宿主 `<宿主文件>:99999` → `out of range at dbfbc096f`；**去掉一个 `upstream/main:` 前缀 → 报「not found at baseline but found at upstream/main: add an upstream/main: prefix」**。还原后退出码 0、文档字节一致。
+它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。当前实测三组全绿：**47/47**（`ref=upstream/main`）、**宿主 98/98**（`baseline=dbfbc096f`）、**upstream 全路径 21/21**。已做**反向验证**（五次扰动全部退出码 1）：relaykit 全路径 `:99999` → `out of range`；改文件名 → `file not found`；简写路径 `:99999`；宿主 `<宿主文件>:99999` → `out of range at dbfbc096f`；**去掉一个 `upstream/main:` 前缀 → 报「not found at baseline but found at upstream/main: add an upstream/main: prefix」**。还原后退出码 0、文档字节一致。
 
 **简写路径的支持（第 28 轮补充）**：文档大量用省略 `relaykit/relayconvert/` 前缀的写法，形如 `internal/oai_chat/<文件>.go:<行>`、`oai_chat/<文件>.go:<行>`、`convmeta/<文件>.go:<行>`、`shared/claude/<文件>.go:<行>`。旧版正则要求 `relaykit/` 前缀，**这 23 处唯一简写引用全部在门禁之外**，而检查器仍报 18/18 绿——与第 26 轮的假绿同类（那次是新表缺前缀）。现按**显式映射表**（`SHORT_PACKAGES`，逐个核实过真实目录）扩展：`internal`/`oai_chat`/`oai_responses`/`claude_messages`/`gemini_chat`/`shared`/`media`/`convdiag` → `relaykit/relayconvert/internal/...`；`convmeta`/`kitutil` → `relaykit/relayconvert/...`；`reasonmap` → `relaykit/reasonmap/...`。**宿主路径（`relay/`、`service/`、`controller/`、`common/`、`setting/`、`aws/`、`vertex/` 与裸 `dto/`、`types/`）一律不扩展**——宿主有自己的 `dto/`、`types/`，文档里的 `dto/...:NN` 指宿主，误扩展会造出假引用。15 个单测覆盖了「宿主路径不得被扩展」这一条。**注意本段自身不能用真引用作示例**——写成 `foo.go:12` 会被检查器当成待解析的引用（本轮就踩过一次），故示例一律用 `<文件>`/`<行>` 占位。
 
@@ -678,7 +678,7 @@ scripts/relaykit-dto-compat.sh --strict
 **设计文档行号引用的完整性**（锚定漂移后重跑，见「阶段 1 的前置：relaykit 源码的取得与版本锚定」）：
 
 ```bash
-scripts/relaykit-citation-check.py            # 全部引用可解析时退出码 0（relaykit 47 + 宿主 98 + upstream 全路径 15）
+scripts/relaykit-citation-check.py            # 全部引用可解析时退出码 0（relaykit 47 + 宿主 98 + upstream 全路径 21）
 python3 scripts/relaykit-citation-check.test.py  # 25 个单测
 ```
 
@@ -1850,7 +1850,7 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 
 | 调用点族 | 数量 | 形态 C 下的处置 | 依据 |
 |---|---|---|---|
-| `*WithError` 生产调用点（`relay/channel/openai/relay-openai.go:314,324`、`relay/channel/openai/helper.go:46,63,246,267`、`relay/channel/openai/chat_via_responses.go:280,286`、`relay/channel/gemini/relay-gemini.go:1784`+`:1819`） | 9（4 个文件） | **改指** `service.ConvertResponse`/`ConvertStreamResponse` 包装（上游形态；`openai/helper.go` 同文件 4 处，故按文件回滚仍是 4 个文件） | 12.3、12.20 |
+| `*WithError` 生产调用点（`relay/channel/openai/relay-openai.go:314,324`、`relay/channel/openai/helper.go:46,63,246,267`、`relay/channel/openai/chat_via_responses.go:280,286`、`relay/channel/gemini/relay-gemini.go:1784`（HEAD 口径 `:1819`，同一处）） | 9（4 个文件） | **改指** `service.ConvertResponse`/`ConvertStreamResponse` 包装（上游形态；`openai/helper.go` 同文件 4 处，故按文件回滚仍是 4 个文件） | 12.3、12.20 |
 | `ClaudeToOpenAIRequest`/`GeminiToOpenAIRequest` 生产调用（`relay/channel/ali/adaptor.go:88`、`relay/channel/aws/converse.go:113`、`relay/channel/openai/adaptor.go:47,65`、`relay/claude_handler.go:134`） | 5 | **零改动**（同名 shim 保留） | 12.20 |
 | 4 个非 WithError 旧包装的生产调用 | 0 | 不涉及（本就只有测试引用） | 12.3 |
 
@@ -1860,7 +1860,7 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 |---|---|---|
 | `*WithError` 调用（`convert_claude_request_test` 1、`convert_claude_stream_test` 1、`convert_test` 9、`convert_golden_test` 6） | 17 | **必改**——改指 relaykit 无 error 入口或包装层；其中 golden 的 6 处已由处置清单 12 认领，**另 3 个文件的 11 处此前无认领，C 定案后随处置清单增补** |
 | 4 个非 WithError 旧包装的调用（`convert_claude_request_test` 6、`convert_claude_stream_test` 13、`convert_test` 2） | 21 | **零改动**（facade 保名保签名） |
-| 请求方向调用（`ClaudeToOpenAIRequest` 30、`GeminiToOpenAIRequest` 10、golden 2） | 42 | **零改动**（同名 shim） |
+| 请求方向调用（`ClaudeToOpenAIRequest` 31 = 28+2+1、`GeminiToOpenAIRequest` 11 = 10+1，含 golden 的 2 处） | 42 | **零改动**（同名 shim） |
 | `IsDeepSeekModelName` 调用（`convert_test` 2） | 2 | **保留**——与上游终态的**必要差异**：上游已删这两个函数，但本地要用 `hasDeepSeekModelName` 作 12.4 的门控钩子值（12.4.4），函数必须活到阶段 6 之后。**须记入本地改动清单**（宿主侧差异，不是 relaykit 分叉） |
 
 合计：C 形态下**必改 17 处**（全在 `*WithError`），零改动 65 处，其中 2 处是与上游终态的有意差异。
@@ -1873,7 +1873,7 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 | C2 | 新增 `service/request_converter.go`（2 个同名 shim + 3 个 `ConvertRequest*` 包装 + `init()` 注册 `SetMediaResolver` **两个字段**） | `upstream/main:service/request_converter.go` | 签名逐行一致；`DecodeBase64FileData` 必须一并注册（12.20 第 3 点） |
 | C3 | 新增 `service/response_converter.go`（4 个包装，均调 `info.RecordConversionDiagnostics`） | `upstream/main:service/response_converter.go` | 同上 |
 | C4 | 新增 `relay/common/conversion_diagnostics.go`，`RelayInfo` 实现 `RecordConversionDiagnostics`（**可选接口、不在 `convmeta.Meta`**，relaykit 经类型断言调用） | `upstream/main:relay/common/conversion_diagnostics.go` | 断言生效的验证：切流式/非流式后诊断出现在 `info` 上（或按上游同名测试） |
-| C5 | 流式路径构造 `relayconvert.NewResponseStreamState`（上游 6 处构造点：`relay-claude.go:195`、`relay_responses.go:22`、`relay-gemini.go` 响应两处、`openai/helper.go:89`、`chat_via_responses.go:181`、`responses_via_chat.go:73` 口径） | 同上游各处 | 流式 golden 仍绿 |
+| C5 | 流式路径构造 `relayconvert.NewResponseStreamState`（上游 6 处构造点，全部实测、全部 `upstream/main:` 口径：`upstream/main:relay/channel/claude/relay-claude.go:195`、`upstream/main:relay/channel/claude/relay_responses.go:22`、`upstream/main:relay/channel/gemini/relay_responses.go:84`、`upstream/main:relay/channel/openai/helper.go:89`、`upstream/main:relay/channel/openai/chat_via_responses.go:181`、`upstream/main:relay/channel/openai/responses_via_chat.go:73`） | 同上游各处 | 流式 golden 仍绿 |
 | C6 | 通道级 4 个函数改保为一行 facade（`relay-claude.go` 的 `StreamResponseClaude2OpenAI`/`ResponseClaude2OpenAI`、`relay-gemini.go` 的 `responseGeminiChat2OpenAI`/`streamResponseGeminiChat2OpenAI`），`*WithError` 变体删除 | `upstream/main:relay/channel/{claude/relay-claude.go,gemini/relay-gemini.go}` | 4.5.5 表 4 行的「阶段 6 删除」判据随之改为「保留为 facade」——**选 C 时须改阶段 6 判据，否则判据与形态矛盾** |
 
 **C 的回滚点**：阶段 4 的切换集中在 2 个既有文件的函数体（`service/convert.go` + 通道级 4 行）与 3 个新增文件（`request_converter.go`、`response_converter.go`、`conversion_diagnostics.go`）——回滚 = 删 3 新文件 + revert 2 个既有文件 + revert `*WithError` 的 9 处生产改写（4 个文件）。与 §8.1「单点可逆」的关系：facade 层本身单点（一个文件的函数体），`*WithError` 的 9 处是 12.3 已决定的固定删除项，不随形态变化。
