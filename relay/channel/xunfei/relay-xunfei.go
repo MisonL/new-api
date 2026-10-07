@@ -157,8 +157,10 @@ func buildXunfeiAuthUrl(hostUrl string, apiKey, apiSecret string) string {
 	return callUrl
 }
 
-func xunfeiStreamHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId string, apiSecret string, apiKey string) (*dto.Usage, *types.NewAPIError) {
-	domain, authUrl := getXunfeiAuthUrl(c, apiKey, apiSecret, textRequest.Model)
+// xunfeiStreamHandler 的 domain/authUrl 由调用方预先构建：handler 需要 info 来把
+// 终止原因写入 StreamStatus，而测试需要用本地 WebSocket 上游替换
+// wss://spark-api.xf-yun.com，两者都要求这两个参数外显而不是在 handler 内重建。
+func xunfeiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, textRequest dto.GeneralOpenAIRequest, appId string, domain string, authUrl string) (*dto.Usage, *types.NewAPIError) {
 	dataChan, stopChan, requestErr := xunfeiMakeRequest(c, textRequest, domain, authUrl, appId)
 	if requestErr != nil {
 		return nil, requestErr
@@ -179,7 +181,8 @@ func xunfeiStreamHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, a
 			}
 			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
 			return true
-		case <-stopChan:
+		case res := <-stopChan:
+			helper.RecordStreamEnd(c, info, res.endedNormally)
 			c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
 			return false
 		case <-relaycommon.GinRequestContext(c).Done():
@@ -209,7 +212,8 @@ func xunfeiHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId s
 			usage.PromptTokens += xunfeiResponse.Payload.Usage.Text.PromptTokens
 			usage.CompletionTokens += xunfeiResponse.Payload.Usage.Text.CompletionTokens
 			usage.TotalTokens += xunfeiResponse.Payload.Usage.Text.TotalTokens
-		case stop = <-stopChan:
+		case <-stopChan:
+			stop = true
 		case <-relaycommon.GinRequestContext(c).Done():
 			stop = true
 		}
@@ -233,7 +237,14 @@ func xunfeiHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId s
 	return &usage, nil
 }
 
-func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, domain, authUrl, appId string) (chan XunfeiChatResponse, chan bool, *types.NewAPIError) {
+// xunfeiStreamResult 是 reader goroutine 的一次性收尾信号：endedNormally 表示
+// 收到 payload.status==2 的终止帧后才关闭连接，直接断开（读错误、无终止帧）为 false。
+// 消费者收到该信号时才写 StreamStatus；发送发生在写入之后，构成 happens-before。
+type xunfeiStreamResult struct {
+	endedNormally bool
+}
+
+func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, domain, authUrl, appId string) (chan XunfeiChatResponse, chan xunfeiStreamResult, *types.NewAPIError) {
 	data, conversionErr := requestOpenAI2Xunfei(textRequest, appId, domain)
 	if conversionErr != nil {
 		return nil, nil, types.NewError(conversionErr, types.ErrorCodeInvalidRequest)
@@ -283,7 +294,7 @@ func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, dom
 	}
 
 	dataChan := make(chan XunfeiChatResponse)
-	stopChan := make(chan bool, 1)
+	stopChan := make(chan xunfeiStreamResult, 1)
 	stopOnCancel := make(chan struct{})
 	go func() {
 		select {
@@ -297,6 +308,7 @@ func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, dom
 		defer func() {
 			conn.Close()
 		}()
+		endedNormally := false
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -317,6 +329,9 @@ func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, dom
 				return
 			}
 			if response.Payload.Choices.Status == 2 {
+				// 讯飞协议的终止帧：payload.status==2 是「正常收尾」的唯一信号，
+				// 与读错误区分开，否则健康流会被记成上游中断。
+				endedNormally = true
 				if err != nil {
 					common.SysLog("error closing websocket connection: " + err.Error())
 				}
@@ -324,7 +339,7 @@ func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, dom
 			}
 		}
 		select {
-		case stopChan <- true:
+		case stopChan <- xunfeiStreamResult{endedNormally: endedNormally}:
 		default:
 		}
 	}()
