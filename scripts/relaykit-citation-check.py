@@ -64,7 +64,138 @@ SHORT_CITATION = re.compile(
 )
 
 DEFAULT_REF = "upstream/main"
+DEFAULT_BASELINE = "dbfbc096f"
 DEFAULT_DOC = "docs/superpowers/specs/2026-09-30-relaykit-migration-design.md"
+
+# ---------------------------------------------------------------------------
+# Host paths (round 36)
+# ---------------------------------------------------------------------------
+# The design doc also cites HOST files -- relay/, service/, dto/, ... -- which
+# this checker has always ignored (the original brief was upstream relaykit
+# line refs only). Two rounds of review found citations that resolve at NEITHER
+# ref, silently: a wrong line number (service/convert.go:533 for a function at
+# :526), and upstream-only paths written without the upstream/main: prefix
+# (resolving only because a same-named file happens to exist locally is exactly
+# what the gate must not tolerate).
+#
+# Host citations resolve at the local BASELINE ref declared in the doc header.
+# Citations spelled "upstream/main:<path>:NN" resolve at upstream/main.
+# A bare host path that only resolves upstream is reported as needing its
+# prefix -- the message says so, which is the intended use for the deliberate
+# full-format cites.
+HOST_DIRS = (
+    "relay", "service", "controller", "common", "setting", "model", "dto",
+    "types", "constant", "middleware", "logger", "bin", "tools", "web",
+    "scripts", "docs", "deploy",
+)
+HOST_SUFFIX = r"\.(?:go|sh|py|yml|yaml|md|json)"
+
+# Not preceded by a path char or ':' -- so "upstream/main:service/x.go:15"
+# and "dbfbc096f:relay/y.go:670" are excluded (those are covered by
+# extract_upstream_full / their sha form respectively).
+HOST_CITATION = re.compile(
+    r"(?<![A-Za-z0-9_./:-])((?:" + "|".join(HOST_DIRS) + r")/[A-Za-z0-9_./-]+"
+    + HOST_SUFFIX + r"):(\d+)"
+)
+
+# Full-format upstream citations for non-relaykit host paths. relaykit/ paths
+# under this prefix are already captured by CITATION (it has no lookbehind);
+# duplicates are dropped by (path, line) in main().
+UPSTREAM_FULL = re.compile(
+    r"upstream/main:([A-Za-z0-9_./-]+" + HOST_SUFFIX + r"):(\d+)"
+)
+
+
+def extract_host_citations(text):
+    """Bare host citations as sorted unique (path, line) pairs."""
+    seen = {}
+    for path, line in HOST_CITATION.findall(text):
+        seen.setdefault((path, int(line)), None)
+    return sorted(seen)
+
+
+def extract_upstream_full(text):
+    """upstream/main:<path>:<line> citations, excluding relaykit/ paths.
+
+    relaykit/ paths under this prefix are already captured by CITATION (which
+    has no lookbehind), so they are dropped here to avoid double counting.
+    """
+    seen = {}
+    for path, line in UPSTREAM_FULL.findall(text):
+        if path.startswith("relaykit/"):
+            continue
+        seen.setdefault((path, int(line)), None)
+    return sorted(seen)
+
+
+def read_at(ref, path):
+    """Return the file's lines at ref, or None if it does not exist there."""
+    result = subprocess.run(
+        ["git", "show", f"{ref}:{path}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.split("\n")
+
+
+def check_host(doc_text, ref, upstream_ref=DEFAULT_REF, reader=read_at):
+    """Resolve bare host citations at ref; report upstream-only ones as such.
+
+    Returns (ok_count, failures, skipped_count). skipped = doc/ files that do
+    not exist at ref (documentation-only citations, e.g. path:NN into a doc's
+    own sections) -- they are skipped only when absent at BOTH refs; an
+    existing file with a bad line still fails.
+    """
+    failures = []
+    ok = skipped = 0
+    for path, line in extract_host_citations(doc_text):
+        lines = reader(ref, path)
+        if lines is None:
+            up = reader(upstream_ref, path)
+            if path.startswith("docs/"):
+                skipped += 1
+                continue
+            if up is not None:
+                failures.append(
+                    (path, line, f"not found at baseline {ref} but found at "
+                                 f"{upstream_ref}: add an {upstream_ref}: prefix")
+                )
+            else:
+                failures.append((path, line, f"file not found at {ref}"))
+            continue
+        if not 1 <= line <= len(lines):
+            failures.append(
+                (path, line, f"out of range at {ref} (file has {len(lines)} lines)")
+            )
+            continue
+        if not lines[line - 1].strip():
+            failures.append((path, line, f"cited line blank at {ref}"))
+            continue
+        ok += 1
+    return ok, failures, skipped
+
+
+def check_upstream_full(doc_text, ref, reader=read_at):
+    """Resolve upstream/main:<path>:<line> citations at ref."""
+    failures = []
+    ok = 0
+    for path, line in extract_upstream_full(doc_text):
+        lines = reader(ref, path)
+        if lines is None:
+            failures.append((path, line, "file not found at ref"))
+            continue
+        if not 1 <= line <= len(lines):
+            failures.append(
+                (path, line, f"out of range (file has {len(lines)} lines)")
+            )
+            continue
+        if not lines[line - 1].strip():
+            failures.append((path, line, "cited line is blank"))
+            continue
+        ok += 1
+    return ok, failures
 
 
 def _expand(path):
@@ -86,18 +217,6 @@ def extract_citations(text):
         if expanded is not None:
             seen.setdefault((expanded, int(line)), None)
     return sorted(seen)
-
-
-def read_at(ref, path):
-    """Return the file's lines at ref, or None if it does not exist there."""
-    result = subprocess.run(
-        ["git", "show", f"{ref}:{path}"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    return result.stdout.split("\n")
 
 
 def check(doc_text, ref, reader=read_at):
@@ -122,6 +241,8 @@ def check(doc_text, ref, reader=read_at):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ref", default=DEFAULT_REF, help="pinned upstream ref")
+    parser.add_argument("--baseline", default=DEFAULT_BASELINE,
+                        help="local baseline ref for host-path citations")
     parser.add_argument("--doc", default=DEFAULT_DOC, help="design doc path")
     args = parser.parse_args(argv)
 
@@ -137,7 +258,19 @@ def main(argv=None):
     print(f"ref={args.ref}  citations={len(citations)}  ok={ok}  failed={len(failures)}")
     for path, line, why in failures:
         print(f"  FAIL {path}:{line}  {why}", file=sys.stderr)
-    return 1 if failures else 0
+
+    # Host paths (round 36): bare host refs resolve at the local baseline;
+    # upstream/main:<path>:NN refs resolve at the upstream ref.
+    h_ok, h_failures, h_skipped = check_host(doc_text, args.baseline, args.ref)
+    u_ok, u_failures = check_upstream_full(doc_text, args.ref)
+    print(f"baseline={args.baseline}  host-citations ok={h_ok}  failed={len(h_failures)}  skipped={h_skipped}")
+    print(f"upstream-full ok={u_ok}  failed={len(u_failures)}")
+    for path, line, why in h_failures:
+        print(f"  FAIL host {path}:{line}  {why}", file=sys.stderr)
+    for path, line, why in u_failures:
+        print(f"  FAIL upstream {path}:{line}  {why}", file=sys.stderr)
+
+    return 1 if (failures or h_failures or u_failures) else 0
 
 
 if __name__ == "__main__":
