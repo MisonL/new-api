@@ -911,6 +911,14 @@ func converseStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, adaptor 
 	if err := stream.Err(); err != nil {
 		return apitypes.NewOpenAIError(fmt.Errorf("AWS ConverseStream event stream: %w", err), apitypes.ErrorCodeBadResponseBody, http.StatusBadGateway), state.Usage
 	}
+	return finishConverseStream(c, info, state, isClaude)
+}
+
+// finishConverseStream 校验终止事件、发送收尾帧，并在成功返回前记录流的正常结束。
+// 到达这里的成功路径必然见过 message_start 与 message_stop（Claude 还要求 metadata），
+// 因此终止标记为真；没有这一记录时，健康流会以零值 EndReason 结束，被
+// classifyStreamStatus 记成 "error"，渠道健康探针也永远无法标记成功。
+func finishConverseStream(c *gin.Context, info *relaycommon.RelayInfo, state *converseStreamState, isClaude bool) (*apitypes.NewAPIError, *dto.Usage) {
 	if !state.MessageStarted {
 		return apitypes.NewOpenAIError(fmt.Errorf("AWS ConverseStream ended without message_start"), apitypes.ErrorCodeBadResponseBody, http.StatusBadGateway), state.Usage
 	}
@@ -943,6 +951,9 @@ func converseStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, adaptor 
 			return apitypes.NewError(err, apitypes.ErrorCodeBadResponseBody), state.Usage
 		}
 	}
+	// 走到这里必然见过 message_start 与 message_stop（Claude 还要求 metadata），
+	// 是协议的终止标记，按正常结束记录。
+	helper.RecordStreamEnd(c, info, true)
 	return nil, state.Usage
 }
 
