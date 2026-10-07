@@ -905,7 +905,116 @@ go version go1.26.8 linux/amd64
 ### 15.5 边界与残余
 
 - 未重建任何镜像或容器。正式与隔离环境仍运行旧二进制；本改动只影响后续构建。
-- 7 条 package-level / 19 条 module-level 残余（§14.5）不变；其中 x/net 的
-  idna/http2 两条在 go1.26.8 下仍以模块形式（v0.47.0）列于"不可达"清单。
+- 7 条 package-level / 19 条 module-level 残余（§14.5）在本节时点不变；
+  2026-10-07 晚间已被 §16 清到 0 / 4（x/net、compress 升级）。
 - `release.yml` 的 `>=1.25.14` 下限不改变当前解析结果（仍取最新稳定版），
   只是让"必须含 stdlib 修复"成为显式约束。
+
+## 16. 2026-10-07 依赖层收尾：Go 包级残留与前端 bun audit（第七批）
+
+### 16.1 触发的维度
+
+§15 只扫了工具链自带的 stdlib。本节补两个此前从未覆盖的维度：Go 依赖的
+package/module 级残留，以及两个前端的 `bun audit`（前端依赖从未审计过）。
+
+### 16.2 Go 侧：x/net 与 compress（已修 `54b81803a`）
+
+`govulncheck -show verbose` 的 package 级 7 条全部落在
+`golang.org/x/net@v0.47.0`（html 解析 XSS/DoS 5 条、idna Punycode 1 条、
+HTTP/2 SETTINGS 死循环 1 条），module 级另有 `klauspost/compress@v1.18.0`
+的 s2 越界读（GO-2026-5841）。
+
+```console
+$ GOTOOLCHAIN=auto go get golang.org/x/net@v0.57.0 github.com/klauspost/compress@v1.18.7
+go: upgraded github.com/klauspost/compress v1.18.0 => v1.18.7
+go: upgraded golang.org/x/crypto v0.45.0 => v0.54.0
+go: upgraded golang.org/x/net v0.47.0 => v0.57.0
+```
+
+`go 1.25.1` 指令未被顶高（先在与仓库无关的 `/tmp` 模块副本里试跑过才动真
+go.mod）。这是关键约束：只有 `x/crypto@v0.56.0` 会把 go 指令顶到 1.26.0，
+而 tauri 工作流钉的是 1.25.14。x/net 只要求 go 1.25.0。
+
+结果：package 级 7 → 0，module 级 19 → 4。剩余 4 条全在 `x/crypto@v0.54.0`
+（GO-2026-6355 / 6354 / 6303 在 ssh，GO-2026-5932 openpgp 标注 `Fixed in: N/A`），
+工具判定本仓不可达（本仓只用 bcrypt），且需 `x/crypto >= v0.55.0` 才能清，
+即必须先接受 go 1.26.0 —— 与 tauri 钉版冲突，本轮不做。
+
+### 16.3 前端：两个 bun audit（已修 `301eb1eb8`）
+
+基线（改动前）：
+
+| 前端 | 条数 | 直接依赖中的高危 |
+| --- | --- | --- |
+| `web/default` | 47（2 critical / 17 high / 23 moderate / 5 low） | `axios@1.19.0` 11 条 |
+| `web/classic` | 27（12 high / 11 moderate / 4 low） | `axios@1.18.0` |
+
+`seroval@1.5.3` 是 critical 且经 `@tanstack/router-core` 进主 bundle
+（`fromJSON` 的 Promise thenable 同化会调用插件产出的可调用对象）。
+
+`bun audit fix`（只升到满足所有依赖者范围的最低安全版本，不跨 major）
+一次清掉 default 38 条 / 14 包、classic 22 条 / 8 包，含：
+
+- `axios` 1.19.0 与 1.18.0 → 1.20.0（classic 是精确钉版，bun 自动改了
+  package.json；advisory 声明 `<1.20.0` 全受影响）；
+- `seroval` 1.5.3 → 1.6.3（`@tanstack/router-core@1.168.15` 声明 `^1.5.0`，
+  1.6.3 在范围内且同时越过两条 advisory 的修复线 1.6.0 / 1.6.2）；
+- `dompurify` 3.4.13 → 3.4.16、`js-yaml` 4.3.1 → 4.3.2、`colord` 2.9.4、
+  `smol-toml` 1.9.0、`hono` 4.13.7、`qs` 6.16.0、`proxy-addr` 2.0.8、
+  `@modelcontextprotocol/sdk` 1.31.0、`brace-expansion` 5.0.12 等。
+
+剩余项被"精确钉版"或"依赖者窄范围"挡住，用 `overrides` 收口：
+
+- default：`fast-uri` 3.1.7 → 3.1.8、`ip-address` 10.3.1 → 10.7.3
+  （**这两个 override 原先就钉在受影响版本，本身在阻止修复**）、
+  新增 `decode-uri-component` 0.5.0 与 `@ai-sdk/provider-utils` 4.0.33
+  （`ai` / `@ai-sdk/gateway` 精确依赖 4.0.23）；
+- classic：新增 `decode-uri-component` 0.5.0 与
+  `postcss-selector-parser` `^6.1.3`。
+
+结果：default 47 → 2，classic 27 → 3。
+
+### 16.4 无法修复并记录在案的残余
+
+| 包 | 范围 | 原因 |
+| --- | --- | --- |
+| `braces@3.0.3` | 两个前端，high | 上游无已发布修复版本 |
+| `katex` | 两个前端，low | 修复 0.18.2 落在所有依赖者的 `^0.16` 范围之外 |
+| `postcss-selector-parser@6.1.4` | classic，moderate | `<7.1.6` 的 moderate 在 6.x 无修复，7.x 超出 tailwindcss 3 范围 |
+
+均为 dev/build 期或低危；`braces` 仅由 fast-glob/micromatch/chokidar 等
+构建期工具链使用，不进运行时产物。
+
+### 16.5 验证
+
+```console
+$ govulncheck ./...                       # 改后
+Your code is affected by 0 vulnerabilities.
+This scan also found 0 vulnerabilities in packages you import and 4 in modules.
+$ go build ./... && go test ./controller ./model ./relay/common ./relay/helper ./service
+BUILD=0  TEST=0（5 包全 ok）  go mod verify: all modules verified
+
+$ cd web/default
+$ bun run lint          # eslint 通过
+$ bun run typecheck     # tsc -b 通过
+$ bun test tests/       # 211 pass / 0 fail
+$ bun run build         # 产物 19099.2 kB，Safari 兼容检查通过
+$ cd web/classic
+$ bun run lint          # prettier --check 通过
+$ bun test              # 218 pass / 0 fail
+$ bun run build         # built in 2m22s，Safari 兼容检查通过
+```
+
+真实浏览器冒烟（`web/default` 经只读代理 3300、`web/classic` 直连 5177，
+均按 `VITE_REACT_APP_READONLY_MODE=true` / 只读代理双重阻断）：两端首页
+标题、导航、hero 均正常渲染，router 与主 bundle 加载无错。
+
+### 16.6 边界
+
+- 未重建镜像或容器；前端 dist 未提交，正式与隔离环境仍运行旧产物。
+- 只读代理临时容器与 `deploy/env/frontend-readonly.env` 已在验证后清理
+  （该 env 文件 gitignore，创建自 example；注意 example 里
+  `READONLY_PROXY_TEMPLATE_PATH` 为空，启动前必须填绝对路径，属已知保真度缺口）。
+- `@ai-sdk/provider-utils` 的 override 是跨 minor 强升（4.0.23 → 4.0.33），
+  依赖方 `ai` / `@ai-sdk/gateway` 声明的是精确版本；构建与测试通过，
+  但未做该 SDK 的运行时功能验证。
