@@ -768,3 +768,68 @@ SSE 帧超过该值（典型形态是大 tool-call 参数）时 `Scan` 停在 `E
 五个渠道文件与 `stream_scanner.go` 都带其他会话的在途改动（`encoding/json` →
 `common.*` 迁移、ping 写入重构），提交以 HEAD 为基线、只叠加本次的 3 行/渠道与
 导出函数；`git show 94c07e8b5 --stat` 可复核为纯新增。
+
+## 14. 2026-10-07 govulncheck 首次跑通：GO-2026-6278 与 v1.5.3 假修复陷阱
+
+### 14.1 门禁首次跑通
+
+此前两轮审计（09-23、10-05）的 `govulncheck` 均因超时或工具链不匹配没有产出。
+本机 govulncheck 是用 go1.26 构建的，而 PATH 上是 go1.27.1，包加载直接报
+`method must have no type parameters`（stdlib 解析失败）。`go install
+golang.org/x/vuln/cmd/govulncheck@latest` 重建后一次跑通。
+
+### 14.2 发现：GO-2026-6278 在本仓代码可达（已修 `4c0a1e904`）
+
+`gorilla/websocket@v1.5.0` 的客户端帧掩码密钥用 `math/rand` 生成。
+govulncheck 给出 11 条本仓调用链，覆盖 `controller/relay.go` 的
+`Upgrader.Upgrade`、`relay/channel/xunfei` 与 `volcengine` 的 `WriteJSON`/
+`WriteMessage`、`relay/channel/api_request.go` 的 `Dialer.DialContext` 等。
+
+### 14.3 陷阱：公告标注的"已修复版本" v1.5.3 实际不含修复
+
+OSV 条目 `GO-2026-6278` 标注 `fixed: 1.5.3`。但 v1.5.3 的 tag 提交是
+`ce903f6 "Reverts to v1.5.0"`——把 crypto/rand 修复连同其它改动一起回退了，
+`newMaskKey` 又变回 `math/rand.Uint32()`。三个独立来源一致：
+
+```console
+$ curl -s https://raw.githubusercontent.com/gorilla/websocket/v1.5.3/conn.go | grep -A3 "func newMaskKey"
+	n := rand.Uint32()          # math/rand
+$ grep -A3 "func newMaskKey" $(go env GOMODCACHE)/github.com/gorilla/websocket@v1.5.3/conn.go
+	n := rand.Uint32()          # 模块缓存（go.sum 已校验）
+$ 发布说明： "Important change: This reverts the websockets package back to 931041c"
+```
+
+实测两个方向都反直觉：
+
+- 升到 v1.5.3（公告说已修复）：`govulncheck` 报 0 可达漏洞，但模块缓存里
+  `newMaskKey` 仍是 `math/rand`——**扫描器绿、代码仍弱**；
+- 降回 v1.5.2（代码实际含 crypto/rand 修复）：`govulncheck` 仍报
+  `Your code is affected by 1 vulnerability`——**代码已修、扫描器红**。
+
+即 OSV 的 SEMVER 区间（introduced 0 / fixed 1.5.3）与真实内容不一致：
+v1.5.1 就含修复，v1.5.3 把它回退了，真正的修复提交 `d67f418`
+（"Use crypto/rand for mask key"，committed 2024-07-01，晚于 v1.5.3 的
+2024-06-14）只存在于 main，`git tag --contains d67f418` 为空。
+
+### 14.4 处理
+
+go.mod 钉到修复提交本身：`v1.5.4-0.20240701034025-d67f41855da4`
+（伪版本，sum.golang.org 校验）。验证：
+
+- 解析后的模块源码：`var maskRand = rand.Reader`（crypto/rand），
+  `io.ReadFull(maskRand, k[:])`；
+- `govulncheck ./...`：0 可达漏洞；
+- `go build ./...`、`go test ./controller ./model ./relay/... ./service
+  ./middleware`：42 包全过；`go mod verify` 全过。
+
+边界：该伪版本比 v1.5.3 新 14 个提交（含 subprotocol 选择修复、
+x/net proxy 解绑、Go 最低版本 1.20 等），均来自上游 main；未重建任何容器，
+正式与隔离环境仍运行旧二进制。
+
+### 14.5 残余（未修，非可达）
+
+`govulncheck -show verbose` 另列 7 条"包级导入但本仓未调用"的
+`golang.org/x/net@v0.47.0` 漏洞（html/idna/http2/dns 解析类）与 19 条
+模块级漏洞（`x/crypto`、`klauspost/compress` 等），工具判定本仓代码不可达。
+其中 `GO-2026-5932`（x/crypto）标注 `Fixed in: N/A`。未升级：属独立议题，
+升级 x/net/x/crypto 会牵动 gin 等依赖树，需要单独验证。
