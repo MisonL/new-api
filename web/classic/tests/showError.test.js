@@ -82,6 +82,24 @@ describe('showError', () => {
     expect(authExpired).toHaveBeenCalledTimes(1);
   });
 
+  test('a second showError on the same error object does not toast again', () => {
+    // API 拦截器在 reject 前已经 showError 过一次，调用方 catch 后再调
+    // showError 会弹第二个一模一样的 toast。
+    const error = networkAxiosError();
+
+    showError(error);
+    showError(error);
+
+    expect(toastError).toHaveBeenCalledTimes(1);
+  });
+
+  test('distinct error objects each toast', () => {
+    showError(networkAxiosError());
+    showError(networkAxiosError());
+
+    expect(toastError).toHaveBeenCalledTimes(2);
+  });
+
   test('prefers the backend message over the generic axios text', () => {
     const error = new Error('Request failed with status code 400');
     error.name = 'AxiosError';

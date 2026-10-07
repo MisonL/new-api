@@ -123,7 +123,28 @@ if (isMobileScreen) {
 // The backend serialises failures as {message, success}, which is more useful
 // than axios' "Request failed with status code N". A network-level AxiosError
 // carries no `response` at all, so the status read must stay behind a guard.
+//
+// The API interceptor already calls showError before rejecting, and callers
+// commonly call it again in their own catch block; without this the same
+// failure produces two identical toasts. The marker lives on the error object,
+// so distinct failures still each report once.
+const SHOW_ERROR_REPORTED = Symbol.for('new-api.showErrorReported');
+
 export function showError(error) {
+  if (error !== null && typeof error === 'object') {
+    if (error[SHOW_ERROR_REPORTED]) {
+      return;
+    }
+    try {
+      Object.defineProperty(error, SHOW_ERROR_REPORTED, {
+        value: true,
+        enumerable: false,
+        configurable: true,
+      });
+    } catch (markerError) {
+      // A frozen error object still deserves its one toast.
+    }
+  }
   console.error(error);
   if (error.message) {
     if (error.name === 'AxiosError') {
