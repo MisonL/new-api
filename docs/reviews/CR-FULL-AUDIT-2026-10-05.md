@@ -833,3 +833,79 @@ x/net proxy 解绑、Go 最低版本 1.20 等），均来自上游 main；未重
 模块级漏洞（`x/crypto`、`klauspost/compress` 等），工具判定本仓代码不可达。
 其中 `GO-2026-5932`（x/crypto）标注 `Fixed in: N/A`。未升级：属独立议题，
 升级 x/net/x/crypto 会牵动 gin 等依赖树，需要单独验证。
+
+## 15. 2026-10-07 构建工具链 stdlib 漏洞：生产 Dockerfile 钉的 go1.26.2（第六批）
+
+### 15.1 发现方式
+
+§14 的扫描用的是本机 PATH 上的 go1.27.1，看不到旧工具链的问题。用
+`GOTOOLCHAIN` 切到生产 Dockerfile 实际钉的版本复扫：
+
+```console
+$ GOTOOLCHAIN=go1.26.2 govulncheck ./...
+Your code is affected by 11 vulnerabilities from the Go standard library.
+```
+
+11 条全部 `Found in: ...@go1.26.2`，即漏洞随工具链进入产物，与依赖模块无关。
+本地 go1.27.1 下同样的命令报 0 条，说明这不是代码问题而是构建链钉版问题。
+
+### 15.2 条目与修复版本
+
+| GO 编号 | 包 | fixed（1.26 线） |
+| --- | --- | --- |
+| GO-2026-6218 | net/url（解析二次复杂度） | go1.26.6 |
+| GO-2026-6090 | crypto/tls | go1.26.6 |
+| GO-2026-6089 | net/http | go1.26.6 |
+| GO-2026-6088 | encoding/xml（递归栈溢出） | go1.26.6 |
+| GO-2026-5972 | encoding/asn1 | go1.26.6 |
+| GO-2026-5856 | crypto/tls | go1.26.5 |
+| GO-2026-5039 | net/textproto | go1.26.4 |
+| GO-2026-5037 | crypto/x509 | go1.26.4 |
+| GO-2026-5026 | x/net/idna 经 net/http | go1.26.6（x/net v0.55.0） |
+| GO-2026-4971 | net（Windows NUL 注入） | go1.26.3 |
+| GO-2026-4918 | HTTP/2 无限循环 经 net/http | go1.26.3（x/net v0.53.0） |
+
+修复版本上界 go1.26.6。go1.26.8 是该线最新补丁版（`go.dev/dl` 实测），覆盖全部。
+
+### 15.3 处理（本轮改动）
+
+- `Dockerfile:50`（builder2）：
+  `golang:1.26.2-alpine@sha256:c2a1f7b2...` →
+  `golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c`。
+  新 digest 取自 `docker buildx imagetools inspect golang:1.26.8-alpine`，
+  并经 registry API 解析确认为 index（linux/amd64 + arm 变体齐全）。
+- `Dockerfile.dev:4`：`golang:1.26.1-alpine` → `golang:1.26.8-alpine`
+  （该文件原有风格未钉 digest，保持原样）。
+- `.github/workflows/tauri-build.yml`、`tauri-release.yml`：
+  `go-version: '1.25.1'` → `'1.25.14'`（桌面端 sidecar 构建线，1.25 最新补丁）。
+- `.github/workflows/release.yml` 三处：`>=1.25.1` → `>=1.25.14`
+  （原值解析到最新版，本就安全；显式抬高下限以固定语义）。
+
+全仓 `Dockerfile*` 排查：仓库自有的 golang 基础镜像只有上述两处
+（`desktop/tauri-app/.cache/gomod/` 下的是第三方模块自带的 Dockerfile，非本仓构建入口）。
+
+### 15.4 验证
+
+```console
+$ GOTOOLCHAIN=go1.26.2 govulncheck ./...   # 改前基线，RED
+Your code is affected by 11 vulnerabilities from the Go standard library.  (exit 3)
+$ GOTOOLCHAIN=go1.26.8 govulncheck ./...   # 改后
+No vulnerabilities found. Your code is affected by 0 vulnerabilities.     (exit 0)
+$ GOTOOLCHAIN=go1.25.14 govulncheck ./...  # tauri 线
+Your code is affected by 0 vulnerabilities.                               (exit 0)
+$ GOTOOLCHAIN=go1.26.8 go build ./...      # 全仓库编译
+EXIT=0
+$ docker run --rm golang:1.26.8-alpine@sha256:8ac98ca5... go version
+go version go1.26.8 linux/amd64
+```
+
+镜像实测同时验证了 digest 与 tag 一致（pull 时 Docker 回报同一 digest）。
+三个 workflow 文件经 `yaml.safe_load` 语法校验通过。
+
+### 15.5 边界与残余
+
+- 未重建任何镜像或容器。正式与隔离环境仍运行旧二进制；本改动只影响后续构建。
+- 7 条 package-level / 19 条 module-level 残余（§14.5）不变；其中 x/net 的
+  idna/http2 两条在 go1.26.8 下仍以模块形式（v0.47.0）列于"不可达"清单。
+- `release.yml` 的 `>=1.25.14` 下限不改变当前解析结果（仍取最新稳定版），
+  只是让"必须含 stdlib 修复"成为显式约束。
