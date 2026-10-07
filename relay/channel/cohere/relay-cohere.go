@@ -103,6 +103,9 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	usage := &dto.Usage{}
 	responseText := ""
 	scanner := bufio.NewScanner(resp.Body)
+	// 与共享扫描器同一行上限：裸 NewScanner 的 token 上限是 64KiB，上游一帧
+	// 超过它就会停在 ErrTooLong，收尾块 is_finished=true 再也读不到。
+	scanner.Buffer(make([]byte, helper.InitialScannerBufferSize), helper.GetScannerBufferSize())
 	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		if atEOF && len(data) == 0 {
 			return 0, nil, nil

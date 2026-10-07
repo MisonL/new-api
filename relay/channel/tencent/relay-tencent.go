@@ -153,6 +153,9 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 	var responseText string
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
+	// 与共享扫描器同一行上限：裸 NewScanner 的 token 上限是 64KiB，上游一帧
+	// 超过它就会停在 ErrTooLong，尾包 FinishReason=stop 再也读不到。
+	scanner.Buffer(make([]byte, helper.InitialScannerBufferSize), helper.GetScannerBufferSize())
 	sawFinish := false
 
 	helper.SetEventStreamHeaders(c)

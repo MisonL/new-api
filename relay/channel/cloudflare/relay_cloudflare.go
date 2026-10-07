@@ -61,6 +61,9 @@ func convertCf2CompletionsRequest(textRequest dto.GeneralOpenAIRequest) (*CfRequ
 func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*types.NewAPIError, *dto.Usage) {
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
+	// 与共享扫描器同一行上限：裸 NewScanner 的 token 上限是 64KiB，上游一帧
+	// 超过它就会停在 ErrTooLong，[DONE] 再也读不到，健康流被判成中断。
+	scanner.Buffer(make([]byte, helper.InitialScannerBufferSize), helper.GetScannerBufferSize())
 
 	helper.SetEventStreamHeaders(c)
 	id := helper.GetResponseID(c)

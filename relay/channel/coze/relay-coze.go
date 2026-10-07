@@ -104,6 +104,9 @@ func cozeChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
+	// 与共享扫描器同一行上限：裸 NewScanner 的 token 上限是 64KiB，上游一帧
+	// 超过它就会停在 ErrTooLong，下面把 scanner.Err() 当响应体错误返回。
+	scanner.Buffer(make([]byte, helper.InitialScannerBufferSize), helper.GetScannerBufferSize())
 	helper.SetEventStreamHeaders(c)
 	id := helper.GetResponseID(c)
 	var responseText string

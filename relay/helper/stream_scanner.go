@@ -38,6 +38,17 @@ func getScannerBufferSize() int {
 	return DefaultMaxScannerBufferSize
 }
 
+// GetScannerBufferSize exposes the shared scanner's line ceiling to the channels
+// that drive their own bufio.Scanner. A bare bufio.NewScanner caps a token at
+// bufio.MaxScanTokenSize (64KiB), so one upstream SSE frame larger than that --
+// a big tool-call payload is the usual case -- makes Scan stop with ErrTooLong
+// and silently truncates the stream before its terminal marker. Those channels
+// must use the same ceiling, and the same StreamScannerMaxBufferMB override, as
+// the shared scanner; otherwise the override only applies to one code path.
+func GetScannerBufferSize() int {
+	return getScannerBufferSize()
+}
+
 func copyCodexResponsesHeaders(c *gin.Context, resp *http.Response) {
 	if c == nil || c.Writer == nil || resp == nil {
 		return

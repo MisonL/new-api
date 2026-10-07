@@ -188,6 +188,9 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	sawMeta := false
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
+	// 与共享扫描器同一行上限：裸 NewScanner 的 token 上限是 64KiB，上游一帧
+	// 超过它就会停在 ErrTooLong，meta 终止事件再也读不到。
+	scanner.Buffer(make([]byte, helper.InitialScannerBufferSize), helper.GetScannerBufferSize())
 	dataChan := make(chan string)
 	metaChan := make(chan string)
 	stopChan := make(chan bool)
