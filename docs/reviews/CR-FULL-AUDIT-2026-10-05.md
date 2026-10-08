@@ -1276,3 +1276,71 @@ Rust 侧使用，权限面与使用面一致。
   本节的结论只来自产物静态分析与 CI 门禁复跑。
 - `bun run build`（Tauri bundle）未执行：它需要 `@tauri-apps/cli` 与平台
   原生依赖，属长时构建，本轮以 `check:rust` + `test:rust` 代替。
+
+## 21. 2026-10-08 classic 死翻译文件清理与 i18n 支持盘点（第十二批）
+
+### 21.1 删除 `web/classic/src/i18n/locales/zh.json`
+
+该文件是 classic 前端的死翻译文件，四条证据一致：
+
+- `web/classic/src/i18n/i18n.js` 只 import `zh-CN.json` 与 `zh-TW.json`，
+  `resources` 里没有 `zh` 键；
+- 全仓检索无任何 `locales/zh.json` 引用；
+- 提取配置 `web/classic/i18next.config.js` 的
+  `locales: ['zh-CN','zh-TW','en','fr','ru','ja','vi']` 不含 `zh`，官方
+  工具链既不会生成也不会更新它；
+- 它用的是旧结构（`{"translation": {...}}`），2814 键，比 `zh-CN.json`
+  少 2303 键。
+
+更值得注意的是它仍在被写：最近五个提交分别给它追加了 +84、+3、+1、+11、
++2 行，但那些翻译永远不会渲染。删除以消除该维护陷阱。
+
+验证：删除后无残留引用；`bun run build` 通过（含 Safari 兼容检查）；
+`bun test` 218 pass / 0 fail；`prettier --check` 通过。
+
+提交时发生并发事件：本仓有其他会话在途工作，共享暂存区。该删除先被
+`git rm` 暂存，随后另一会话的提交 `67d2fa47d` 把它一并带入（该提交主体是
+relaykit 文档改动）。文件已正确删除，未重写他人提交。
+
+### 21.2 两个前端的 i18n 支持现状（盘点，未改动）
+
+| 前端 | 语言 | 资源加载 | 提取配置 |
+| --- | --- | --- | --- |
+| classic | zh-CN, zh-TW, en, fr, ru, ja, vi | `i18n.js` 显式 import 7 个 json | `i18next.config.js` 的 7 项一致 |
+| default | en, fr, ja, ru, vi, zh | `config.ts` 显式 import 6 个 json | `sync-i18n.mjs` |
+
+注意两个前端的语言代码体系不同：classic 用 `zh-CN`/`zh-TW` 拆分，
+default 只用 `zh`。删除 classic 的 `zh.json` 不影响 default 的
+`web/default/src/i18n/locales/zh.json`（后者是正常在用的）。
+
+后端另有独立体系 `i18n/locales/*.yaml`（en / zh-CN / zh-TW），与前端无关。
+
+### 21.3 classic 的空值分布（既有状态，未改动）
+
+| locale | 键数 | 空值 |
+| --- | --- | --- |
+| en | 5219 | 1268 |
+| fr | 5057 | 914 |
+| ja | 4982 | 861 |
+| ru | 5108 | 943 |
+| vi | 5523 | 862 |
+| zh-CN | 5117 | 0 |
+| zh-TW | 4955 | 1142 |
+
+这不是回归：HEAD 版本的 `en.json` 空值数为 1272（当前工作区 1268，仍在
+被其他会话修改）。空值性质分两类：
+
+- 1246/1268 的键本身是**中文原文**（classic 采用 key-as-source 模式，
+  中文即源文案，英文界面才需要填值），属设计使然；
+- 22 个是纯 ASCII 键（如 `Cached tokens`、`OAuth Client ID`、`Request ID`），
+  是英文界面的真实缺口：这些键在 `en.json` 为空，而 `zh-CN` 有 17/22、
+  `fr`/`ja` 各 11/22 有值。
+
+`en.json` 等 7 个 locale 文件当前均被其他会话在途修改（正在补翻译），
+本轮不介入。22 个 ASCII 缺口的修复留给该会话。
+
+### 21.4 i18n 门禁
+
+`node web/scripts/i18nLintGate.mjs` 通过：无超出基线（307 条）的新硬编码
+字符串。`web/default/src/i18n/locales/_reports/_sync-report.json` 显示
+default 六个 locale 的 missing / extras / untranslated 均为 0。
