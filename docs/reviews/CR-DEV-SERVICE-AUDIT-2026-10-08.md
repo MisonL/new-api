@@ -135,6 +135,15 @@ relay/websocket.go` 为空；`git blame` 显示该调用由 `f0589cc478`
 （应为 404/401 处返回了 200），会误导监控、爬虫与「只看状态码」的客户端。
 属既有行为，非本轮改动引入。
 
+**同日修复**（`0d66b45e7`）：`router/web-router.go` 的
+`shouldReturnRelayNotFound` 改为对「原始 URI + `path.Clean(requestPath)`」
+取并集分类（只新增分类、不回退既有分支）。修复后 `//api/...`、
+`/./api/...`、`/%2f%2fapi/...` 返回 404 JSON；`/API/...` 大小写变体仍走
+SPA——路由本身大小写敏感，这是刻意保留的行为。新增 6 个表驱动用例
+（4 个在修复前失败）；`go test ./router/` 与 `go build ./...` 通过。
+上游 `QuantumNous/new-api` 的 `router/web-router.go` 没有这个分类函数
+（结构不同），本修复无上游对齐问题。
+
 ### 3.3 P3：安全响应头缺失
 
 3001 响应未观察到 `X-Content-Type-Options`、`X-Frame-Options`、
