@@ -3,7 +3,6 @@ package controller
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -154,6 +153,11 @@ func GetClaudeAuthHeader(token string) http.Header {
 	return relaychannel.AnthropicAuthHeaders(token)
 }
 
+// maxUpstreamJSONResponseBodyBytes bounds the JSON bodies fetched from channel
+// endpoints (balance, usage, model lists). The model-sync and ratio-sync paths
+// already cap the same kind of upstream JSON at 10 MB.
+const maxUpstreamJSONResponseBodyBytes int64 = 10 << 20
+
 func GetResponseBody(method, url string, channel *model.Channel, headers http.Header) ([]byte, error) {
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
@@ -172,7 +176,7 @@ func GetResponseBody(method, url string, channel *model.Channel, headers http.He
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status code: %d", res.StatusCode)
 	}
-	body, err := io.ReadAll(res.Body)
+	body, err := common.ReadAllWithLimit(res.Body, maxUpstreamJSONResponseBodyBytes)
 	if err != nil {
 		return nil, err
 	}

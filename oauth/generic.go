@@ -6,7 +6,6 @@ import (
 	stdjson "encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -30,6 +29,12 @@ const (
 	AuthStyleInParams   = 1 // Send client_id and client_secret as POST parameters
 	AuthStyleInHeader   = 2 // Send as Basic Auth header
 )
+
+// maxGenericOAuthResponseBodyBytes bounds every response body the generic
+// provider reads from a configured endpoint. The directory is administered
+// elsewhere, so the token and userinfo endpoints are not trusted to stay
+// small; the value matches the other oauth flows (cas, jwt_direct).
+const maxGenericOAuthResponseBodyBytes int64 = 1 << 20
 
 // GenericOAuthProvider implements OAuth for custom/generic OAuth providers
 type GenericOAuthProvider struct {
@@ -143,7 +148,7 @@ func (p *GenericOAuthProvider) ExchangeToken(ctx context.Context, code string, c
 
 	logger.LogDebug(ctx, "[OAuth-Generic-%s] ExchangeToken response status: %d", p.config.Slug, res.StatusCode)
 
-	body, err := io.ReadAll(res.Body)
+	body, err := common.ReadAllWithLimit(res.Body, maxGenericOAuthResponseBodyBytes)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Generic-%s] ExchangeToken read body error: %s", p.config.Slug, err.Error()))
 		return nil, err
@@ -229,7 +234,7 @@ func (p *GenericOAuthProvider) GetUserInfo(ctx context.Context, token *OAuthToke
 		return nil, NewOAuthError(i18n.MsgOAuthGetUserErr, nil)
 	}
 
-	body, err := io.ReadAll(res.Body)
+	body, err := common.ReadAllWithLimit(res.Body, maxGenericOAuthResponseBodyBytes)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Generic-%s] GetUserInfo read body error: %s", p.config.Slug, err.Error()))
 		return nil, err

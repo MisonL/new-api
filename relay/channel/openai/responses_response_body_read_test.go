@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,4 +163,54 @@ func deadlineExceededContext() context.Context {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	cancel()
 	return ctx
+}
+
+// zeroByteReader yields an endless stream of zero bytes without allocating a
+// backing buffer, so an oversized body can be simulated cheaply.
+type zeroByteReader struct{}
+
+func (zeroByteReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+// A non-streaming Responses body arrives from an upstream this gateway does
+// not control. A response that never ends must fail the read explicitly rather
+// than grow the process heap, and the failure must stay classified as a
+// non-retryable read failure: the same upstream would answer the same way.
+func TestReadResponsesNonStreamingResponseBodyRejectsOversizedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	body, apiErr := readResponsesNonStreamingResponseBody(
+		ctx,
+		io.LimitReader(zeroByteReader{}, maxResponsesNonStreamingBodyBytes+1),
+	)
+
+	require.Nil(t, body)
+	require.NotNil(t, apiErr)
+	require.Equal(t, types.ErrorCodeReadResponseBodyFailed, apiErr.GetErrorCode())
+	require.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
+	require.True(t, types.IsSkipRetryError(apiErr))
+	require.Contains(t, apiErr.Error(), "exceeds")
+}
+
+// Control case: a body within the limit is returned untouched, so the bound
+// cannot silently truncate or reject a legitimate response.
+func TestReadResponsesNonStreamingResponseBodyAcceptsBodyWithinLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	body, apiErr := readResponsesNonStreamingResponseBody(ctx, strings.NewReader(`{"id":"resp_1"}`))
+
+	require.Nil(t, apiErr)
+	require.Equal(t, `{"id":"resp_1"}`, string(body))
 }

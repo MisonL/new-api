@@ -6,12 +6,18 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
+// maxResponsesNonStreamingBodyBytes bounds the non-streaming Responses body
+// this gateway will hold in memory. It matches the other non-streaming JSON
+// envelopes (claude, xai, synthetic compaction).
+const maxResponsesNonStreamingBodyBytes int64 = 64 << 20
+
 func readResponsesNonStreamingResponseBody(c *gin.Context, body io.Reader) ([]byte, *types.NewAPIError) {
-	responseBody, err := io.ReadAll(body)
+	responseBody, err := common.ReadAllWithLimit(body, maxResponsesNonStreamingBodyBytes)
 	if err != nil {
 		return nil, newResponsesNonStreamingResponseBodyReadError(c, err)
 	}
