@@ -154,7 +154,7 @@ macOS 环境的 Caddy 代理（`deploy/proxy/macos-docker-tun/Caddyfile`）只�
 `reverse_proxy`、未设置任何头，故也不存在外部代理层补齐。非本轮改动引入，
 也无证据表明当前构成漏洞。
 
-**同日实施**：新增
+**同日实施**（`74d9ab719`）：新增
 `middleware/security_headers.go`，在 `main.go` 全局中间件链上于
 `middleware.I18n()` 之后、`sessions.Sessions` 之前注册。注册点在
 `router.SetRouter`（`main.go:228`）之前，因此覆盖全部路由，包括 SPA 兜底
