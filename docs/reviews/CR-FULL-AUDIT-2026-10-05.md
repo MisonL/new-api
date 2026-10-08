@@ -1344,3 +1344,27 @@ default 只用 `zh`。删除 classic 的 `zh.json` 不影响 default 的
 `node web/scripts/i18nLintGate.mjs` 通过：无超出基线（307 条）的新硬编码
 字符串。`web/default/src/i18n/locales/_reports/_sync-report.json` 显示
 default 六个 locale 的 missing / extras / untranslated 均为 0。
+
+### 21.5 门禁基线核查（未改动，结论：基线不可刷新）
+
+本轮核查发现门禁报告"当前 263 条，基线 307 条，已解决 44 条"。对
+`--write-baseline` 的处置做了完整推演后决定**不刷新**：
+
+- 那 44 条对应的字符串在源文件中**依然存在**（如
+  `EditTagModal.jsx` 的 `round_robin`、`SettingsPerformance.jsx` 的 `｜`），
+  只是本次 `i18next-cli lint` 没有把它们报为硬编码问题——可能是工具行为
+  或输出解析差异，而不是问题真被修复；
+- 门禁的匹配是计数式的（`current.count > baseline.count` 才报新增）。基线
+  **多留**条目是安全方向（最坏是漏报已解决项），**少留**条目会把仍在的
+  字符串报成"新增"造成假阳性，或更糟——掩盖真实的重新引入；
+- 实测刷新基线会把 44 条从基线移除（307 → 263），其中 39 条对应的字符串
+  仍在源文件里。这属于**削弱门禁**，已回滚。
+
+真正的可操作缺口另有其物：`web/classic/i18next.config.js` 的语言列表含
+`removeUnusedKeys: false`，加上 `i18n.js` 工作区改动（其他会话正在加
+`returnEmptyString: false`），说明 classic 的 i18n 正在被主动修整中。
+本轮不介入这些在途文件。
+
+补充事实：门禁未接入 CI（`grep i18n .github/workflows/*.yml` 为空），
+只在 `web/classic` 的 `bun run i18n:lint` 手动触发。若要把"新硬编码
+字符串"变成硬门禁，需先把它接进某个 workflow——属独立决策，记录不执行。
