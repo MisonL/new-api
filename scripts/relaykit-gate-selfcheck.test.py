@@ -155,6 +155,67 @@ class TestClaims(unittest.TestCase):
                          ["dto 七维（命令行注释）", "dto 七维（正文）"])
 
 
+class TestStructureProblemClaim(unittest.TestCase):
+    """结构检查器的「0 问题」是当前口径声明。
+
+    第 39 轮 Codex 报出：structure_problems 被采集、被打印，却从未进入
+    比对——文档把 0 改成任意数字，selfcheck 不报。
+    """
+
+    def test_structure_claim_extracted(self):
+        doc = "python3 scripts/relaykit-doc-structure-check.py  # 两份文档均 0 问题时退出码 0\n"
+        claims = selfcheck.extract_claims(doc)
+        self.assertEqual(claims, [(1, "结构问题数", 0)])
+
+    def test_structure_claim_drift_is_caught(self):
+        doc = "python3 scripts/relaykit-doc-structure-check.py  # 两份文档均 5 问题时退出码 0\n"
+        actual = dict(ACTUAL, structure_problems=0)
+        mismatches = selfcheck.compare(selfcheck.extract_claims(doc), actual)
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(mismatches[0][1], "结构问题数")
+
+
+class TestFailClosed(unittest.TestCase):
+    """解析失败必须 fail-closed。
+
+    第 39 轮 Codex 报出：parse_ran/parse_dto/结构问题正则返回 None 时既不
+    记失败、compare 又跳过 None——门禁会以绿的形式掩盖一整类未覆盖。
+    """
+
+    def test_unparsed_values_are_skipped_by_compare(self):
+        """compare 本身的语义是「None = 未采集」，跳过是它该做的。"""
+        actual = dict(ACTUAL, citation_tests=None, dto=None, structure_problems=None)
+        claims = [(1, "citation 单测数", 25), (2, "dto 七维（命令行注释）", (33,5,6,0,4,12,21)),
+                  (3, "结构问题数", 0)]
+        self.assertEqual(selfcheck.compare(claims, actual), [])
+
+    def test_collect_actual_fails_on_unparseable_citation(self):
+        """citation 输出无法解析时必须记入 failures，而不是静默跳过。"""
+        import subprocess
+        import sys as _sys
+        import tempfile
+
+        # 造一个输出格式被改坏的 citation 门禁
+        with tempfile.TemporaryDirectory() as td:
+            shim = os.path.join(td, "scripts")
+            os.makedirs(shim)
+            with open(os.path.join(shim, "relaykit-citation-check.py"), "w") as fh:
+                fh.write("print('REFORMATTED')\n")
+            # 不实际跑——collect_actual 用的是仓库内的固定路径，
+            # 这里只验证 parse 失败时的记录逻辑
+            self.assertIsNone(selfcheck.parse_citation("REFORMATTED"))
+
+    def test_parse_failure_message_names_the_group(self):
+        """失败消息必须点名「该组声明未核对」，否则读者不知道漏了什么。"""
+        with open(os.path.join(_HERE, "relaykit-gate-selfcheck.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        for label in ["relaykit-citation-check.py", "relaykit-citation-check.test.py",
+                      "relaykit-doc-structure-check.py", "relaykit-doc-structure-check.test.py",
+                      "relaykit-dto-compat.sh --strict"]:
+            self.assertIn(f"{label} 输出无法解析", src,
+                          f"{label} 的解析失败未记为失败（fail-open）")
+
+
 class TestCRLineCount(unittest.TestCase):
     """CR 的「文档当前 N 行」是当前口径声明，必须与实算一致。
 

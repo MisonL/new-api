@@ -33,6 +33,13 @@ DEFAULT_DOC = "docs/superpowers/specs/2026-09-30-relaykit-migration-design.md"
 CR_DOC = "docs/reviews/CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md"
 
 
+def read_text(path):
+    """显式关闭的读文件——`io.open(p).read()` 依赖引用计数回收，在
+    `-W error::ResourceWarning` 下会报 unclosed file（第 39 轮 Codex 报出）。"""
+    with io.open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
 def run(cmd):
     """跑一条门禁命令，返回 (退出码, 合并后的输出)。"""
     proc = subprocess.run(
@@ -74,7 +81,7 @@ def extract_line_claims(cr_path):
     if not os.path.exists(cr_path):
         return []
     claims = []
-    for i, line in enumerate(io.open(cr_path, encoding="utf-8").read().split("\n"), 1):
+    for i, line in enumerate(read_text(cr_path).split("\n"), 1):
         # 只认**行首的规范句式**「文档当前 N 行，位于 ...」——正文里复述这个
         # 句式（如本轮叙述「④CR 的『文档当前 1987 行』实为 1986」）不得被
         # 当成声明。不锚行首就会把「描述缺陷的文字」读成缺陷本身。
@@ -85,65 +92,83 @@ def extract_line_claims(cr_path):
 
 
 def collect_actual(quiet):
-    """实跑四个门禁，返回 (计数 dict, 失败列表)。"""
+    """实跑四个门禁，返回 (计数 dict, 失败列表)。
+
+    **fail-closed**：任何一条门禁的输出解析失败都记为失败，不放行。解析
+    失败意味着「这条声明没有被核对」，若静默跳过，门禁会以绿的形式掩盖
+    一整类未覆盖——这正是本脚本要防的病，不能在自己身上复发。
+    唯一的例外是递归守卫下的 selfcheck_tests（见下），且它在输出里显式
+    标注「未核对」。
+    """
     failures = []
     actual = {}
+
+    def parsed_or_fail(label, value, key, fail_msg):
+        if value is None:
+            failures.append(fail_msg)
+        else:
+            actual[key] = value
+        return value
 
     code, out = run([sys.executable, "scripts/relaykit-citation-check.py"])
     if code != 0:
         failures.append(f"relaykit-citation-check.py 退出码 {code}")
-    parsed = parse_citation(out)
-    if parsed is None:
-        failures.append("relaykit-citation-check.py 输出无法解析")
-    else:
-        actual["citation"] = parsed
+    parsed_or_fail("citation", parse_citation(out), "citation",
+                   "relaykit-citation-check.py 输出无法解析（该组声明未核对）")
 
     code, out = run([sys.executable, "scripts/relaykit-citation-check.test.py"])
     if code != 0:
         failures.append(f"relaykit-citation-check.test.py 退出码 {code}")
-    actual["citation_tests"] = parse_ran(out)
+    parsed_or_fail("citation_tests", parse_ran(out), "citation_tests",
+                   "relaykit-citation-check.test.py 输出无法解析（该组声明未核对）")
 
     code, out = run([sys.executable, "scripts/relaykit-doc-structure-check.py"])
     if code != 0:
         failures.append(f"relaykit-doc-structure-check.py 退出码 {code}")
     m = re.search(r"合计 (\d+) 个结构问题", out)
-    actual["structure_problems"] = int(m.group(1)) if m else None
+    parsed_or_fail("structure_problems", int(m.group(1)) if m else None, "structure_problems",
+                   "relaykit-doc-structure-check.py 输出无法解析（该组声明未核对）")
 
     code, out = run([sys.executable, "scripts/relaykit-doc-structure-check.test.py"])
     if code != 0:
         failures.append(f"relaykit-doc-structure-check.test.py 退出码 {code}")
-    actual["structure_tests"] = parse_ran(out)
+    parsed_or_fail("structure_tests", parse_ran(out), "structure_tests",
+                   "relaykit-doc-structure-check.test.py 输出无法解析（该组声明未核对）")
 
     # 自检脚本自己的单测数。这一条是自指的：selfcheck.test.py 的端到端用例
     # 会反过来调用 collect_actual，故它在调用前设置 RELAYKIT_SELFCHECK_SKIP_RECURSE
     # 断开递归；置位时跳过本段，selfcheck_tests 为 None，compare() 随之跳过该声明。
+    # **这是唯一的合法跳过**，且主流程会在总结里显式标注「未核对」。
     if os.environ.get("RELAYKIT_SELFCHECK_SKIP_RECURSE"):
         actual["selfcheck_tests"] = None
     else:
         code, out = run([sys.executable, "scripts/relaykit-gate-selfcheck.test.py"])
         if code != 0:
             failures.append(f"relaykit-gate-selfcheck.test.py 退出码 {code}")
-        actual["selfcheck_tests"] = parse_ran(out)
+        parsed_or_fail("selfcheck_tests", parse_ran(out), "selfcheck_tests",
+                       "relaykit-gate-selfcheck.test.py 输出无法解析（该组声明未核对）")
 
     # 「文档当前 N 行」——CR 记录里的当前口径声明，实算为 wc -l 口径
     # （s.count("\n")），不是 split("\n") 的长度：后者在文件末尾有换行时多算 1，
     # 第 38 轮就是这么写错了一次。
-    doc_lines = io.open(os.path.join(ROOT, DEFAULT_DOC), encoding="utf-8").read().count("\n")
+    doc_lines = read_text(os.path.join(ROOT, DEFAULT_DOC)).count("\n")
     actual["doc_lines"] = doc_lines
 
     code, out = run("bash scripts/relaykit-dto-compat.sh --strict")
     if code != 0:
         failures.append(f"relaykit-dto-compat.sh --strict 退出码 {code}")
-    actual["dto"] = parse_dto(out)
+    parsed_or_fail("dto", parse_dto(out), "dto",
+                   "relaykit-dto-compat.sh --strict 输出无法解析（该组声明未核对）")
 
     if not quiet:
         print("门禁实际输出：")
-        print(f"  citation        relaykit={actual['citation'][0]} host={actual['citation'][1]} full={actual['citation'][2]}")
-        print(f"  citation 单测   {actual['citation_tests']}")
-        print(f"  结构问题        {actual['structure_problems']}")
-        print(f"  结构单测        {actual['structure_tests']}")
-        print(f"  自检单测        {actual['selfcheck_tests']}")
-        print(f"  dto 七维        {actual['dto']}")
+        cite = actual.get("citation")
+        print(f"  citation        {('relaykit=%d host=%d full=%d' % cite) if cite else '无法解析'}")
+        print(f"  citation 单测   {actual.get('citation_tests', '无法解析')}")
+        print(f"  结构问题        {actual.get('structure_problems', '无法解析')}")
+        print(f"  结构单测        {actual.get('structure_tests', '无法解析')}")
+        print(f"  自检单测        {actual.get('selfcheck_tests', '无法解析')}")
+        print(f"  dto 七维        {actual.get('dto', '无法解析')}")
         print()
     return actual, failures
 
@@ -187,6 +212,12 @@ def extract_claims(doc):
             add(i, "§11 宿主引用数", int(m.group(1)))
         for m in re.finditer(r"全路径 \*\*(\d+) 处\*\*", line):
             add(i, "§11 全路径引用数", int(m.group(1)))
+
+        # 「# 两份文档均 0 问题时退出码 0」——结构检查器的当前口径声明。
+        # 第 39 轮补入：此前 structure_problems 被采集、被打印，却从未进入
+        # 比对——文档把 0 改成任意数字，selfcheck 不报。
+        for m in re.finditer(r"两份文档均 (\d+) 问题时退出码 0", line):
+            add(i, "结构问题数", int(m.group(1)))
 
         # 「# 计数: fieldSet=33 tag=5 type=6 embed=0 order=4 sig=12 equiv=21」
         for m in re.finditer(
@@ -235,6 +266,10 @@ def compare(claims, actual):
             real = actual.get("selfcheck_tests")
             if real is not None and claimed != real:
                 mismatches.append((line_no, desc, claimed, real))
+        elif desc == "结构问题数":
+            real = actual.get("structure_problems")
+            if real is not None and claimed != real:
+                mismatches.append((line_no, desc, claimed, real))
         elif desc == "CR 文档行数":
             real = actual.get("doc_lines")
             if real is not None and claimed != real:
@@ -267,7 +302,7 @@ def main():
     actual, failures = collect_actual(args.quiet)
 
     doc_path = args.doc if os.path.isabs(args.doc) else os.path.join(ROOT, args.doc)
-    doc = io.open(doc_path, encoding="utf-8").read()
+    doc = read_text(doc_path)
     claims = extract_claims(doc)
     cr_path = os.path.join(ROOT, CR_DOC)
     cr_claims = extract_line_claims(cr_path)

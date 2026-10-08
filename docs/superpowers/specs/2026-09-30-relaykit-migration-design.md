@@ -754,14 +754,14 @@ python3 scripts/relaykit-citation-check.test.py  # 25 个单测
 
 ```bash
 python3 scripts/relaykit-doc-structure-check.py        # 两份文档均 0 问题时退出码 0
-python3 scripts/relaykit-doc-structure-check.test.py   # 19 个单测
+python3 scripts/relaykit-doc-structure-check.test.py   # 20 个单测
 ```
 
 **门禁自述计数**（第 38 轮新增：把「门禁改了、描述没改」变成门禁——这一盲区此前复发三次：第 36 轮的 34/15、第 38 轮的 §9.3 47/98/21、以及 `relaykit-citation-check.py` docstring 里长期滞留的 「13 citations across 9 files」）：
 
 ```bash
 python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对
-python3 scripts/relaykit-gate-selfcheck.test.py       # 25 个单测
+python3 scripts/relaykit-gate-selfcheck.test.py       # 30 个单测
 ```
 
 它只检查**本文档的当前口径声明**；CR 记录里的计数是历史记录（「第 37 轮为 50/103/24」这类），记的是「当时为真」，不随门禁演进失效，故不在射程内。

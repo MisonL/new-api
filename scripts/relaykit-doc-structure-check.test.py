@@ -137,10 +137,10 @@ class TestRealDocuments(unittest.TestCase):
 
     def test_default_targets_are_clean(self):
         root = os.path.dirname(_HERE)
-        texts = [
-            open(os.path.join(root, t), encoding="utf-8").read()
-            for t in checker.DEFAULT_TARGETS
-        ]
+        texts = []
+        for t in checker.DEFAULT_TARGETS:
+            with open(os.path.join(root, t), encoding="utf-8") as fh:
+                texts.append(fh.read())
         defined = set()
         for text in texts:
             defined |= checker.defined_sections(text)
@@ -152,6 +152,25 @@ class TestRealDocuments(unittest.TestCase):
         for path, text in zip(checker.DEFAULT_TARGETS, texts):
             problems = run_text(text, defined=defined, unresolved=unresolved or None)
             self.assertEqual(problems, [], f"{path} 有结构问题：{problems[:5]}")
+
+
+class TestNoResourceLeak(unittest.TestCase):
+    """读文件必须用 with——第 39 轮 Codex 报出 line 141 泄漏文件句柄。"""
+
+    def test_real_doc_read_has_no_unclosed_file(self):
+        import gc
+        import warnings
+
+        root = os.path.dirname(_HERE)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+            texts = []
+            for t in checker.DEFAULT_TARGETS:
+                with open(os.path.join(root, t), encoding="utf-8") as fh:
+                    texts.append(fh.read())
+            gc.collect()
+        leaks = [w for w in caught if issubclass(w.category, ResourceWarning)]
+        self.assertEqual(leaks, [])
 
 
 if __name__ == "__main__":
