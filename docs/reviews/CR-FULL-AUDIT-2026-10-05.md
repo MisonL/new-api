@@ -1166,3 +1166,60 @@ $ /new-api --build-info            # version/commit/date/source 正常
 - 前端产物来自当前 dirty 工作区（含其他会话在途改动），构建成功只证明
   Dockerfile 可构建，不代表这些前端改动已验收。
 - 生产与隔离环境仍运行旧镜像；本次只影响后续构建。
+
+## 19. 2026-10-08 systemd 单元模板的行内注释（第十批）
+
+### 19.1 发现
+
+`new-api.service`（systemd 单元模板）把三处"注意修改"提示写成了行内注释：
+
+```ini
+User=ubuntu  # 注意修改用户名
+WorkingDirectory=/path/to/new-api  # 注意修改路径
+ExecStart=/path/to/new-api/new-api --port 3000 --log-dir /path/to/new-api/logs  # 注意修改路径和端口号
+```
+
+systemd 不把行尾 `#` 当注释。`systemd.syntax(7)` 只说明"空行与以
+`#`/`;` 开头的行被忽略"，未定义行内注释；实测（`systemd-analyze verify`，
+容器内离线解析）：
+
+```console
+$ systemd-analyze verify /tmp/x.service
+Accepting user/group name 'ubuntu  # 注意修改用户名', which does not match
+strict user/group name rules.
+```
+
+即 `User` 的值被解析成含注释文本的 `ubuntu  # 注意修改用户名`。照抄模板的
+用户会得到无法启动的单元（用户不存在）。上游 `QuantumNous/new-api` 同样
+如此，本仓原样继承。
+
+### 19.2 处理（`f80e7972b`）
+
+把三处提示移到指令上方的独立注释行。反向验证：
+
+```console
+$ systemd-analyze verify orig.service    # HEAD 版本
+Accepting user/group name 'ubuntu  # 注意修改用户名', ...   # 警告
+$ systemd-analyze verify fixed.service
+# 无 User 警告（仅剩 "Command /path/to/new-api/new-api is not executable"，
+#  那是模板占位符的预期结果）
+```
+
+### 19.3 同类排查（无发现）
+
+- 仓库仅此一个 `.service`/`.timer`/`.socket` 文件，无同类问题；
+- 29 个 `scripts/*.sh` 全部通过 `bash -n`；
+- 文档引用的 21 个 `scripts/*.sh`、3 个 `deploy/compose/*.yml` 全部存在；
+- `deploy/env/*.env` 的两处"缺失"（`storage-postgres.env`、
+  `frontend-readonly.env`）是 gitignored 的本地文件，由 `.example` 复制生成，
+  非坏引用；
+- `deploy/env/storage-postgres.example.env` 的命名（`X.example.env`）与其余
+  6 个（`X.env.example`）相反，但 `.gitignore:50` 已显式加
+  `!deploy/env/*.example.env` 例外兼容，属既定选择，不改。
+
+### 19.4 顺带验证（无发现）
+
+- `go test -shuffle=on -count=2` 七个包全过（0 FAIL），无跨运行状态泄漏；
+- `go vet ./...` 全仓 0 问题；
+- 桌面端 `cargo test --test runtime_support` 22 项全过；
+- §17 新钉的 4 个 action SHA 经 `git ls-remote` 复核，与对应 tag 一致。
