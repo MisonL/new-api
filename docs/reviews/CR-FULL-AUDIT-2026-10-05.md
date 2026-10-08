@@ -1741,7 +1741,8 @@ relay 出站体（`aws/converse.go`、jimeng adaptor）与 `controller/channel.g
   其余 `/api` 读取点（含 `common.DecodeJson(c.Request.Body, ...)` 一类
   Gin/JSON 绑定，如登录、注册、重置密码）仍无字节上界。是否在 `/api` 组
   统一装一个 `MaxBytesReader` 中间件属跨切面决定（涉及上限取值，以及
-  对全部 `/api` 请求的行为改变），留待用户拍板。现状证据：仓库内 `/api`
+  对全部 `/api` 请求的行为改变），留待用户拍板（2026-10-08 已决策并实施，
+  见 §26）。现状证据：仓库内 `/api`
   无 multipart 上传端点（`FormFile`/`ParseMultipartForm` 在 `controller/`
   零命中），`/api/mj/*` 仅 GET，Midjourney 的大体提交走 relay 组（已受
   入口上限约束）；
@@ -1775,3 +1776,84 @@ relay 出站体（`aws/converse.go`、jimeng adaptor）与 `controller/channel.g
   未引用任何请求体上限中间件。若决定收口该缺口，与上游对齐的选项是移植
   这套逐路由匿名上限（覆盖面即上列 18 条路由，含本批两处 handler 已覆盖
   的 webhook），而非新增整组中间件。
+
+## 26. 2026-10-08 `/api` 请求体上限：方案调研与两层实施（第十七批）
+
+### 26.1 方案调研（2026-10-08，候选与逐条否决依据）
+
+先枚举本 fork 真实的匿名写入面（按 `router/api-router.go` 的组鉴权继承
+逐条判定，再对每个 handler 检查读体方式；**不是**照抄 §25.4 的上游清单）：
+
+| 路由 | 读体方式 | 匿名可达 |
+| --- | --- | --- |
+| `POST /api/setup` | `ShouldBindJSON` | 仅未初始化实例（先查 `constant.Setup`） |
+| `POST /api/user/reset` | `DecodeJson` | 是 |
+| `POST /api/user/register`、`/login`、`/login/2fa` | `DecodeJson` / `ShouldBindJSON` | 是 |
+| `POST /api/user/passkey/login/finish` | webauthn 库内部读体 | 是 |
+| `POST /api/auth/external/:provider/jwt/login`、`header/login` | `ShouldBind` | 是（fork 独有，上游清单无） |
+| `POST /api/stripe/webhook`、`creem/webhook` | `io.ReadAll` | 是 |
+| `POST /api/waffo/webhook` | `io.ReadAll` | 是（§25 已封 1MB） |
+| `POST /api/user/epay/notify`、`/subscription/epay/notify`、`/return` | `Request.ParseForm` | 是（stdlib 对 urlencoded 已封 10MB） |
+| `POST /api/oauth/email/bind`、`/oauth/wechat/bind` | `DecodeJson` | handler 内先验会话再读体，不计入向量 |
+| `POST /api/user/passkey/login/begin` | 不读体 | 是，但无向量 |
+
+候选方案与否决依据：
+
+- **整组 512KB**：否决。会打断合法大体请求，反证在仓库内——
+  `controller/channel.go` 三个 admin 路由显式设了 16MB
+  （`maxUpdateChannelBodyBytes`），说明渠道配置体按设计可以很大。
+- **整组/全局 128MB**：否决。对匿名 DoS 无实质作用（§22.9 实测 130MiB
+  体 8.5 秒内被完整解码）；且引擎级安装会**静默破坏** fork 自研的
+  deferred opaque replay——该特性刻意把 Responses 重放体上限（768MB）
+  推迟到 token 鉴权之后激活（`middleware/gzip.go`），鉴权前的
+  `MaxBytesReader` 会让 768MB 永不可达。
+- **依赖限流**：否决。`GlobalAPIRateLimit` 与 `CriticalRateLimit` 是计数
+  限流而非字节限制，且都可在配置中关闭（`GlobalApiRateLimitEnable`、
+  `CriticalRateLimitEnable`），不能作为结构性防护。
+- **反代层限制**：否决作为唯一手段。仓库唯一的 Caddyfile
+  （`deploy/proxy/macos-docker-tun/`）无 `request_body` 限制，且只覆盖
+  走反代的部署。
+
+### 26.2 实施（两层，代码提交 `062a38663`）
+
+- **第一层（主修复）**：移植上游的 `middleware.AnonymousRequestBodyLimit`
+  （`middleware/request_body_limit.go` + `common/request_body_limit.go`），
+  默认 512KB（`ANONYMOUS_REQUEST_BODY_LIMIT_KB`，0 关闭、负值回落默认），
+  读完 `limit+1` 字节判超限，返回 413（其它读取错误 400），并把请求体换成
+  可重放的 `io.NopCloser(bytes.NewReader(...))` 且修正 `ContentLength`。
+  挂载点为本 fork 自己的 17 条匿名路由（上表），非上游的 18 条。
+- **第二层（对上游方案的补强）**：`middleware.RequestBodyIngressLimit()`
+  装在 `apiRouter` 组上，用 `common.RequestBodyIngressLimit(c)`（默认
+  128MB）惰性包一层 `http.MaxBytesReader`。它实现的是
+  `RequestBodyIngressLimit` 注释里已写、但只在 relay 组落地的不变量，
+  同时把「新增匿名路由忘挂逐路由中间件」的最坏后果从无界降为 128MB。
+  惰性：handler 不读体则不读不分配。
+- 上批两处 handler 内封顶保留（纵深防御）。
+
+### 26.3 验证
+
+- TDD：先落骨架（getter 返回 0、中间件直通、组级不装），此时 11 条用例
+  以正确原因失败——`TestGetAnonymousRequestBodyLimitBytes` 得 0；
+  中间件四条（超限、上限内、负值回落、读错误）与 `BoundsHandlerRead`
+  失败；router 端 `/api/setup` 得 500（handler 被走到）而非 413。
+- 实现后 11 条全绿，含 `TestRequestBodyIngressLimitDoesNotReadUnreadBodies`
+  （惰性）与 `TestAuthenticatedRouteIsNotBoundedByAnonymousLimit`
+  （`PUT /api/user/self` 超限体仍到鉴权，得 401，证明挂载未过宽）。
+- 反向验证（2026-10-08，备份在 /tmp 并已删除）：还原为骨架后中间件两条
+  失败、router 包编译失败（`anonymousRequestBodyLimit` 未使用）；恢复后
+  全绿。
+- `go build ./...` exit 0；`go test ./common ./controller ./model
+  ./relay/common ./relay/helper ./service ./middleware ./router ./oauth
+  ./relay/channel/openai -count=1` 十包全部 ok，exit 0。
+- 新增环境变量已在 `docker-compose.yml` 与 `.env.example` 登记。
+
+### 26.4 取舍与未覆盖
+
+- 512KB 使 `waffo/creem/stripe` webhook 的有效上限由上批 handler 内的
+  1MB 收紧为 512KB。超大支付事件（罕见但存在）会得 413；需要时用
+  `ANONYMOUS_REQUEST_BODY_LIMIT_KB` 抬高，或把某个 webhook 从逐路由清单
+  移出。
+- 未覆盖：`/dashboard` 组未装第二层（该组无写路由，仅 GET，无读体向量）；
+  video/task/plugin 等组继承 `SetRelayRouter` 的入口上限，未逐一复测；
+  512KB 是否拒掉某个真实上游的合法回调，需真实支付回调验证，本轮无此类
+  流量；上游这两个文件没有任何测试，本批新增的测试比上游多。
