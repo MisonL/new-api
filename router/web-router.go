@@ -3,6 +3,7 @@ package router
 import (
 	"embed"
 	"net/http"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -77,11 +78,27 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	})
 }
 
+// shouldReturnRelayNotFound decides whether an unmatched path answers with
+// the relay 404 JSON instead of the SPA index page. It classifies both the
+// raw request URI and the normalized path, because a probe spelling like
+// "//api/status", "/./api/status" or "/%2f%2fapi/status" matches no route and
+// would otherwise get a 200 HTML SPA body, breaking the /api and /v1 JSON 404
+// contract and misleading status-code-only clients. The union keeps paths
+// such as "/assets/../console" on the branch they already take. Matching
+// stays case-sensitive because routes are.
 func shouldReturnRelayNotFound(requestURI string, requestPath string) bool {
-	return strings.HasPrefix(requestURI, "/v1") ||
-		strings.HasPrefix(requestURI, "/api") ||
-		middleware.IsWebStaticResourcePath(requestPath) ||
-		isRootWebStaticFilePath(requestPath)
+	normalizedPath := path.Clean(requestPath)
+	return isRelayNotFoundPath(requestURI) || isRelayNotFoundPath(normalizedPath)
+}
+
+// isRelayNotFoundPath reports whether a path or request URI belongs to a
+// route family that must answer with the relay 404 JSON rather than the SPA
+// fallback.
+func isRelayNotFoundPath(pathOrURI string) bool {
+	return strings.HasPrefix(pathOrURI, "/v1") ||
+		strings.HasPrefix(pathOrURI, "/api") ||
+		middleware.IsWebStaticResourcePath(pathOrURI) ||
+		isRootWebStaticFilePath(pathOrURI)
 }
 
 func isRootWebStaticFilePath(requestPath string) bool {

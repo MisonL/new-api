@@ -87,6 +87,44 @@ func TestShouldReturnRelayNotFound(t *testing.T) {
 			requestPath: "/console/usage.js",
 			want:        false,
 		},
+		{
+			name:        "leading double slash api path",
+			requestURI:  "//api/status",
+			requestPath: "//api/status",
+			want:        true,
+		},
+		{
+			name:        "leading double slash relay path",
+			requestURI:  "//v1/chat/completions",
+			requestPath: "//v1/chat/completions",
+			want:        true,
+		},
+		{
+			name:        "leading double slash spa page",
+			requestURI:  "//console/midjourney",
+			requestPath: "//console/midjourney",
+			want:        false,
+		},
+		{
+			name:        "leading dot slash api path",
+			requestURI:  "/./api/status",
+			requestPath: "/./api/status",
+			want:        true,
+		},
+		{
+			name:        "uppercase api path",
+			requestURI:  "/API/status",
+			requestPath: "/API/status",
+			// Routes are case-sensitive, so "/API/status" is not an API path;
+			// it stays on the SPA fallback by design.
+			want: false,
+		},
+		{
+			name:        "encoded slash api path",
+			requestURI:  "/%2f%2fapi/status",
+			requestPath: "//api/status",
+			want:        true,
+		},
 	}
 
 	for _, tt := range tests {
