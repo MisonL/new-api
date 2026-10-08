@@ -148,8 +148,11 @@ SPA——路由本身大小写敏感，这是刻意保留的行为。新增 6 �
 
 3001 响应未观察到 `X-Content-Type-Options`、`X-Frame-Options`、
 `Content-Security-Policy`、`Referrer-Policy`、`Permissions-Policy`、
-`Strict-Transport-Security`；仓库内也未找到 CSP 配置。属加固候选，需先
-确认生产是否有外部代理层补齐。非本轮改动引入，也无证据表明当前构成漏洞。
+`Strict-Transport-Security`；仓库 Go 侧也没有任何安全响应头配置。生产
+macOS 环境的 Caddy 代理（`deploy/proxy/macos-docker-tun/Caddyfile`）只做
+`reverse_proxy`、未设置任何头，故也不存在外部代理层补齐。属真实的加固
+候选，但下线需决策（加哪些头、CSP 与前端 inline script 的兼容），本轮
+只记录。非本轮改动引入，也无证据表明当前构成漏洞。
 
 ### 3.4 P3（文档准确性）：在途 CORS 注释的前提不成立
 
