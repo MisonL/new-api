@@ -100,6 +100,17 @@ relay/websocket.go` 为空；`git blame` 显示该调用由 `f0589cc478`
 确有这些模型名（共 180 个模型），但当前 22 个渠道均为 OpenAI 型且没有
 一个承载它们，故本环境暂不可达；生产配置未查（未触碰生产）。
 
+**同日修复**（`4ea8c39ea`）：`PostWssConsumeQuota` 改为经
+`buildTieredTokenParamsFromRealtime`（`service/tiered_settle.go`）复用
+`BuildTieredTokenParams` 的归一化契约，`Len` 保持原始输入总量。新增两个
+用例：`TestBuildTieredTokenParamsFromRealtime_NormalizesSubcategories`
+钉住归一化（P/C 减去被引用的子类、子类保留），
+`TestRealtimeBilling_TieredSettleChargesAudioSubcategory` 走完整结算
+断言钱包扣款等于表达式值。反向验证：还原旧调用后结算用例失败
+（999400 vs 990800，差额即被漏计的音频费）。`go build ./...` 与
+`go test ./service/ ./relay/helper/ ./pkg/billingexpr/ -count=1` 通过。
+本次修复未部署到开发容器（容器仍为 `4ba36471d-dirty`）。
+
 ### 3.2 P3：非规范前缀路径返回 200 SPA HTML，绕过 `/api` 的 404 JSON 契约
 
 `router/web-router.go:80` 的 `shouldReturnRelayNotFound` 只按**原始 URI
