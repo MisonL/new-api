@@ -206,8 +206,9 @@ func main() {
 	server.Use(middleware.RequestId())
 	server.Use(middleware.PoweredBy())
 	server.Use(middleware.I18n())
-	// Before the session middleware so the headers reach the login page and the
-	// SPA fallback too, not only authenticated responses.
+	// Registered before router.SetRouter, which is what makes the headers cover
+	// every route and both NoRoute fallbacks; sitting early in the chain also
+	// means a response aborted by a later middleware still carries them.
 	server.Use(middleware.SecurityHeaders())
 	middleware.SetUpLogger(server)
 	// Initialize session store
