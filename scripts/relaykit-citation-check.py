@@ -2,10 +2,16 @@
 """Check that every relaykit line citation in the migration design doc still
 resolves at the pinned upstream commit.
 
-The design doc cites upstream relaykit by `path:line` (13 citations across 9
-files). Those line numbers are only valid at the pinned commit recorded in
-section 1 (`upstream/main` = 789c97019). Upstream relaykit keeps moving, so a
-later bump silently invalidates them -- and nothing detected that until now.
+The design doc cites upstream relaykit by `path:line`, and host paths by
+`path:line` too. Those line numbers are only valid at the pinned commits
+recorded in section 1 (`upstream/main` = 789c97019 for relaykit citations,
+`dbfbc096f` for host citations). Upstream relaykit keeps moving, so a later
+bump silently invalidates them -- and nothing detected that until now.
+
+The script counts are printed at run time, not restated here: a number written
+into this docstring is a number nothing checks (it said "13 citations across 9
+files" for many rounds after the doc had grown past 50). The design doc's own
+self-described counts are gated by scripts/relaykit-gate-selfcheck.py.
 
 This script extracts every `relaykit/<path>.go:<line>` from the doc and
 verifies, against the pinned ref, that:
