@@ -1508,8 +1508,13 @@ git status --porcelain -- <上述文件>                 # 在途判定
 - 65 处不带界中，在途文件占 45 处，干净文件占 20 处。
 - 干净文件的 20 处按可达性分：10 处是 §22.2 已由
   `boundedTaskSubmitResponseBody` 中心封顶的 task adaptor 读取（运行时
-  不属于无界）；5 处是请求体（`aws/converse.go` 出站体、jimeng adaptor
-  与三个 topup/webhook 的入站体，受请求入口上限约束）；3 处是本地文件
+  不属于无界）；5 处是请求体——其中 2 处是 relay 出站体
+  （`aws/converse.go`、jimeng adaptor，读的是本进程已构造的 `io.Reader`，
+  位于有入口上限的 relay 路径），3 处是 `/api` 入站体
+  （`topup_waffo.go`、`topup_waffo_pancake.go`、
+  `subscription_payment_creem.go`）。**原表述把这三处入站体一并写成
+  「受请求入口上限约束」是错的：`/api`、`/dashboard` 组没有请求体入口
+  上限，见 §22.9。** 3 处是本地文件
   （`common/audio.go`、`task/gemini/image.go`、jimeng adaptor 的
   `io.ReadAll(file)`）；1 处实际已被 `LimitReader` 包住、只是同行看不到
   （`controller/ratio_sync.go:310` 的 `io.ReadAll(limited)`）；1 处只经死
@@ -1533,11 +1538,52 @@ git status --porcelain -- <上述文件>                 # 在途判定
 | relay/responses_handler.go:1366 | `reader`（Codex 折叠请求体回放） | 在途，不动 |
 | service/image.go:163 | `reader`（`getImageConfig`） | 仅两条上游（`DecodeUrlImageData`）可达，而 `DecodeUrlImageData` 全仓无调用点（死代码）；另两条是本地 base64 解码。不改 |
 | common/audio.go:318 | `r`（`io.ReadSeeker`） | 本地文件时长解析，非上游响应，不改 |
-| relay/channel/aws/converse.go:38 | `requestBody` | 出站请求体（受入口上限约束），不改 |
+| relay/channel/aws/converse.go:38 | `requestBody` | relay 出站体（调用方已构造的 reader；relay 路径有入口上限），不改 |
 
 字面量模式漏掉、但属于上游在途的 4 处与 §22.4 原有 23 个在途文件一并
 留待各自会话；「46 个文件 / 61 处」仍是清点当日的历史记录，不改写，新增
 量以本节的命令与表格为准。
+
+### 22.9 对 §22.8「受请求入口上限约束」的更正（2026-10-08 复测）
+
+§22.8 把三处 `/api` 入站体与两处 relay 出站体一并写成「受请求入口上限
+约束」。复测证明该合并对入站体不成立：`/api`、`/dashboard` 路由**没有**
+请求体入口上限。
+
+代码证据：
+
+- `http.MaxBytesReader`（Gin 请求体上限的安装点）全仓仅 5 处：
+  `middleware/gzip.go:112,183`（`DecompressRequestMiddleware` 内）与
+  `controller/channel.go:1254,1478,1567`（渠道写接口显式
+  `maxUpdateChannelBodyBytes = 16MB`）。
+- 该中间件的唯一注册处是 `router/relay-router.go:15`；`router/main.go:16-18`
+  的调用顺序为 `SetApiRouter` → `SetDashboardRouter` → `SetRelayRouter`，
+  Gin 在注册路由时固化当时的中间件链，故 `/api`、`/dashboard` 路由不含
+  它，也不包 `http.MaxBytesReader`。
+
+运行证据（2026-10-08，本地隔离容器 127.0.0.1:3001）：
+
+| 探针 | 结果 | 说明 |
+| --- | --- | --- |
+| `POST /v1/chat/completions`，`Content-Encoding: gzip` + 非 gzip 体 | 400 | relay 链含解压中间件，非法 gzip 在读体前被拒 |
+| `POST /api/user/reset`，同样请求 | 200 `无效的参数` | handler 收到原始字节（非法 JSON），链上无该中间件 |
+| `POST /api/user/reset`，33MiB 合法 JSON（含 `email`/`token` 字段） | 200 `重置链接非法或已过期` | 超过 32MiB 默认上限仍被完整解码并进入验证码校验；若存在 32MiB 上限会在解码时回到 `无效的参数`，故此探针可判别 |
+
+（补充：同一路由只发 38MiB「无字段」体时得到 `无效的参数`，与「解码
+失败」落在同一分支，不能判别，已弃用该口径。）
+
+据此更正 §22.8 的分类：
+
+- 2 处 relay 出站体（`aws/converse.go`、jimeng adaptor）读的是本进程已
+  构造的 `io.Reader`，且位于有入口上限的 relay 路径：维持「不改」；
+- 3 处 `/api` 入站体（`topup_waffo.go`、`topup_waffo_pancake.go`、
+  `subscription_payment_creem.go`）当时无任何上限。第十六批封顶了其中
+  路由活跃的 2 处（`topup_waffo.go`、`subscription_payment_creem.go`，
+  见 §25）；`topup_waffo_pancake.go:219` 的路由被注释
+  （`router/api-router.go:67`），无界状态保留但不可达。
+
+第十六批后按 §22.8 的命令重数：生产 `io.ReadAll(` 仍 87 处，同行已带界
+22 处、整行注释 2 处、不带界 63 处。
 
 ## 23. 2026-10-08 十二个干净文件的有界读取实施（第十四批）
 
@@ -1641,3 +1687,60 @@ git status --porcelain -- <上述文件>                 # 在途判定
 - 65 处不带界读取里其余为请求体、本地文件与上游在途文件，见 §22.8 表
   的结论列；
 - §22.6 的 FetchModels 裸 client 同样在途，未动。
+
+## 25. 2026-10-08 两处 `/api` 入站请求体的有界读取实施（第十六批）
+
+### 25.1 实施内容
+
+承接 §22.9 的更正与 §22.8 的清点：`/api` 组没有请求体入口上限，两处
+路由活跃的入站读取在读取客户端可控的请求体时没有任何字节上界。
+（代码提交 `47533ff6c`。）
+
+| 文件:函数 | 上限 | 依据 |
+| --- | --- | --- |
+| `controller/topup_waffo.go` `WaffoWebhook` | 1MB | 支付回调载荷仅几 KB；与 oauth 通用端点同级 |
+| `controller/subscription_payment_creem.go` `SubscriptionRequestCreemPay` | 1MB | 请求体只含一个 `plan_id` |
+
+两处均用 `http.MaxBytesReader(c.Writer, c.Request.Body, limit)` 包住读取
+（仓库既有做法，见 `controller/channel.go` 三处），超限由
+`common.IsRequestBodyTooLargeError` 识别：
+
+- `WaffoWebhook`：超限走独立的 413 分支，原有 400 分支保留给其它读取
+  失败，避免与「验签失败」的 400 混同；
+- `SubscriptionRequestCreemPay`：超限并入原有的读取失败分支，返回既有的
+  `{"message":"error","data":"read query error"}`——该端点对前端固定回
+  200 + 业务错误，不改协议。
+
+在途文件（`controller/topup_creem.go`、`controller/topup_stripe.go`）、
+relay 出站体（`aws/converse.go`、jimeng adaptor）与 `controller/channel.go`
+三处已显式封顶的站点均不动。
+
+### 25.2 验证
+
+- TDD：先只加两个上限常量（不含边界）使测试可编译，此时
+  `controller/payment_request_body_limit_test.go` 的两条超限用例以**正确
+  原因**失败——`TestWaffoWebhookRejectsOversizedBody` 得 500（SDK 初始化
+  失败，说明请求体已被读完）、
+  `TestSubscriptionRequestCreemPayRejectsOversizedBody` 得 `参数错误`
+  （说明请求体已被读完并进入 JSON 校验）。
+- 加边界后四条用例全绿（两条超限 + 两条上限内对照）。
+- 反向验证（2026-10-08，备份置于 /tmp 并已删除）：把两处
+  `MaxBytesReader` 还原为 `io.ReadAll(c.Request.Body)` 后，两条超限用例
+  再次以 500 / `参数错误` 失败；恢复后全绿。
+- `go build ./...` exit 0；`go test ./controller ./model ./relay/common
+  ./relay/helper ./service ./middleware ./router ./oauth
+  ./relay/channel/openai -count=1` 九包全部 ok，exit 0；`gofmt` 三个触碰
+  文件干净。
+
+### 25.3 未覆盖
+
+- `/api` 组的整体入口上限缺口**未修**：本批只在两处 handler 内封顶，
+  其余 `/api` 读取点（含 `common.DecodeJson(c.Request.Body, ...)` 一类
+  Gin/JSON 绑定，如登录、注册、重置密码）仍无字节上界。是否在 `/api` 组
+  统一装一个 `MaxBytesReader` 中间件属跨切面决定（涉及上限取值，以及
+  对全部 `/api` 请求的行为改变），留待用户拍板。现状证据：仓库内 `/api`
+  无 multipart 上传端点（`FormFile`/`ParseMultipartForm` 在 `controller/`
+  零命中），`/api/mj/*` 仅 GET，Midjourney 的大体提交走 relay 组（已受
+  入口上限约束）；
+- `topup_waffo_pancake.go:219` 路由被注释，无界状态保留但不可达；
+- §22.8 表中其余在途站点未动。
