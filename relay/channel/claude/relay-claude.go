@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -1394,7 +1393,10 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 		ResponseText: strings.Builder{},
 		Usage:        &dto.Usage{},
 	}
-	responseBody, err := io.ReadAll(resp.Body)
+	// Claude non-stream responses are JSON envelopes; bound the read so a
+	// provider cannot force unbounded allocation.
+	const maxClaudeResponseBodyBytes int64 = 64 << 20
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxClaudeResponseBodyBytes)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}

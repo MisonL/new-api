@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -132,7 +131,9 @@ func CreateWaffoPancakeCheckoutSession(ctx context.Context, params *WaffoPancake
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := io.ReadAll(resp.Body)
+	// 支付会话响应是小体积 JSON，封顶 8MB
+	const maxWaffoPancakeResponseBodyBytes int64 = 8 << 20
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxWaffoPancakeResponseBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read Waffo Pancake checkout response: %w", err)
 	}

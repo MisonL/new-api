@@ -1,7 +1,6 @@
 package zhipu_4v
 
 import (
-	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -55,7 +54,9 @@ type openAIImageData struct {
 }
 
 func zhipu4vImageHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
-	responseBody, err := io.ReadAll(resp.Body)
+	// 图像响应可能内联 base64 图片，128MB 在留足空间的同时封顶
+	const maxZhipu4vImageResponseBodyBytes int64 = 128 << 20
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxZhipu4vImageResponseBodyBytes)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}

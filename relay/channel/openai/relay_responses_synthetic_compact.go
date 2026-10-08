@@ -2,7 +2,6 @@ package openai
 
 import (
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -107,7 +106,9 @@ func OaiSyntheticRemoteResponsesCompactionHandler(c *gin.Context, info *relaycom
 
 func buildSyntheticResponsesCompaction(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.OpenAIResponsesCompactionResponse, *dto.Usage, *types.NewAPIError) {
 
-	responseBody, err := io.ReadAll(resp.Body)
+	// 远端压缩响应是 Responses JSON 负载，封顶 64MB
+	const maxSyntheticResponsesCompactionBodyBytes int64 = 64 << 20
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxSyntheticResponsesCompactionBodyBytes)
 	if err != nil {
 		return nil, nil, newResponsesReadResponseBodyError(err)
 	}

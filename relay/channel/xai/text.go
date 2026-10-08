@@ -1,7 +1,6 @@
 package xai
 
 import (
-	"io"
 	"net/http"
 	"strings"
 
@@ -80,7 +79,10 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 func xAIHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
+	// xAI non-stream responses are JSON envelopes; bound the read so a
+	// provider cannot force unbounded allocation.
+	const maxXAIResponseBodyBytes int64 = 64 << 20
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxXAIResponseBodyBytes)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}

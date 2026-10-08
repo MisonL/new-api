@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -281,7 +280,9 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	defer CloseResponseBodyGracefully(resp)
 	var midjResponse dto.MidjourneyResponse
 	var midjourneyUploadsResponse dto.MidjourneyUploadResponse
-	responseBody, err := io.ReadAll(resp.Body)
+	// Midjourney 响应是任务 JSON（含图片 URL），封顶 16MB
+	const maxMidjourneyResponseBodyBytes int64 = 16 << 20
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxMidjourneyResponseBodyBytes)
 	if err != nil {
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "read_response_body_failed", statusCode), nullBytes, err
 	}

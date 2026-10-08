@@ -1,7 +1,6 @@
 package common_handler
 
 import (
-	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,7 +15,10 @@ import (
 )
 
 func RerankHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
-	responseBody, err := io.ReadAll(resp.Body)
+	// 重排响应会回显请求文档（cohere 转换强制 return_documents），上限随
+	// 请求入口上限缩放而不是固定常数。
+	maxRerankResponseBodyBytes := common.RequestBodyIngressLimit(c) * 2
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxRerankResponseBodyBytes)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}

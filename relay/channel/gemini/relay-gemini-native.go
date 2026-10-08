@@ -2,7 +2,6 @@ package gemini
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -21,8 +20,9 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 	captureGeminiResponseHeaders(info, resp)
 	defer service.CloseResponseBodyGracefully(resp)
 
-	// 读取响应体
-	responseBody, err := io.ReadAll(resp.Body)
+	// 读取响应体；原生响应可能内联 base64 媒体，128MB 在留足空间的同时封顶
+	const maxGeminiNativeResponseBodyBytes int64 = 128 << 20
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxGeminiNativeResponseBodyBytes)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -54,7 +54,9 @@ func NativeGeminiEmbeddingHandler(c *gin.Context, resp *http.Response, info *rel
 	captureGeminiResponseHeaders(info, resp)
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
+	// 嵌入响应是 JSON 向量数据，64MB 足够且封顶
+	const maxGeminiNativeEmbeddingResponseBodyBytes int64 = 64 << 20
+	responseBody, err := common.ReadAllWithLimit(resp.Body, maxGeminiNativeEmbeddingResponseBodyBytes)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}

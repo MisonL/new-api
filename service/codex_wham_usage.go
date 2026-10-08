@@ -3,9 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 func FetchCodexWhamUsage(
@@ -48,7 +49,9 @@ func FetchCodexWhamUsage(
 	}
 	defer resp.Body.Close()
 
-	body, err = io.ReadAll(resp.Body)
+	// 用量接口返回小体积 JSON，封顶 8MB
+	const maxCodexWhamUsageBodyBytes int64 = 8 << 20
+	body, err = common.ReadAllWithLimit(resp.Body, maxCodexWhamUsageBodyBytes)
 	if err != nil {
 		return resp.StatusCode, nil, err
 	}
