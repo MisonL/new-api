@@ -174,6 +174,25 @@ class TestCRLineCount(unittest.TestCase):
             os.unlink(path)
         self.assertEqual(claims, [(2, "CR 文档行数", 123)])
 
+    def test_quoted_claim_in_prose_is_not_a_claim(self):
+        """正文里复述这个句式（描述缺陷的文字）不得被读成缺陷本身。
+
+        本轮踩过：CR 叙述写「④CR 的『文档当前 1987 行』实为 1986」，
+        抽取器把这句引文当成声明，于是报了一个不存在的 1987。
+        """
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                         encoding="utf-8") as fh:
+            fh.write("4. **CR 的「文档当前 1987 行」是错的**，实为 1986。\n"
+                     "| 行 | ④CR 的「文档当前 1987 行」实为 1986 |\n"
+                     "文档当前 1986 行，位于 `docs/...`。\n")
+            path = fh.name
+        try:
+            claims = selfcheck.extract_line_claims(path)
+        finally:
+            os.unlink(path)
+        self.assertEqual(claims, [(3, "CR 文档行数", 1986)])
+
     def test_line_claim_drift_is_caught(self):
         actual = dict(ACTUAL, doc_lines=1986)
         claims = [(7, "CR 文档行数", 9999)]

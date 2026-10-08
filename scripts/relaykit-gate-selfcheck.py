@@ -75,7 +75,11 @@ def extract_line_claims(cr_path):
         return []
     claims = []
     for i, line in enumerate(io.open(cr_path, encoding="utf-8").read().split("\n"), 1):
-        for m in re.finditer(r"文档当前 (\d+) 行", line):
+        # 只认**行首的规范句式**「文档当前 N 行，位于 ...」——正文里复述这个
+        # 句式（如本轮叙述「④CR 的『文档当前 1987 行』实为 1986」）不得被
+        # 当成声明。不锚行首就会把「描述缺陷的文字」读成缺陷本身。
+        m = re.match(r"文档当前 (\d+) 行，位于 ", line)
+        if m:
             claims.append((i, "CR 文档行数", int(m.group(1))))
     return claims
 

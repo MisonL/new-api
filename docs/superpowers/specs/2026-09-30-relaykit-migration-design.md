@@ -761,7 +761,7 @@ python3 scripts/relaykit-doc-structure-check.test.py   # 17 个单测
 
 ```bash
 python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对
-python3 scripts/relaykit-gate-selfcheck.test.py       # 24 个单测
+python3 scripts/relaykit-gate-selfcheck.test.py       # 25 个单测
 ```
 
 它只检查**本文档的当前口径声明**；CR 记录里的计数是历史记录（「第 37 轮为 50/103/24」这类），记的是「当时为真」，不随门禁演进失效，故不在射程内。
