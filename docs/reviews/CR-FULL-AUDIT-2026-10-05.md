@@ -1857,3 +1857,29 @@ relay 出站体（`aws/converse.go`、jimeng adaptor）与 `controller/channel.g
   video/task/plugin 等组继承 `SetRelayRouter` 的入口上限，未逐一复测；
   512KB 是否拒掉某个真实上游的合法回调，需真实支付回调验证，本轮无此类
   流量；上游这两个文件没有任何测试，本批新增的测试比上游多。
+
+### 26.5 收尾复核（2026-10-08，第十七批之后）
+
+- 匿名写入路由覆盖闭合：按组鉴权继承重新枚举，17 条匿名写入路由与
+  `anonymousRequestBodyLimit` 挂载点一一对应，无遗漏、无多余挂载。
+- 给被注释的 `waffo-pancake/webhook` 路由补了注释（`753555124`），说明
+  重新启用时必须同时挂 `anonymousRequestBodyLimit`，否则该 handler 只有
+  128MB 组级兜底。
+- 剩余无界 `io.ReadAll(` 生产读取：41 个文件，其中 26 个在途、15 个干净。
+  干净文件的 15 处按可达性分：10 处是 task adaptor 的 `DoResponse` 读
+  `resp.Body`（由 `relay/relay_task.go:859` 的中心包装
+  `boundedTaskSubmitResponseBody` 封顶，运行时无界）；2 处是本地文件
+  （`common/audio.go:318`、`relay/channel/task/gemini/image.go:37`）；
+  1 处是 relay 出站体（`aws/converse.go:38`，调用方已构造 reader）；
+  1 处是死代码（`service/image.go:163`）；1 处是路由被注释的
+  `topup_waffo_pancake.go:219`。**均无新增可修站点。**
+- 两处「组级 `.Use()` 晚于组内首条路由」的顺序陷阱，核对后判定为既有
+  设计而非缺陷：`logRoute`（api-router.go:377）与上游同构，其
+  `CORS + CriticalRateLimit` 只作用于 `/log/token` 一条路由；
+  `relayMjRouter`（relay-router.go:244）的 `Distribute` 只作用于
+  `/mj/submit/*`，注释写明这是刻意让 `/mj/image/:id` 不参与渠道选择。
+  两处都不影响请求体上限。
+- §10.3 的 P1「`model.User.AccessToken` 的 JSON 序列化」已由其他会话修复
+  （`model/user.go:37` 现为 `json:"-"`，未提交的在途改动），该发现关闭。
+- §10.3 的 P2「共享扫描器不聚合多行 `data:`」仍未修，且
+  `relay/helper/stream_scanner.go` 当前在途，留待其会话。
