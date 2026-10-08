@@ -316,6 +316,11 @@ type webhookSubscriptionInfo struct {
 	SubscriptionRequest string `json:"subscriptionRequest,omitempty"`
 }
 
+// maxWaffoWebhookBodyBytes bounds the webhook body this handler buffers. The
+// route lives under /api, which carries no request-body ingress limit, so the
+// read must enforce its own ceiling; real Waffo notifications are a few KB.
+const maxWaffoWebhookBodyBytes int64 = 1 << 20
+
 // WaffoWebhook 处理 Waffo 回调通知（支付/退款/订阅）
 func WaffoWebhook(c *gin.Context) {
 	if !isWaffoWebhookEnabled() {
@@ -324,8 +329,13 @@ func WaffoWebhook(c *gin.Context) {
 		return
 	}
 
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxWaffoWebhookBodyBytes))
 	if err != nil {
+		if common.IsRequestBodyTooLargeError(err) {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("Waffo webhook 请求体超过上限 path=%q client_ip=%s limit=%d", c.Request.RequestURI, c.ClientIP(), maxWaffoWebhookBodyBytes))
+			c.AbortWithStatus(http.StatusRequestEntityTooLarge)
+			return
+		}
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo webhook 读取请求体失败 path=%q client_ip=%s error=%q", c.Request.RequestURI, c.ClientIP(), err.Error()))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return

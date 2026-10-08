@@ -20,11 +20,16 @@ type SubscriptionCreemPayRequest struct {
 	PlanId int `json:"plan_id"`
 }
 
+// maxCreemPayRequestBodyBytes bounds the pay-request body this handler
+// buffers. The route lives under /api, which carries no request-body ingress
+// limit, and the payload only carries a plan id, so the ceiling is small.
+const maxCreemPayRequestBodyBytes int64 = 1 << 20
+
 func SubscriptionRequestCreemPay(c *gin.Context) {
 	var req SubscriptionCreemPayRequest
 
 	// Keep body for debugging consistency (like RequestCreemPay)
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxCreemPayRequestBodyBytes))
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅支付请求读取失败 error=%q", err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "read query error"})
