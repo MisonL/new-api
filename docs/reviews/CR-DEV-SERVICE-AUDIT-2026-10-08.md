@@ -109,7 +109,8 @@ relay/websocket.go` 为空；`git blame` 显示该调用由 `f0589cc478`
 断言钱包扣款等于表达式值。反向验证：还原旧调用后结算用例失败
 （999400 vs 990800，差额即被漏计的音频费）。`go build ./...` 与
 `go test ./service/ ./relay/helper/ ./pkg/billingexpr/ -count=1` 通过。
-本次修复未部署到开发容器（容器仍为 `4ba36471d-dirty`）。
+部署：开发容器已于同日用 `77bc17e90` 重建（含本修复与 3.2 的路由修复），
+实测生效。
 
 ### 3.2 P3：非规范前缀路径返回 200 SPA HTML，绕过 `/api` 的 404 JSON 契约
 
