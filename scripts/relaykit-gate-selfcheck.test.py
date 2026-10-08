@@ -155,6 +155,36 @@ class TestClaims(unittest.TestCase):
                          ["dto 七维（命令行注释）", "dto 七维（正文）"])
 
 
+class TestCRLineCount(unittest.TestCase):
+    """CR 的「文档当前 N 行」是当前口径声明，必须与实算一致。
+
+    第 38 轮写错过一次：用 split("\n") 的长度（1987）而非 wc -l 口径
+    （1986）——文件末尾有换行时前者多算 1。
+    """
+
+    def test_line_claim_extracted(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                         encoding="utf-8") as fh:
+            fh.write("...\n文档当前 123 行，位于 `docs/...`。\n")
+            path = fh.name
+        try:
+            claims = selfcheck.extract_line_claims(path)
+        finally:
+            os.unlink(path)
+        self.assertEqual(claims, [(2, "CR 文档行数", 123)])
+
+    def test_line_claim_drift_is_caught(self):
+        actual = dict(ACTUAL, doc_lines=1986)
+        claims = [(7, "CR 文档行数", 9999)]
+        mismatches = selfcheck.compare(claims, actual)
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(mismatches[0][2], 9999)
+
+    def test_missing_cr_file_yields_no_claims(self):
+        self.assertEqual(selfcheck.extract_line_claims("/nonexistent/x.md"), [])
+
+
 class TestSkipIsNotPass(unittest.TestCase):
     """置位递归守卫时该条声明「跳过」，主流程不得打印「全部一致」。
 

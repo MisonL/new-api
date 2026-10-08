@@ -30,6 +30,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DOC = "docs/superpowers/specs/2026-09-30-relaykit-migration-design.md"
+CR_DOC = "docs/reviews/CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md"
 
 
 def run(cmd):
@@ -66,6 +67,17 @@ def parse_dto(out):
     if not m:
         return None
     return tuple(int(g) for g in m.groups())
+
+
+def extract_line_claims(cr_path):
+    """从 CR 记录抽出「文档当前 N 行」这类当前口径声明。"""
+    if not os.path.exists(cr_path):
+        return []
+    claims = []
+    for i, line in enumerate(io.open(cr_path, encoding="utf-8").read().split("\n"), 1):
+        for m in re.finditer(r"文档当前 (\d+) 行", line):
+            claims.append((i, "CR 文档行数", int(m.group(1))))
+    return claims
 
 
 def collect_actual(quiet):
@@ -108,6 +120,12 @@ def collect_actual(quiet):
         if code != 0:
             failures.append(f"relaykit-gate-selfcheck.test.py 退出码 {code}")
         actual["selfcheck_tests"] = parse_ran(out)
+
+    # 「文档当前 N 行」——CR 记录里的当前口径声明，实算为 wc -l 口径
+    # （s.count("\n")），不是 split("\n") 的长度：后者在文件末尾有换行时多算 1，
+    # 第 38 轮就是这么写错了一次。
+    doc_lines = io.open(os.path.join(ROOT, DEFAULT_DOC), encoding="utf-8").read().count("\n")
+    actual["doc_lines"] = doc_lines
 
     code, out = run("bash scripts/relaykit-dto-compat.sh --strict")
     if code != 0:
@@ -213,6 +231,10 @@ def compare(claims, actual):
             real = actual.get("selfcheck_tests")
             if real is not None and claimed != real:
                 mismatches.append((line_no, desc, claimed, real))
+        elif desc == "CR 文档行数":
+            real = actual.get("doc_lines")
+            if real is not None and claimed != real:
+                mismatches.append((line_no, desc, claimed, real))
         elif desc == "§11 relaykit 引用数":
             real = actual.get("citation")
             if real is not None and claimed != real[0]:
@@ -243,7 +265,9 @@ def main():
     doc_path = args.doc if os.path.isabs(args.doc) else os.path.join(ROOT, args.doc)
     doc = io.open(doc_path, encoding="utf-8").read()
     claims = extract_claims(doc)
-    mismatches = compare(claims, actual)
+    cr_path = os.path.join(ROOT, CR_DOC)
+    cr_claims = extract_line_claims(cr_path)
+    mismatches = compare(claims + cr_claims, actual)
 
     if not args.quiet:
         print(f"文档自述计数 {len(claims)} 处（{args.doc}）")
