@@ -20,7 +20,7 @@ _spec.loader.exec_module(selfcheck)
 
 
 CITATION_OUT = (
-    "ref=upstream/main  citations=51  ok=51  failed=0\n"
+    "ref=789c97019  citations=51  ok=51  failed=0\n"
     "baseline=dbfbc096f  host-citations ok=107  failed=0  skipped=0\n"
     "upstream-full ok=24  failed=0\n"
 )
@@ -59,7 +59,7 @@ class TestParsers(unittest.TestCase):
 
 DOC = """\
 `upstream/main` = `789c97019`（2026-09-28）
-当前实测三组全绿：**51/51**（`ref=upstream/main`）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 24/24**（**第 38 轮**：第 37 轮为 50/103/24）。
+当前实测三组全绿：**51/51**（`ref=789c97019`）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 24/24**（**第 38 轮**：第 37 轮为 50/103/24）。
 scripts/relaykit-citation-check.py            # 全部引用可解析时退出码 0（relaykit 51 + 宿主 107 + upstream 全路径 24）
 python3 scripts/relaykit-citation-check.test.py  # 25 个单测
 python3 scripts/relaykit-doc-structure-check.test.py   # 13 个单测
@@ -99,6 +99,24 @@ class TestClaims(unittest.TestCase):
     def test_clean_doc_matches(self):
         claims = selfcheck.extract_claims(DOC)
         self.assertEqual(selfcheck.compare(claims, ACTUAL), [])
+
+    def test_non_pinned_ref_claim_is_caught(self):
+        """抽取器只认钉死 ref 的句式（第 40 轮）。
+
+        写错 ref（退回会漂移的 upstream/main）时，`**51/51**（`ref=...`）`
+        声明不再匹配抽取器 → 整类漏检。本条两侧都钉：(a) 漂移句式抽取不到；
+        (b) 正确句式（用 UPSTREAM_PIN 现拼）能抽取，避免升锚后抽取器失联。
+        """
+        good = "**51/51**（`ref=%s`）" % selfcheck.UPSTREAM_PIN
+        drifted = "**51/51**（`ref=upstream/main`）"
+        self.assertIn(
+            "citation relaykit 分子/分母",
+            [d for _, d, _ in selfcheck.extract_claims(good)],
+        )
+        self.assertNotIn(
+            "citation relaykit 分子/分母",
+            [d for _, d, _ in selfcheck.extract_claims(drifted)],
+        )
 
     def test_drifted_doc_is_caught(self):
         drifted = DOC.replace("relaykit 51 + 宿主 107", "relaykit 52 + 宿主 107")

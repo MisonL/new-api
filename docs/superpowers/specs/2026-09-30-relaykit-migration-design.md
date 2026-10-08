@@ -415,7 +415,7 @@ git grep -hE '^func [A-Za-z0-9_]*[A-Za-z]2[A-Za-z][A-Za-z0-9_]*\(' dbfbc096f -- 
 | # | 动作 | 依据 |
 |---|---|---|
 | 1 | 打补丁 1：两个请求转换器的 content block switch 增加 `case "thinking"` 与非 assistant role 门控，并补 `default:` 显式报错 | 3.3 |
-| 2 | **`*WithError` ×4 删除**（与上游一致）；**4 个无 error 旧包装的去留随未决项 33**——推荐形态 C 照抄上游终态时保留为 facade（调用点零改动），见 12.20。原文本「与 4 个无 error 旧包装一并删除」已按 12.3（第 35 轮修正）撤回 | 12.3、12.20 |
+| 2 | **`*WithError` ×4 删除**（与上游一致，**删除时机随形态**——**第 40 轮修正**：B/C 下随阶段 4 切换一并删，A 下先以同名转发函数存活至阶段 6，见第 14 项 A）；**4 个无 error 旧包装的去留随未决项 33**——推荐形态 C 照抄上游终态时保留为 facade（调用点零改动），见 12.20。原文本「与 4 个无 error 旧包装一并删除」已按 12.3（第 35 轮修正）撤回 | 12.3、12.20 |
 | 3 | 4 个本地专有 `ErrorCode` 与 2 个判定函数：搬迁动作在**阶段 1**（随 `types` 拆分），阶段 4 只做**确认**——宿主侧无残留引用 | 12.2、4.3 |
 | 4 | `ParseContentStrict`（`dto/openai_request.go:882`）/ `ParseToolCallsStrict`（`:624`）迁入 `relaykit/dto`。**上游 relaykit/dto 无同名方法**（实测 `git grep` 空）——这是**本地专有的反向新增**，不是照抄。**两个方法只用 `common.{GetJsonType,Marshal,Unmarshal,RawMessage}` + stdlib**，其中前三个 `kitutil` 有等价物（`kitutil/json.go` 的 `GetJsonType`/`Marshal`/`Unmarshal`），但 **`kitutil` 不提供 `RawMessage` 类型别名**（本地 `common.RawMessage = json.RawMessage`，`common/json.go:9`；`kitutil/json.go` 里 `RawMessage` 只作为 `json.RawMessage` 的参数类型出现）。故 `ParseContentStrict` 里的 `[]common.RawMessage` 须改为 `[]json.RawMessage`。**不得 import 宿主 `common`**（`boundary_test.go` 会红） | 12.1、12.5（A 类） |
 | 5 | think 标签剥离族迁入 relaykit（纯函数），门控留宿主。**具体拆分（实测，HEAD 口径）**：纯函数是 `splitThinkTaggedText`（`service/convert.go:554`）、`indexASCIIFold`（`:597`）、`appendVisibleThinkText`（`:629`），**只依赖 `strings`**，可无改动迁入 relaykit；门控是 `shouldExtractThinkTaggedClaudeHistory`（`:489`）与 `shouldExposeReasoningAsClaudeThinking`（`:526`），**依赖宿主 `*relaycommon.RelayInfo`**，须留宿主。**但门控的 3 个调用点全在 `service/convert.go` 内**（`:103`、`:749`、`:1049`）——**阶段 6 删该文件主体，调用点随之消失**。故「门控留宿主」必须落到**注入机制**上（阶段 4 接线）：请求方向的历史回传门控走 `convmeta.Options` 钩子、响应方向的 reasoning 暴露门控走 12.4 的 relaykit 内门控。**本节此前只写「门控留宿主」，没说门控函数放哪个文件、由谁调用、经哪条钩子**——阶段 4 开工前须定（与第 6.1 节「不能按客户端意图门控」的结论配套） | 12.1、4.3、12.4、6.1 |
@@ -425,9 +425,9 @@ git grep -hE '^func [A-Za-z0-9_]*[A-Za-z]2[A-Za-z][A-Za-z0-9_]*\(' dbfbc096f -- 
 | 9 | finish_reason 严格语义：**三选一**（第 29 轮重写，**第 37 轮修正为 A1/A2/B——原「选项 A」的布尔钩子无法产生 error，见 12.11.3**）——**A1**：给 `reasonmap` 加返回 error 的严格变体并改 `oai_chat` 3 个函数签名（本地改动清单第 12 行 + 新增签名变更行）；**A2**：布尔钩子只选分支，「未知值报错」由宿主前置校验（= B 的落点）；**B**：在宿主 5 个 Claude 响应方向的 `*WithError` 调用点各自前置校验 `Choices[].FinishReason`。**不得**沿用「留宿主调用点」的原表述——原调用点全在阶段 6 删除的 `service/convert.go` 内（12.11.1）。无论选哪个，须为 `""`/`TrimSpace`/`function_call` 三条各补测试（12.11.3） | 12.11、12.11.1、12.11.3 |
 | 10 | 接线 `relayconvert.SetMediaResolver(service.GetBase64Data 包装)` 与 `convmeta.Options` 钩子（`model_setting` 适配）；通道级转换器改调 relaykit。**第 28 轮已实测两条边界，均不成立**（12.15.4.1/12.15.4.2）：schema 归一化有 4 处差异、媒体分派有 7 处差异（含能力缺失与行为回归）。故本项**不是纯接线**——须把 schema 归一化（改 relaykit 的 `FunctionParametersToInputSchema` 或留宿主 pre-step）与媒体分派（`text/*`→text 块、`ContentTypeFile` 独立分支、不支持的 MIME 报错、`ToFileSource()==nil` 报错）一并处置，否则 9.2 新增的第 7、8 条即为回归 | 12.15.4、12.15.4.1、12.15.4.2 |
 | 11 | `dto` 的 `EffectiveTools()` 及缓存字段迁入 `relaykit/dto`，13 个调用点改 import | 12.0.7 |
-| 12 | **把 `service/convert_golden_test.go` 的 8 个调用点改指 `relayconvert` 包级入口**（**第 30 轮修正：8 个调用点分布在 6 个不同函数上**——`ClaudeToOpenAIRequest`、`GeminiToOpenAIRequest`、`ResponseOpenAI2ClaudeWithError`×2、`ResponseOpenAI2GeminiWithError`、`StreamResponseOpenAI2ClaudeWithError`×2、`StreamResponseOpenAI2GeminiWithError`；早期版本写「6 个调用点」是把**函数个数**当成了**调用点个数**）（换函数名、`info` 由 `*relaycommon.RelayInfo` 换成 `convmeta.Meta`、删去 `*WithError` 变体），**快照内容保持不变**；随后逐条解释差异。**不得 import `relayconvert/internal/...`**（Go 的 `internal` 规则禁止） | 12.16.2 |
+| 12 | **把 `service/convert_golden_test.go` 的 8 个调用点改指 `relayconvert` 包级入口**（**第 30 轮修正：8 个调用点分布在 6 个不同函数上**——`ClaudeToOpenAIRequest`、`GeminiToOpenAIRequest`、`ResponseOpenAI2ClaudeWithError`×2、`ResponseOpenAI2GeminiWithError`、`StreamResponseOpenAI2ClaudeWithError`×2、`StreamResponseOpenAI2GeminiWithError`；早期版本写「6 个调用点」是把**函数个数**当成了**调用点个数**）（换函数名、`info` 由 `*relaycommon.RelayInfo` 换成 `convmeta.Meta`、删去 `*WithError` 变体），**快照内容保持不变**；随后逐条解释差异。**改指范围随形态**（**第 40 轮修正**：B 下 8 处全改；C 下仅 6 处 `*WithError` 改指、2 处请求方向经同名 shim 零改动，见 12.16.2/12.20.1；A 下阶段 6 再改）。**不得 import `relayconvert/internal/...`**（Go 的 `internal` 规则禁止） | 12.16.2 |
 | 13 | **落地 12.4 的响应方向门控（补丁 3）**：`convmeta.Options` 加 `RetainReasoningInClaudeResponse` 字段（12.4.2，**nil = 保留上游默认**）、宿主 `ConvOptions()` 接线（阶段 3 的 `convOptions` 快照里填该钩子，指向 `model_setting` 适配）、`oai_chat/to_claude_messages_resp.go` 流式与非流式两条入口在**进入 `reasoning/text` 二选一之前**归零被抑制的 reasoning。**必须在本阶段完成，不能留到阶段 5**——本阶段的判据要求 4 个门控快照逐字节一致，而 relaykit 默认无条件暴露，不门控即失败（12.4.4）。**验证条件：上游两条依赖默认暴露的测试（`to_claude_messages_resp_test.go:82`、`:125`）仍绿**（本地改动清单第 9 行） | 12.4、12.4.4 |
-| 14 | **定阶段 4 的切换形态（第 33 轮新增；第 35 轮扩为三选一，§8.1 的「单点可逆」落地）**：**A 薄封装**（新增 6 个同名转发函数、调用点零改动，阶段 6 再删封装并改写——注意这 6 个含 `*WithError` 名字，与上游实际保留的 5+2 个不同）或 **B 直接改写 8 处调用点**（回滚须 revert 4 个生产文件）或 **C 照抄上游终态（推荐）**——5 个 facade + 2 个 shim + 包装层，测试侧只需动 19 处、回滚＝`service/convert.go` 单文件函数体替换，见 12.20。**必须在开工前选定并写回 §8.1**，否则「单点可逆」无法验证。判据随之：A→调用点零改动且全链路绿；B→revert 那 4 个文件后 `go build ./...` 与全量测试仍绿；C→按 12.20 的落点逐项核（facade 保名、包装层 + `RecordConversionDiagnostics` 就位、82 处测试调用在所选形态下全部有出路） | §8.1、12.3、12.16.2、12.20 |
+| 14 | **定阶段 4 的切换形态（第 33 轮新增；第 35 轮扩为三选一，§8.1 的「单点可逆」落地）**：**A 薄封装**（新增 6 个同名转发函数、调用点零改动，阶段 6 再删封装并改写——注意这 6 个含 `*WithError` 名字，与上游实际保留的 5+2 个不同）或 **B 直接改写 8 处调用点**（回滚须 revert 4 个生产文件）或 **C 照抄上游终态（推荐）**——5 个 facade + 2 个 shim + 包装层，测试侧 `service/` 4 文件必改 17 处（全为 `*WithError`；`IsDeepSeekModelName` 2 处调用点零改动、函数保留为宿主差异）、通道级 4 文件另必改 22 处（HEAD 30 处中 16×请求方向 + 6×`*WithError`，8 处 facade 零改动）——C 的测试侧改动面 = 17+22 = 39 处（**第 40 轮修正**：原文写「19 处」，把 2 处零改动调用算进必改、且漏了通道级 22 处）、回滚见 12.20.1 末段（不是单文件）。**必须在开工前选定并写回 §8.1**，否则「单点可逆」无法验证。判据随之：A→调用点零改动且全链路绿；B→revert 那 4 个文件后 `go build ./...` 与全量测试仍绿；C→按 12.20 的落点逐项核（facade 保名、包装层 + `RecordConversionDiagnostics` 就位、82 处测试调用在所选形态下全部有出路） | §8.1、12.3、12.16.2、12.20 |
 | 15 | **安装思考等级的后缀填充器（第 34 轮新增，未决项 34）**：宿主入口把模型名后缀解析成 `dto.ReasoningConversionState` 写入 `info.ReasoningConversion`，并把 `UpstreamModelName` 裁成无后缀基础名。上游实现是 `relay/helper/reasoning_suffix.go` 的 `ApplyReasoningModelSuffix`（置 `info.ReasoningConversion` 于 `:71`，非测试调用 6 处、5 个文件），本地**不存在该文件**；A（移植上游）或 B（本地解析器薄填充器）二选一，见 12.19。**不装即回归**：本阶段换入的 relaykit 转换器在 4 处消费 `ReasoningStateOf(info)`，且 relaykit README 明示转换器不再解释 `-thinking`/effort 尾缀。验证条件：带后缀的跨协议请求（oai→claude 至少一条）在快照或单测中渲染出正确 thinking 与裁剪后的模型名——现有 8 个快照零后缀用例，抓不到该回归 | 12.19 |
 | 16 | **未决项 33 定案为 C 时，按 12.20.1 的连带清单在本阶段（阶段 4）落地（第 36 轮新增，阶段归属第 37 轮钉死——与第 13 项同批，阶段 5 行只核验不落地）**：C1 保留 `service/convert.go` 为 5 个 facade（不删文件，与处置清单第 2 项的删除范围差异已由 12.3 修正）、C2/C3 新增两个包装文件（含 `SetMediaResolver` 两个字段）、C4 新增 `conversion_diagnostics.go` + `RelayInfo.RecordConversionDiagnostics`、C5 流式 6 处构造 `NewResponseStreamState`、C6 通道级 4 函数保为 facade（阶段 6 判据随之改为「保留」）；测试侧：`service/` 4 文件只改 `*WithError` 的 17 处（其中 golden 6 处已由第 12 项认领，另 3 文件 11 处随本项增补）；**通道级 4 文件另有 30 处（HEAD 口径，基线 22 处）——第 37 轮补入**：`RequestOpenAI2ClaudeMessage` 16 处必改（无 facade 可依）、4 个非 WithError facade 8 处零改动、`*WithError` 6 处必改且其中 6 处（`relay_claude_test.go:689,697` + `tool_call_id_test.go` 4 处）钉住的是被 relaykit 丢弃的本地严格性，须随对应小节裁定——`relay_claude_test.go:689,697` 对应 **9.2.1 第 1、4 条**，`tool_call_id_test.go` 4 处对应 **9.2.3 第 8 条**（**第 38 轮修正**：原文把 6 处一并归给 9.2.1，但 `tool_call_id_test.go` 钉的是 Gemini 合成 tool call ID 的跨 chunk 唯一性，与 Claude 侧 9.2.1 无关）。**定案为 A/B 时本项不适用** | 12.20.1、9.2.1、未决项 33 |
 
@@ -445,7 +445,7 @@ git grep -hE '^func [A-Za-z0-9_]*[A-Za-z]2[A-Za-z][A-Za-z0-9_]*\(' dbfbc096f -- 
 
 **版本锚定（必须做，否则本文档全部行号失效）**：本文档所有 `relaykit/...` 行号均以 `upstream/main` = **`789c97019`**（2026-09-28）为准。拷贝后必须把该 commit 记入 `relaykit/VERSION` 或等价文件。
 
-**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档 relaykit 行引用现为 **51 处唯一**（**第 38 轮**）（第 28 轮时 34 处：18 全路径 + 23 简写 − 7 重叠；此后 29–35 轮陆续新增，本段计数此前未随批次更新——**第 36 轮修正**）。除 relaykit 外，第 36 轮起**宿主路径也进门禁**：裸宿主引用 **107 处**（在本地基线 `dbfbc096f` 解析；**第 38 轮修正**：原文写 103，与本节下一段的 107/107 及门禁实际输出均不一致）+ `upstream/main:<宿主路径>:NN` 全路径 **24 处**（在 `upstream/main` 解析）。**第 37 轮更新此三处计数**（36 轮为 98/21）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
+**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档 relaykit 行引用现为 **51 处唯一**（**第 38 轮**）（第 28 轮时 34 处：18 全路径 + 23 简写 − 7 重叠；此后 29–35 轮陆续新增，本段计数此前未随批次更新——**第 36 轮修正**）。除 relaykit 外，第 36 轮起**宿主路径也进门禁**：裸宿主引用 **107 处**（在本地基线 `dbfbc096f` 解析；**第 38 轮修正**：原文写 103，与本节下一段的 107/107 及门禁实际输出均不一致）+ `upstream/main:<宿主路径>:NN` 全路径 **24 处**（在钉死的 `789c97019` 解析——即本文档的锚定版本，不用会漂移的 `upstream/main` 默认值）。**第 37 轮更新此三处计数**（36 轮为 98/21）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
 
 ```bash
 scripts/relaykit-citation-check.py            # 校验，漂移时退出码 1
@@ -453,7 +453,7 @@ scripts/relaykit-citation-check.py --ref <ref>  # 换锚点复核
 python3 scripts/relaykit-citation-check.test.py # 25 个单测
 ```
 
-它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。当前实测三组全绿：**51/51**（`ref=upstream/main`）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 24/24**（**第 38 轮**：第 37 轮为 50/103/24）。已做**反向验证**（五次扰动全部退出码 1）：relaykit 全路径 `:99999` → `out of range`；改文件名 → `file not found`；简写路径 `:99999`；宿主 `<宿主文件>:99999` → `out of range at dbfbc096f`；**去掉一个 `upstream/main:` 前缀 → 报「not found at baseline but found at upstream/main: add an upstream/main: prefix」**。还原后退出码 0、文档字节一致。
+它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。**实测（第 40 轮重测，2026-10-08）三组全绿：** **51/51**（`ref=789c97019`，即本文档锚定版本）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 24/24**（**第 38 轮**：第 37 轮为 50/103/24）。**注意：不带 `--ref` 的默认运行已因 `upstream/main` 漂移而变红**——第 40 轮实测 `upstream/main` 已前进到 `04c597bf6`（PR #7698，2026-10-08 16:07），默认 ref 下得到 `50/51`（`convmeta/meta.go:58`、`relay-claude.go:37`、`:195` 三处行内容变空白）与 `upstream-full 22/24`、退出码 1；`--ref 789c97019` 恢复全绿。这正是「必须钉 ref、不能依赖移动的 `upstream/main`」的现场证据——本段旧文写「`ref=upstream/main` 51/51」，该表述自 `upstream/main` 移动起不再成立（**第 40 轮修正**）。已做**反向验证**（五次扰动全部退出码 1）：relaykit 全路径 `:99999` → `out of range`；改文件名 → `file not found`；简写路径 `:99999`；宿主 `<宿主文件>:99999` → `out of range at dbfbc096f`；**去掉一个 `upstream/main:` 前缀 → 报「not found at baseline but found at upstream/main: add an upstream/main: prefix」**。还原后退出码 0、文档字节一致。
 
 **简写路径的支持（第 28 轮补充）**：文档大量用省略 `relaykit/relayconvert/` 前缀的写法，形如 `internal/oai_chat/<文件>.go:<行>`、`oai_chat/<文件>.go:<行>`、`convmeta/<文件>.go:<行>`、`shared/claude/<文件>.go:<行>`。旧版正则要求 `relaykit/` 前缀，**这 23 处唯一简写引用全部在门禁之外**，而检查器仍报 18/18 绿——与第 26 轮的假绿同类（那次是新表缺前缀）。现按**显式映射表**（`SHORT_PACKAGES`，逐个核实过真实目录）扩展：`internal`/`oai_chat`/`oai_responses`/`claude_messages`/`gemini_chat`/`shared`/`media`/`convdiag` → `relaykit/relayconvert/internal/...`；`convmeta`/`kitutil` → `relaykit/relayconvert/...`；`reasonmap` → `relaykit/reasonmap/...`。**宿主路径（`relay/`、`service/`、`controller/`、`common/`、`setting/`、`aws/`、`vertex/` 与裸 `dto/`、`types/`）一律不扩展**——宿主有自己的 `dto/`、`types/`，文档里的 `dto/...:NN` 指宿主，误扩展会造出假引用。**3 个单测**覆盖了「宿主路径不得被扩展」这一条（`test_does_not_expand_host_paths`、`test_does_not_extract_upstream_prefixed_host_paths`、`test_does_not_extract_sha_prefixed_host_paths`）——**第 38 轮修正**：原文写「15 个单测」，那是当时该文件的总用例数、且并非都测这一条；此处改为按用例名指认（总用例数由 §9.3 的门禁自述检查覆盖）。**注意本段自身不能用真引用作示例**——写成 `foo.go:12` 会被检查器当成待解析的引用（本轮就踩过一次），故示例一律用 `<文件>`/`<行>` 占位。
 
@@ -478,7 +478,7 @@ python3 scripts/relaykit-citation-check.test.py # 25 个单测
 | 11 | **媒体分派补齐**（第 28 轮新增） | `relaykit/relayconvert/internal/oai_chat/to_claude_messages_req.go`（switch 在 `:255`，`default` 分支的 MIME 判定在 `:277`）——须补：`ContentTypeFile` 独立 case、`text/*`→text 块、不支持的 MIME 显式报错、`ToFileSource()==nil` 报错（现为静默 `continue`）、MIME 归一化（`ResolveBase64Data` 自身零归一化）。差异清单见 12.15.4.2 | 4 |
 | 12 | **finish_reason 严格语义注入**（第 29 轮新增；**第 37 轮修正：原「仅选项 A」不成立**） | `relaykit/reasonmap/reasonmap.go:31` `OpenAIFinishReasonToClaudeStopReason` 返回裸 `string`、**无 error 通道**，其 3 个 `oai_chat` 调用函数同样无 error 返回——**布尔钩子无法把「未知值」变成 error**（12.11.3 第 37 轮实测）。**A1**：本行改为「补返回 error 的严格变体 + 改 `oai_chat` 3 个函数签名（`StreamResponseOpenAI2Claude`/`FinalizeStreamResponseOpenAI2Claude`/`ResponseOpenAI2Claude`）及其调用点（`response_registry.go:1055`、`:1063`、`:1071`——**第 38 轮补入 `:1063`**，原文漏列；三处分别对应 `ResponseOpenAI2Claude`/`StreamResponseOpenAI2Claude`/`FinalizeStreamResponseOpenAI2Claude`）」，b/c/d 三条与未知值报错都可恢复，**另须新增一行登记 3 个函数签名变更**；**A2/B**：本行不适用——钩子只选分支、报错由宿主前置校验完成，改落阶段 4 处置清单。差异与影响面见 12.11.2、12.11.3 | 4 |
 
-**维护要求**：`relaykit/VERSION` 只记上游锚点一个字段，**不足以识别本地改动**。须再有一份「本地改动记录」——最简形式是 `relaykit/LOCAL_PATCHES.md`，逐条记上表的落点与目的；跟进上游升级时，先用它定位「哪些 hunk 会冲突」，再跑 `scripts/relaykit-citation-check.py`（行号）与 `scripts/relaykit-dto-compat.sh --strict`（结构）复核。**没有这份记录，锚定就只能锚住「上游是哪天」，回答不了「我们改了什么」。**
+**维护要求**：`relaykit/VERSION` 只记上游锚点一个字段，**不足以识别本地改动**。须再有一份「本地改动记录」——最简形式是 `relaykit/LOCAL_PATCHES.md`，逐条记上表的落点与目的；跟进上游升级时，先用它定位「哪些 hunk 会冲突」，再跑 `scripts/relaykit-citation-check.py --ref <新锚点>`（行号）与 `KIT_REF=<新锚点> scripts/relaykit-dto-compat.sh --strict`（结构）复核（**第 40 轮**：两命令都须带锚点参数，用会漂移的 `upstream/main` 默认值核对钉死声明必然报错）。**没有这份记录，锚定就只能锚住「上游是哪天」，回答不了「我们改了什么」。**
 
 **依赖影响**：relaykit 的 `require` 会经 MVS 抬高根 module 的两个依赖版本——`github.com/samber/lo` `v1.52.0 → v1.53.0`（本地 58 个文件在用）、`github.com/tidwall/gjson` `v1.18.0 → v1.19.0`（本地 14 个文件在用）。`google/uuid`、`stretchr/testify`、`tidwall/sjson` 版本相同；`golang.org/x/text` 本地（v0.41.0）高于 relaykit 要求（v0.35.0），不受影响。阶段 1 完成后须跑全量测试确认这两个次版本升级无行为回归。
 
@@ -535,7 +535,7 @@ python3 scripts/relaykit-citation-check.test.py # 25 个单测
 
 **阶段 2 的前置：12.5 的 3 个「需实测」方法必须在本阶段开工前定分类（第 32 轮补充）**
 
-12.5 的方法归属表里有 **3 行不是 A/B/C 而是「需实测」**，它们**此前没有任何阶段或处置项认领**——阶段 2 判据只写「全部宿主独有方法给出出路」，处置清单第 6 项只覆盖 9.1/9.2 的语义差异，都不指向这 3 行。这与第 25 轮「门控留宿主但调用点在被删文件里」同型：**一个已知未知项，没有 owner，就会一路滑到开工当天**。
+12.5 的方法归属表里有 **3 行不是 A/B/C 而是「需实测」**，它们**此前没有任何阶段或处置项认领**——阶段 2 判据只写「全部宿主独有方法给出出路」，处置清单第 6 项只覆盖 9.1/9.2/9.2.1/9.2.2/9.2.3 的语义差异（**第 40 轮修正**：原文写「只覆盖 9.1/9.2」，第 37/38 轮已扩到 9.2.1–9.2.3），都不指向这 3 行。这与第 25 轮「门控留宿主但调用点在被删文件里」同型：**一个已知未知项，没有 owner，就会一路滑到开工当天**。
 
 | 方法 | 待比对的 relaykit 侧 | 判定要点 |
 |---|---|---|
@@ -594,7 +594,7 @@ unshallow 的目标是 `upstream` 而非默认 `origin`：`origin/main` 停在 `
 
 **本节不强制薄封装**（它与 12.3「不保留包装层」的意图相左，且多一层间接），但**必须在阶段 4 开工前选定唯一形态并写进处置清单**——现状是两条都写着、都没被指定为唯一形态，回滚路径因此实际不存在。**阶段 4 判据须增一条**：若选薄封装，判据为「调用点零改动且全链路绿」；若选直接改写，判据须包含「revert 该 4 个生产文件后 `go build ./...` 与全量测试仍绿」——**否则「单点可逆」只是一句无人验证的断言**。
 
-**第 35 轮实测补充（见 12.20）：形态选择扩为三选一，新增选项 C——照抄上游终态。** 上游 `main` 的实际形态是：`service/convert.go` 保留 **27 行、5 个同名 facade**（`NormalizeCacheCreationSplit` + 4 个非 WithError 包装，旧签名不变、一行转发 `relayconvert.*`）；`ClaudeToOpenAIRequest`/`GeminiToOpenAIRequest` 保留为 shim（`upstream/main:service/request_converter.go:50`/`:62`）；`*WithError` 删除、9 个生产调用点改指 `service.ConvertResponse`/`ConvertStreamResponse` 包装；通道级 4 个函数同样保为一行 facade（`relay-claude.go:37`/`:41`、`relay-gemini.go:139`/`:143`）。**推荐 C**，理由三条：与上游零分叉（`relaykit/VERSION` 跟进时宿主形态一致）、调用点改动面最小（测试侧只需动 `*WithError` 17 处 + `IsDeepSeekModelName` 2 处，而非全删形态的 82 处；生产侧请求方向 5 处零改动）、回滚点最集中（阶段 4 的切换 = `service/convert.go` 单文件的函数体替换 + 两个新包装文件，revert 即回滚）。**注意上表「薄封装」行里的 6 个同名转发函数与上游实际保留的 5+2 个不同**——那 6 个含 `*WithError` 名字，而上游恰恰删掉了这些名字；选 C 时以 12.20 的表为准。C 的代价是 `service/convert.go` 文件保留（27 行），与 12.3 原标题「不保留包装层」的字面冲突已在 12.3（第 35 轮修正）里处理。
+**第 35 轮实测补充（见 12.20）：形态选择扩为三选一，新增选项 C——照抄上游终态。** 上游 `main` 的实际形态是：`service/convert.go` 保留 **27 行、5 个同名 facade**（`NormalizeCacheCreationSplit` + 4 个非 WithError 包装，旧签名不变、一行转发 `relayconvert.*`）；`ClaudeToOpenAIRequest`/`GeminiToOpenAIRequest` 保留为 shim（`upstream/main:service/request_converter.go:50`/`:62`）；`*WithError` 删除、9 个生产调用点改指 `service.ConvertResponse`/`ConvertStreamResponse` 包装；通道级 4 个函数同样保为一行 facade（`relay-claude.go:37`/`:41`、`relay-gemini.go:139`/`:143`）。**推荐 C**，理由三条：与上游零分叉（`relaykit/VERSION` 跟进时宿主形态一致）、调用点改动面最小（测试侧 `service/` 4 文件必改 17 处（全为 `*WithError`；`IsDeepSeekModelName` 2 处调用点零改动），而非全删形态下同样 4 个文件的 82 处；**通道级 4 个测试文件在 C 下另必改 22 处（HEAD 口径 30 处中 16+6，8 处经 facade 零改动）**——C 的测试侧改动面 = 17+22 = 39 处，`service/` 与通道级两组不可混加（处置清单第 16 项同段的「基线 22 处」指通道级 4 文件在基线口径的调用点总数（22，2 个文件），与 HEAD 必改数 22 数值相同但口径不同）。**第 40 轮修正**：原文写「19 处」，把 2 处零改动调用算进必改、且漏了通道级 22 处。详见处置清单第 16 项）、生产侧请求方向 5 处零改动）、回滚点最集中（阶段 4 的切换 = `service/convert.go` 单文件的函数体替换 + 两个新包装文件，revert 即回滚；**完整回滚清单见 12.20.1 末段**——生产侧还有 8 处改指须一并 revert，第 40 轮修正）。**注意上表「薄封装」行里的 6 个同名转发函数与上游实际保留的 5+2 个不同**——那 6 个含 `*WithError` 名字，而上游恰恰删掉了这些名字；选 C 时以 12.20 的表为准。C 的代价是 `service/convert.go` 文件保留（27 行），与 12.3 原标题「不保留包装层」的字面冲突已在 12.3（第 35 轮修正）里处理。
 
 **为什么阶段 2 的回滚代价可以接受**：阶段 2 只改 import 路径与类型对齐，`dto` 包的类型在迁移前后**语义一致**（33 个字段差异在阶段 2 内逐项对齐完毕，见 12.0.1）。这意味着阶段 2 的产物是「同一个包换了个位置」，出问题可以整体 revert，不会留下半迁移状态。
 
@@ -738,7 +738,7 @@ cd relaykit && GOWORK=off go test ./relayconvert -run TestGolden -count=1
 **dto 兼容性七组比较**（阶段 2 前必跑，上游 relaykit 每次变动后重跑；工具实际打印 7 组、`--strict` gate 7 个计数——「七组」以工具输出为准，组数与分节名见下）：
 
 ```bash
-scripts/relaykit-dto-compat.sh --strict
+KIT_REF=789c97019 scripts/relaykit-dto-compat.sh --strict   # relaykit 侧须钉文档锚点；不钉时默认取会漂移的 upstream/main（第 40 轮实测已漂到 04c597bf6，计数变 (35,6,7,…)、strict 全红）
 # 计数: fieldSet=33 tag=5 type=6 embed=0 order=4 sig=12 equiv=21
 # （2026-10-06 基线；order 与 equiv 是第 30/31 轮补入 gate 的两个维度）
 ```
@@ -746,7 +746,7 @@ scripts/relaykit-dto-compat.sh --strict
 **设计文档行号引用的完整性**（锚定漂移后重跑，见「阶段 1 的前置：relaykit 源码的取得与版本锚定」）：
 
 ```bash
-scripts/relaykit-citation-check.py            # 全部引用可解析时退出码 0（relaykit 51 + 宿主 107 + upstream 全路径 24）
+scripts/relaykit-citation-check.py --ref 789c97019   # 全部引用可解析时退出码 0（relaykit 51 + 宿主 107 + upstream 全路径 24；不带 --ref 时用会漂移的 upstream/main，见「阶段 1 的前置」的版本锚定段）
 python3 scripts/relaykit-citation-check.test.py  # 25 个单测
 ```
 
@@ -760,8 +760,8 @@ python3 scripts/relaykit-doc-structure-check.test.py   # 20 个单测
 **门禁自述计数**（第 38 轮新增：把「门禁改了、描述没改」变成门禁——这一盲区此前复发三次：第 36 轮的 34/15、第 38 轮的 §9.3 47/98/21、以及 `relaykit-citation-check.py` docstring 里长期滞留的 「13 citations across 9 files」）：
 
 ```bash
-python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对
-python3 scripts/relaykit-gate-selfcheck.test.py       # 33 个单测
+python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对（内部按本文档锚点 789c97019 钉 citation 的 --ref 与 dto 的 KIT_REF，见脚本 UPSTREAM_PIN）
+python3 scripts/relaykit-gate-selfcheck.test.py       # 34 个单测（第 40 轮 +1：钉死 ref 句式）
 ```
 
 它只检查**本文档的当前口径声明**；CR 记录里的计数是历史记录（「第 37 轮为 50/103/24」这类），记的是「当时为真」，不随门禁演进失效，故不在射程内。
@@ -811,7 +811,7 @@ python3 scripts/relaykit-gate-selfcheck.test.py       # 33 个单测
 23. ~~**33 个字段不兼容类型的逐项对齐**~~ → **12.0.5 第五节已关闭**：136 个同名结构体中 33 个字段集不同，但按「取 relaykit 后本地是否丢字段」二分后，**只需动作的 16 个**，清单与处置已逐项给出；另 17 个是纯增益
 24. **`openaicompat` tool 循环重构**：让基础分支可独立转调 relaykit 的唯一路径；独立重构，不在本次迁移范围（12.15.3）
 25. ~~**本地行为的 golden 基线**~~ **已关闭**（2026-10-04）：见 12.16——`service/convert_golden_test.go` 已建于 `HEAD`，覆盖请求/响应/流三个矩阵共 8 个快照（含 DeepSeek 与非 DeepSeek 两侧的 thinking 门控），并实测「扰动任一快照即测试失败」
-26. ~~**命名空间字段的生产引用精确计数**~~ **已关闭**（2026-10-03）：见 12.6——11 个非测试文件、跨 6 个包，已给出「口径 + 命令 + 结果」
+26. ~~**命名空间字段的生产引用精确计数**~~ **已关闭**（2026-10-03）：见 12.6——11 个非测试文件、跨 6 个顶层目录（8 个 Go 包；**第 40 轮修正**：原文写「跨 6 个包」，与 12.6 的目录/包双口径不符），已给出「口径 + 命令 + 结果」
 27. ~~**`dto` 宿主 import 归零后 3 个符号的归位方式**~~ → **12.0.7 已关闭**（2026-10-04）：三个符号是 `encoding/json` 的薄包装，直接换 stdlib（relaykit/dto 本就 import 它）；`ResponsesRequestMetadata` 判为宿主类型（488 行文件 + 650 行扫描器依赖），随 `dto/opaque_openai_responses_request.go` 保留在宿主 `dto`
 28. ~~**通道级转换器的归属（第 12 轮新增）**~~ → **12.15.4 已关闭**（2026-10-04）：**收敛到 relaykit**，本地只留薄适配。三类宿主耦合 relaykit 侧均有注入机制——思考等级走 `convmeta.Options` 钩子（`sharedclaude.ApplyReasoning`）、媒体解析走 `relayconvert.MediaResolver`（签名与 `service.GetBase64Data` 一致）、schema 归一化对应 `FunctionParametersToInputSchema`。阶段 4 注册钩子后删除 459 行本地实现。**第 28 轮实测了两条边界，均不成立**（12.15.4.1/12.15.4.2），故收敛不是纯接线：须一并改上游的 schema 归一化与媒体分派（本地改动清单第 10、11 行）
 29. ~~**`dto` 独有缓存字段的承载方式（第 12 轮新增）**~~ → **12.0.7 已关闭**（2026-10-04）：把 `EffectiveTools()` 连缓存字段一起**迁入 `relaykit/dto`**——未导出字段在**自己的包**内声明即合法（上游 relaykit 已有同例，如 `Reasoning.effortRaw`），不需要宿主侧旁路。13 个调用点改 import 即可
@@ -825,7 +825,7 @@ python3 scripts/relaykit-gate-selfcheck.test.py       # 33 个单测
 **编号 31–34 的完整说明见 12.18**（该表同时保留第 12 轮新增的 21–30 条目及其关闭状态）；本节只列「仍未决」的四项。
 ## 11. 事实依据
 
-行号以第 1 节声明的本地基线 `dbfbc096f` 为准（该基线与 `9c4758b53` 之间只改了代理/环境文件，行号一致）。上游行号以 `upstream/main` 为准。
+行号以第 1 节声明的本地基线 `dbfbc096f` 为准（该基线与 `9c4758b53` 之间只改了代理/环境文件，行号一致）。上游行号以**钉死的 `upstream/main` = `789c97019`** 为准（见「阶段 1 的前置」的版本锚定；不用会漂移的 `upstream/main` 默认值——**第 40 轮修正**：原文只写「以 `upstream/main` 为准」）。
 
 | 事实 | 核验 |
 |---|---|
@@ -1122,7 +1122,7 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 
 **类别 B——类型换了但语义等价，改的是引用而非形状（1 个）**：`OpenAIModels.SupportedEndpointTypes` 由 `[]constant.EndpointType` 变为 `[]types.EndpointType`。两者是同一底层类型（12.0.1 已证 `constant.EndpointType` 是 `types.EndpointType` 的别名），**JSON 形状不变**，但**仍需改 import**（`constant` 不能出现在 relaykit 内，见 12.0.4）。工具的「类型不同」维度把它计入 6 处，是对的——它不是拼写等价。
 
-**类别 C——真正的语义变化，必须处置（4 个字段 / 3 个类型）**：
+**类别 C——真正的语义变化，必须处置（5 个字段 / 4 个类型；第 40 轮修正**：原表头写「4 个字段 / 3 个类型」，与下表 5 行字段（`Text`/`Arguments`/`IncludeThoughts`/两个 `CreatedAt`）及同节计数口径行的「4 个类型共 5 个字段」均不符**）**：
 
 | 类型.字段 | 本地 | relaykit | 为何是语义变化 |
 |---|---|---|---|
@@ -1150,12 +1150,12 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 本节与 12.0.5 的全部数字，已固化为可重跑的工具：
 
 - `tools/relaykit-dto-compat/`（独立 Go module，含单元测试，不进根 module 的 `./...` 构建）
-- `scripts/relaykit-dto-compat.sh`（从 git 拉两侧源码——本地取 `HEAD`、relaykit 取 `upstream/main:relaykit/dto`——再调用上述工具）
+- `scripts/relaykit-dto-compat.sh`（从 git 拉两侧源码——本地取 `HEAD`、relaykit 侧默认 `KIT_REF=upstream/main`；**核对本表基线须显式 `KIT_REF=789c97019`**，否则上游一漂移即假红——第 40 轮实测——再调用上述工具）
 
 ```bash
-scripts/relaykit-dto-compat.sh            # 人读报告
-scripts/relaykit-dto-compat.sh --markdown # 供粘进审查记录
-scripts/relaykit-dto-compat.sh --strict   # 计数漂移即非零退出
+KIT_REF=789c97019 scripts/relaykit-dto-compat.sh            # 人读报告（钉文档锚点）
+KIT_REF=789c97019 scripts/relaykit-dto-compat.sh --markdown # 供粘进审查记录
+KIT_REF=789c97019 scripts/relaykit-dto-compat.sh --strict   # 计数漂移即非零退出（基线即本节记录值）
 ```
 
 **这解决了本文档最大的一个结构性弱点**：此前每一次「上游 relaykit 演进后需重新核对」都得靠人肉复核，而 12.0.6 已证明人肉复核会漏维度。现在比较是一条命令；`--strict` 把当前基线（fieldSet=33、tag=5、type=6、embed=0、**order=4**、sig=12、**equiv=21**）变成门禁，**上游一漂移就报警**，而不是等到阶段 2 编译失败才发现。**第 31 轮修正两处**：一是原文的基线列表漏了 `equiv`（等价拼写 21，第 30 轮才纳入门禁）；二是**「打印了几组」与「gate 了几组」曾经不等**——工具打印 6 组而 `--strict` 只 gate 5 项，等价拼写组因此长期在门外。基线是**时间点快照**，本地 `dto` 或锚定的 relaykit 提交变动时须有意重录——这正是门禁的意义。
@@ -1351,7 +1351,7 @@ RetainReasoningInClaudeResponse func(modelName string) bool   // nil = 保留（
 
 **本节修正 12.4 的五处自相矛盾或遗漏，均经命令实测。**
 
-**(1) 门控必须排在阶段 4，不能留到阶段 5。** 早期阶段表把 12.4 的门控排在阶段 5，但阶段 4 的判据是「`TestGolden` 改指 relaykit 后 8 个快照逐字节一致」，其中 4 个门控快照（`response/openai_to_claude`、`stream/openai_to_claude`、`response/openai_to_claude_deepseek`、`stream/openai_to_claude_deepseek`）在**非 DeepSeek** 侧要求「reasoning 被丢弃」。而 relaykit 默认**无条件暴露** reasoning——实测 `ResponseOpenAI2Claude(resp, nil)`（`oai_chat/to_claude_messages_resp.go:449`）在 `info == nil` 时照样产出 `{Type: "thinking"}` 块；`Values.ConvOptions()`（`convmeta/meta.go`）在 `Options` 未设时返回 `&Options{}`（钩子为 nil）。因此阶段 4 一旦切换而不门控，非 DeepSeek 快照必然多出 thinking 块 → 判据必红；且豁免条款只认「处置清单第 6 项（9.1/9.2）」，门控不在其中 → **阶段 4 无法通过**。故门控随阶段 4 的切换同时落地（处置清单 13），阶段 5 只核验其位置语义。
+**(1) 门控必须排在阶段 4，不能留到阶段 5。** 早期阶段表把 12.4 的门控排在阶段 5，但阶段 4 的判据是「`TestGolden` 改指 relaykit 后 8 个快照逐字节一致」，其中 4 个门控快照（`response/openai_to_claude`、`stream/openai_to_claude`、`response/openai_to_claude_deepseek`、`stream/openai_to_claude_deepseek`）在**非 DeepSeek** 侧要求「reasoning 被丢弃」。而 relaykit 默认**无条件暴露** reasoning——实测 `ResponseOpenAI2Claude(resp, nil)`（`oai_chat/to_claude_messages_resp.go:449`）在 `info == nil` 时照样产出 `{Type: "thinking"}` 块；`Values.ConvOptions()`（`convmeta/meta.go`）在 `Options` 未设时返回 `&Options{}`（钩子为 nil）。因此阶段 4 一旦切换而不门控，非 DeepSeek 快照必然多出 thinking 块 → 判据必红；且豁免条款只认「处置清单第 6 项（9.1/9.2/9.2.1/9.2.2/9.2.3；**第 40 轮修正**：原文写 9.1/9.2，第 37/38 轮已扩）」，门控不在其中 → **阶段 4 无法通过**。故门控随阶段 4 的切换同时落地（处置清单 13），阶段 5 只核验其位置语义。
 
 **(2) 钩子的 nil 语义写反了。** 12.4.2 的注释是 `nil = 不保留（与上游一致）`。**前半句与后半句不能同真**：上游没有这个钩子，其行为是**无条件保留**。若按 `nil = 不保留` 实现，则所有不设钩子的调用点（上游自己的测试、独立使用 relaykit 的用户）行为从「暴露」翻转为「不暴露」，是**破坏性默认值变更**。正确语义是 **`nil = 保留（维持上游默认）`**——宿主（new-api）显式把钩子设为 `hasDeepSeekModelName`，独立使用者不设则保持上游行为。这一改同时让上游两条依赖默认暴露的测试（`to_claude_messages_resp_test.go:82`、`:125`，该文件 0 处 `Options:`）**保持绿色、无需改动**；若按原语义实现，这两条必红（本地改动清单第 9 行）。**故这两条测试是 nil 语义实现的验证条件，不是待改对象。**
 
@@ -1451,7 +1451,7 @@ git grep -lE "$PAT" HEAD -- '*.go' | grep -v '_test.go'
 
 得 **11 个非测试文件，跨 6 个顶层目录（按 Go 包为 8 个——`relay/channel/openai`、`relay/common`、`service/openaicompat` 各算一个；**第 39 轮补注口径**）**：`constant/context_key.go`、`controller/{relay.go,relay_responses_tool_observation.go}`、`dto/channel_settings.go`、`model/{channel_responses_tool_capability.go,channel_route_model.go}`、`relay/{channel/openai/responses_tool_capability.go,common/responses_input_filter.go}`、`service/{log_info_generate.go,openai_chat_responses_compat.go,openaicompat/responses_to_chat_request.go}`。
 
-**注意口径陷阱**：早期版本写「横跨 4 个包」（`dto`/`controller`/`model`/`service/openaicompat`），该数字**无法用任何单一命令复现**——它既漏了 `constant`、`relay/common` 与 `relay/channel/openai`，也漏了 `service/log_info_generate.go`。窄口径（只搜 `NamespaceToolCall` 等 4 个符号）得 8 个文件 / 6 个包，宽口径（上列 8 个符号）得 11 个文件 / 6 个包；无论哪个口径都不是 4 个包。本项即 12.18 原第 26 项，现以「口径 + 命令 + 结果」三者齐全的形式关闭。
+**注意口径陷阱**：早期版本写「横跨 4 个包」（`dto`/`controller`/`model`/`service/openaicompat`），该数字**无法用任何单一命令复现**——它既漏了 `constant`、`relay/common` 与 `relay/channel/openai`，也漏了 `service/log_info_generate.go`。窄口径（只搜 `NamespaceToolCall` 等 4 个符号）得 8 个文件 / 6 个顶层目录，宽口径（上列 8 个符号）得 11 个文件 / 6 个顶层目录；无论哪个口径都不是 4 个包。本项即 12.18 原第 26 项，现以「口径 + 命令 + 结果」三者齐全的形式关闭。
 
 若 `dto` 类型整体迁入 relaykit，则这些字段要么一并迁入（使 relaykit 承载宿主协议扩展），要么由宿主维护影子结构——**这是阶段 2 必须一并决策的耦合点**，见 12.0.2。
 
@@ -1695,7 +1695,7 @@ func convertResponsesToolsToChat(raw []byte, options ResponsesChatCompatibilityO
 | `service/convert_test.go`（499 行） | 25 | 11（1×`ResponseOpenAI2Gemini` + 1×`ResponseOpenAI2GeminiWithError` + 1×`StreamResponseOpenAI2Gemini` + 8×`StreamResponseOpenAI2GeminiWithError`） | 14（2×`ClaudeToOpenAIRequest` + 10×`GeminiToOpenAIRequest` + 2×`IsDeepSeekModelName`） |
 | `service/convert_golden_test.go` | 8 | 6（`*WithError`） | 2（请求方向）——已由处置清单 12 认领 |
 
-合计 **82 处**（阶段 4 断 38、阶段 6 断 44）。**只有 `convert_golden_test.go` 有阶段动作认领（处置清单 12），其余三个文件在任何处置清单中零出现。** **行为层的例外有两处**：第 7 条（同 chunk reasoning+text）与 **finish_reason 严格校验**。第 7 条的用例会失败但**不得其所**（本地能力被上游丢弃，见 9.1 表下注），须明确取舍而非默认放行。**finish_reason 一条（第 29 轮新增）更特殊**：`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 直接调用 `ResponseOpenAI2ClaudeWithError`——**该函数在阶段 4 即被删除**（处置清单第 2 项、12.3），故它**不会「失败得其所」，而是编译失败**；它钉的行为（未知 finish_reason 报错）在阶段 6 后**无落点**（12.11.1）。阶段 4 须先按 12.11.3 定下 A/B 选项，再决定该用例是改指新落点还是删除，并补 b/c/d 三条新用例（12.11.2）
+合计 **82 处**（阶段 4 断 38、阶段 6 断 44）。**处置清单 12 只认领 `convert_golden_test.go` 的 8 处；其余三个文件的 11 处 `*WithError` 调用只在形态 C 下被认领（处置清单第 16 项「另 3 文件 11 处随本项增补」，第 36/37 轮补入）——形态 A 下它们零改动（第 14 项 A），形态 B 下无处置项逐条认领（随第 2 项的 `*WithError` 删除一并改写）**（**第 40 轮修正**：原文写「其余三个文件在任何处置清单中零出现」，自第 36 轮第 16 项补入起已不成立）。 **行为层的例外有两处**：第 7 条（同 chunk reasoning+text）与 **finish_reason 严格校验**。第 7 条的用例会失败但**不得其所**（本地能力被上游丢弃，见 9.1 表下注），须明确取舍而非默认放行。**finish_reason 一条（第 29 轮新增）更特殊**：`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 直接调用 `ResponseOpenAI2ClaudeWithError`——**该函数在阶段 4 即被删除**（处置清单第 2 项、12.3），故它**不会「失败得其所」，而是编译失败**；它钉的行为（未知 finish_reason 报错）在阶段 6 后**无落点**（12.11.1）。阶段 4 须先按 12.11.3 定下 A1/A2/B 三选一（**第 40 轮修正**：原文写「A/B 选项」，第 37 轮起已拆为 A1/A2/B），再决定该用例是改指新落点还是删除，并补 b/c/d 三条新用例（12.11.2）
 3. 第 9.3 节的专项清单需扩充，覆盖 12.4.1（索引空洞）、12.4.3（AWS 回归）、12.6（命名空间往返）、12.8（`matchAnyRegex` 语义）、12.7（custom bridge fail-closed）
 4. 12.12 的 thinking `signature` 与本节均属「需实测」，须给出可执行命令而非仅标注
 
@@ -1863,7 +1863,7 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 | 13 | thinking `signature` | 维持现状，列入运行时验证 |
 | 14 | `enabled` 双语义 | 保留并文档化 |
 | 15 | 上游 relaykit 分支 | 不采用，main 已含最终形态 |
-| 16 | 命名空间/tool_search 归属 | 保留宿主；其字段横跨 6 个包、11 个非测试文件，阶段 2 须一并决策（12.6） |
+| 16 | 命名空间/tool_search 归属 | 保留宿主；其字段横跨 6 个顶层目录（8 个 Go 包）、11 个非测试文件，阶段 2 须一并决策（12.6） |
 | 17 | custom tool bridge 门控 | 保留本地 fail-closed |
 | 18 | `matchAnyRegex` 空模式 | 采用本地语义并文档化 |
 | 19 | 未跟踪文件 | 阶段 0 门禁，先提交 |
@@ -1884,14 +1884,14 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 | 23 | ~~33 个字段不兼容类型的逐项对齐~~ | **已关闭**（2026-10-04）：见 12.0.5 第五节——33 个中 **16 个需动作**（含 `ChannelOtherSettings` 20 / `OpenAIResponsesCompactionRequest` 20 / `UserSetting` 3 等保留项，`Message.ThinkingContent` 等保留项），**17 个取 relaykit 即纯增益** |
 | 24 | `openaicompat` tool 循环重构 | 让基础分支可独立转调 relaykit 的唯一路径；独立重构，不在本次范围（12.15.3） |
 | 25 | ~~本地行为的 golden 基线~~ | **已关闭**（2026-10-04）：见 12.16——`service/convert_golden_test.go` 建于 `HEAD`，8 个快照覆盖请求/响应/流三矩阵，且把 thinking 门控的两侧（DeepSeek 暴露 / 非 DeepSeek 丢弃）都钉住；反向验证：扰动任一快照即失败 |
-| 26 | ~~命名空间字段的生产引用精确计数~~ | **已关闭**（2026-10-03）：见 12.6，已给出「口径 + 命令 + 结果」——11 个非测试文件、跨 6 个包。早期写的「4 个包」无法用任何单一命令复现 |
+| 26 | ~~命名空间字段的生产引用精确计数~~ | **已关闭**（2026-10-03）：见 12.6，已给出「口径 + 命令 + 结果」——11 个非测试文件、跨 6 个顶层目录（8 个 Go 包）。早期写的「4 个包」无法用任何单一命令复现 |
 | 27 | ~~`dto` 宿主 import 归零后 3 个符号的归位方式~~ | **已关闭**（2026-10-04）：见 12.0.7——三个符号是 `encoding/json` 薄包装，换 stdlib；`ResponsesRequestMetadata` 判为宿主类型，随 `dto/opaque_openai_responses_request.go` 留在宿主 `dto` |
 | 28 | ~~通道级 Claude 入向转换器的归属（第 12 轮新增）~~ | **已关闭**（2026-10-04；第 28 轮补注）：见 12.15.4——收敛到 relaykit。三类宿主耦合 relaykit 侧均有注入机制（`convmeta.Options` 钩子 / `MediaResolver` / `FunctionParametersToInputSchema`），阶段 4 接线后删除 459 行本地实现。**但第 28 轮实测两条边界均不成立**（12.15.4.1 的 4 处 schema 差异、12.15.4.2 的 7 处媒体分派差异），故收敛须连同改上游实现（本地改动清单第 10、11 行），不是纯接线 |
 | 29 | ~~`dto` 未导出缓存字段的承载方式（第 12 轮新增）~~ | **已关闭**（2026-10-04）：见 12.0.7——`EffectiveTools()` 连缓存字段迁入 `relaykit/dto`，未导出字段在自己包内声明合法（上游已有 `Reasoning.effortRaw` 同例），无需旁路。13 个调用点改 import |
 | 30 | ~~字段名相同但 tag / Go 类型不同（第 14 轮新增）~~ | **已关闭**（2026-10-04；**第 30 轮修正计数**）：见 12.0.8——**11 处**（tag 5 + 类型 6，原文写 15）全部采用 relaykit。tag 3 处空操作（struct 值）、2 处风险排除；类型 `CreatedAt` 纯增益、`IncludeThoughts`(8 处)+`Text`/`Arguments` 改读写点、`SupportedEndpointTypes` 改 import |
 | 31 | **finish_reason 严格语义的落点（第 29 轮新增，第 37 轮修正为三选）** | **未决，阶段 4 开工前须三选一**（12.11.3）：**A1** 给 `reasonmap` 加返回 error 的严格变体 + 改 `oai_chat` 3 个函数签名（本地改动清单第 12 行 + 新增签名变更行）；**A2** 布尔钩子只选分支、报错由宿主前置校验（复用 B 的落点）；**B** 宿主 5 处调用点各自前置校验。**原「选项 A」的布尔钩子不产生 error——`reasonmap.OpenAIFinishReasonToClaudeStopReason` 与 `oai_chat` 3 个调用它的函数都无 error 返回通道（第 37 轮实测）**。原表述「留宿主调用点」无落点——两个原调用点都在阶段 6 删除的 `service/convert.go` 内（12.11.1）。另须为 b/c/d 三条差异各补测试（12.11.2） |
 | 32 | **12.5 的 3 个「需实测」方法的分类（第 32 轮新增）** | **未决，须在阶段 2 开工前定**（见「阶段 2 的前置」）：`Usage.EnsureResponsesTokenDetailObjects`、`Usage.GetOutputTokenDetails`、`OpenAIResponsesResponse.HasImageGenerationCall`。此前**无任何阶段或处置项认领**，而阶段 2 判据要求「全部宿主独有方法给出出路」——3 行未定即判据不可判。**且 `EnsureResponsesTokenDetailObjects` 在 `HEAD` 上不存在**（工作区独有，其他会话未提交改动），分类对象本身尚未进入版本控制 |
-| 33 | **阶段 4 的切换形态（第 33 轮新增；第 35 轮扩为三选一）** | **未决，须在阶段 4 开工前定**（处置清单第 14 项、§8.1、12.20）：**A 薄封装**（6 个同名转发函数——注意这 6 个含 `*WithError` 名字，与上游实际保留的 5+2 个不同）或 **B 直接改写调用点**或 **C 照抄上游终态（第 35 轮新增，推荐）**——上游 `main` 保留 5 个 facade + 2 个 shim + 包装层，调用点改动面最小（测试侧只需动 19 处，而非全删形态的 82 处）。§8.1 要求阶段 4「单点可逆」，C 的切换 = `service/convert.go` 单文件的函数体替换，回滚最集中 |
+| 33 | **阶段 4 的切换形态（第 33 轮新增；第 35 轮扩为三选一）** | **未决，须在阶段 4 开工前定**（处置清单第 14 项、§8.1、12.20）：**A 薄封装**（6 个同名转发函数——注意这 6 个含 `*WithError` 名字，与上游实际保留的 5+2 个不同）或 **B 直接改写调用点**或 **C 照抄上游终态（第 35 轮新增，推荐）**——上游 `main` 保留 5 个 facade + 2 个 shim + 包装层，调用点改动面最小（测试侧 `service/` 4 文件必改 17 处、通道级 4 文件另必改 22 处，而非全删形态下 `service/` 4 文件的 82 处；**第 40 轮修正**：原文写「只需动 19 处」，把 2 处零改动调用算进必改、未标 `service/` 口径、未计通道级）。§8.1 要求阶段 4「单点可逆」，C 的切换 = `service/convert.go` 单文件的函数体替换，回滚最集中（完整回滚清单见 12.20.1 末段） |
 | 34 | **思考等级后缀填充器缺失（第 34 轮新增）** | **未决，阶段 4 开工前二选一**（12.19）：relaykit 的 4 处 `ReasoningStateOf(info)` 消费点 + `ApplyClaudeThinkingModel` 全部依赖 `info.ReasoningConversion`，而 relaykit README 明示转换器**不再解释** `-thinking`/effort 尾缀——后缀意图必须由宿主入口填充。上游入口是 `relay/helper/reasoning_suffix.go` 的 `ApplyReasoningModelSuffix`（非测试调用 6 处、5 个文件），**本地不存在该文件**；本地现有后缀处理全是内联的——`relay-claude.go:430-478` 随阶段 4 收敛删除，`claude_handler.go:55-104` 的换装（§3.1「采用上游」）**在阶段表中零落点**（12.19 第二项）。不装填充器即静默丢失跨协议路径的思考等级，且 8 个 golden 快照零后缀用例、抓不到该回归 |
 
 ### 12.19 思考等级后缀的宿主填充器（第 34 轮新增，未决项 34）
@@ -1939,7 +1939,7 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 
 **对本迁移的三点含义**：
 
-1. **调用点规模相差一个量级**。按本文档的字面计划（全删），本地测试侧有 **4 个文件、82 处调用**会断（见 12.16.1 的逐文件清点；38 处在阶段 4、44 处在阶段 6）；按上游形态，只有 **`*WithError` 的 17 处 + `IsDeepSeekModelName` 的 2 处**需要动，其余 63 处经 facade/shim 零改动继续编译。生产侧同理：`ClaudeToOpenAIRequest`/`GeminiToOpenAIRequest` 的 5 个生产调用点、4 个非 WithError 包装的 0 个生产调用点，按上游形态都是零改动。
+1. **调用点规模相差一个量级**。按本文档的字面计划（全删），本地测试侧有 **4 个文件、82 处调用**会断（见 12.16.1 的逐文件清点；38 处在阶段 4、44 处在阶段 6）；按上游形态，**在这 4 个 `service/` 测试文件内**是 **`*WithError` 的 17 处必须改指**，另 **`IsDeepSeekModelName` 的 2 处调用点零改动**（函数保留为宿主差异，见 12.20.1 测试表），其余 63 处经 facade/shim 零改动继续编译（**第 40 轮修正**：原文的「只有 `*WithError` 的 17 处 + `IsDeepSeekModelName` 的 2 处需要动」把「保留函数」与「改调用点」两种动作混算，且未标口径——通道级 4 个测试文件在 C 下另必改 22 处（`RequestOpenAI2ClaudeMessage` 16 + `*WithError` 6，HEAD 口径），不在此 82 处的父集内，见处置清单第 16 项）。生产侧同理：`ClaudeToOpenAIRequest`/`GeminiToOpenAIRequest` 的 5 个生产调用点、4 个非 WithError 包装的 0 个生产调用点，按上游形态都是零改动。
 2. **「单点可逆」在上游形态下有具体实现**：阶段 4 的切换 = 替换 `service/convert.go` 一个文件内的 5 个函数体（+ 新增 request/response 两个包装文件），回滚 = 恢复该文件；`relay-claude.go`/`relay-gemini.go` 的 4 个通道级 facade 同理。这正是 §8.1 想要的「一次集中的函数体替换」，比「薄封装」更贴近上游、也更好回滚。
 3. **§3.1 声称的「降级可观测性 新增能力」在上游形态下才成立**：diagnostics 的产生在 relaykit 内部，落地要靠 `RelayInfo.RecordConversionDiagnostics`（宿主新文件）+ 包装层调用。按本文档字面计划（直接调 relayconvert 包级函数），diagnostics 会被**静默丢弃**（relaykit 经类型断言调用，宿主没实现该方法就什么都不发生）。若要兑现该能力，阶段 3/4 须加：`relay/common/conversion_diagnostics.go` 等价物 + 包装层（或至少给 `RelayInfo` 加该方法并让调用点经包装层）。
 
@@ -1953,8 +1953,8 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 
 | 调用点族 | 数量 | 形态 C 下的处置 | 依据 |
 |---|---|---|---|
-| `*WithError` 生产调用点（`relay/channel/openai/relay-openai.go:314,324`、`relay/channel/openai/helper.go:46,63,246,267`、`relay/channel/openai/chat_via_responses.go:280,286`、`relay/channel/gemini/relay-gemini.go:1784`（**实测于 `a0491b310` 为 `:1848`**；`:1819` 是第 36 轮的值、`:1845` 是第 38 轮的值，**第 38c 轮实测两者都已漂**——该文件在第 36 轮后被另一会话的提交 `222876349` 改动，此后又漂了 3 行。**故本表一律以函数名 `service.ResponseOpenAI2ClaudeWithError` 为准，行号只作定位参考**。**此类「HEAD 口径」标注无门禁保护，只锚定基线口径的引用才是可复核的**）） | 9（4 个文件） | **改指** `service.ConvertResponse`/`ConvertStreamResponse` 包装（上游形态；`openai/helper.go` 同文件 4 处，故按文件回滚仍是 4 个文件） | 12.3、12.20 |
-| **通道级 4 个 `*WithError` 的生产调用点**（第 37 轮补入，此前 12.20.1 完全未列）：`relay-claude.go:1167`（`StreamResponseClaude2OpenAIWithError`）、`relay-claude.go:1273`（`ResponseClaude2OpenAIWithError`）、`relay-gemini.go:1605`（`streamResponseGeminiChat2OpenAIWithError`）、`relay-gemini.go:1768`（`responseGeminiChat2OpenAIWithError`）、`aws/converse.go:696`（`claude.ResponseClaude2OpenAIWithError`，跨包） | 5（3 个文件） | **逐处按上游形态改**（逐处实测）：**`:1167`** 上游不是调无 error facade，而是 `claudeToChatStreamState(info)` + `state.ConvertChunk(&claudeResponse)`（`upstream/main:relay/channel/claude/relay-claude.go:129-134`，`ConvertChunk` **有** error 返回），错误路径保留；**`:1273`** → `ResponseClaude2OpenAI(&claudeResponse)` 无 error、删 `if conversionErr` 分支（上游 `relay-claude.go:349`）；**`:1605`** → `streamResponseGeminiChat2OpenAI(geminiResponse)` 删 `convertErr`（上游 `relay-gemini.go:276`）；**`:1768`** → `responseGeminiChat2OpenAI(c, ...)` 删 `conversionErr`（上游 `relay-gemini.go:426`）；**`converse.go:696`** 上游无对应文件，按 `:1273` 同型处理——调无 error facade、删 err 分支。**本地报错而 relaykit 侧无对应报错**——`StreamResponseClaude2OpenAI`/`ResponseClaude2OpenAI` 对未知 type 一律 `return nil` 静默跳过（见 9.2.1 第 1、2、8 条），其余条目则静默忽略（第 3、7 条）、无校验产出空 tool_call（第 4 条）、panic（第 5 条）或静默丢弃（第 6 条），故删 err 分支不是机械改写，**须逐条决定 9.2.1 的 9 条是否放弃**（**第 39 轮修正**：原文写「四类本地错误…（见 9.2.1 第 1、2、4 条）」，四类枚举与所引条目均不准确——第 4 条不是 `return nil` 路径，且本地报错的实为 9 条中的 8 条，不能以「四类」概括） | 4.5.5、9.2.1、12.20 |
+| `*WithError` 生产调用点（`relay/channel/openai/relay-openai.go:314,324`、`relay/channel/openai/helper.go:46,63,246,267`、`relay/channel/openai/chat_via_responses.go:280,286`、`relay/channel/gemini/relay-gemini.go:1784`（**实测于 `a0491b310` 为 `:1848`**；`:1819` 是第 36 轮的值、`:1845` 是第 38 轮的值，**第 38c 轮实测两者都已漂**——该文件在第 36 轮后被另一会话的提交 `222876349` 改动，此后又漂了 3 行。**故本表一律以函数名 `service.ResponseOpenAI2ClaudeWithError` 为准，行号只作定位参考**。**此类「HEAD 口径」标注无门禁保护，只锚定基线口径的引用才是可复核的**）） | 9（4 个文件） | **改指** `service.ConvertResponse`/`ConvertStreamResponse` 包装（上游形态；`openai/helper.go` 同文件 4 处，故按文件回滚仍是 4 个文件）。**另有 4 处包装体内部调用不计入本行**（**第 40 轮补注**）：`service/convert.go` 的 4 个非 WithError 包装各自一行转发同名 `*WithError`（基线 `:722`/`:1036`/`:1827`/`:1998`），随 C1 的 facade 改写自然消失——原始 grep 计数为 13 而非 9 时，差集即这 4 处 | 12.3、12.20 |
+| **通道级 4 个 `*WithError` 的生产调用点**（第 37 轮补入，此前 12.20.1 完全未列；**第 40 轮修正计数**：原写「5（3 个文件）」，漏了基线 `relay-claude.go:715`/`:832`、`relay-gemini.go:1277`/`:1382` 四处——实测 `git show dbfbc096f:relay/channel/claude/relay-claude.go \| grep -n 'WithError('` 可见 `:715`/`:832` 位于 4 个非 WithError 包装的**函数体内**（如 `StreamResponseClaude2OpenAI` 一行转发 `…WithError`），这四处是**包装体内部调用**，形态 C 下随包装层改写自然处理、不计独立生产调用点；`relay-gemini.go:1277`/`:1382` 同型。故「必改生产调用点」仍为下 9+5=14 处中的通道级 5 处，本行数量不变、但须说明包装体内 4 处的归属）：`relay-claude.go:1167`（`StreamResponseClaude2OpenAIWithError`）、`relay-claude.go:1273`（`ResponseClaude2OpenAIWithError`）、`relay-gemini.go:1605`（`streamResponseGeminiChat2OpenAIWithError`）、`relay-gemini.go:1768`（`responseGeminiChat2OpenAIWithError`）、`aws/converse.go:696`（`claude.ResponseClaude2OpenAIWithError`，跨包） | 5（3 个文件） | **逐处按上游形态改**（逐处实测）：**`:1167`** 上游不是调无 error facade，而是 `claudeToChatStreamState(info)` + `state.ConvertChunk(&claudeResponse)`（`upstream/main:relay/channel/claude/relay-claude.go:129-134`，`ConvertChunk` **有** error 返回），错误路径保留；**`:1273`** → `ResponseClaude2OpenAI(&claudeResponse)` 无 error、删 `if conversionErr` 分支（上游 `relay-claude.go:349`）；**`:1605`** → `streamResponseGeminiChat2OpenAI(geminiResponse)` 删 `convertErr`（上游 `relay-gemini.go:276`）；**`:1768`** → `responseGeminiChat2OpenAI(c, ...)` 删 `conversionErr`（上游 `relay-gemini.go:426`）；**`converse.go:696`** 上游无对应文件，按 `:1273` 同型处理——调无 error facade、删 err 分支。**本地报错而 relaykit 侧无对应报错**——`StreamResponseClaude2OpenAI`/`ResponseClaude2OpenAI` 对未知 type 一律 `return nil` 静默跳过（见 9.2.1 第 1、2、8 条），其余条目则静默忽略（第 3、7 条）、无校验产出空 tool_call（第 4 条）、panic（第 5 条）或静默丢弃（第 6 条），故删 err 分支不是机械改写，**须逐条决定 9.2.1 的 9 条是否放弃**（**第 39 轮修正**：原文写「四类本地错误…（见 9.2.1 第 1、2、4 条）」，四类枚举与所引条目均不准确——第 4 条不是 `return nil` 路径，且本地报错的实为 9 条中的 8 条，不能以「四类」概括） | 4.5.5、9.2.1、12.20 |
 | `ClaudeToOpenAIRequest`/`GeminiToOpenAIRequest` 生产调用（`relay/channel/ali/adaptor.go:88`、`relay/channel/aws/converse.go:113`、`relay/channel/openai/adaptor.go:47,65`、`relay/claude_handler.go:134`） | 5 | **零改动**（同名 shim 保留） | 12.20 |
 | **`RequestOpenAI2ClaudeMessage` 的生产调用点**（第 37 轮补入）：`relay/channel/claude/adaptor.go:100`、`relay/channel/aws/adaptor.go:173`、`relay/channel/vertex/adaptor.go:302` | 3（3 个文件） | **必改，且不能靠同名 facade**——上游**已删除**该函数（`git grep -c RequestOpenAI2ClaudeMessage upstream/main -- 'relay/'` = 0），上游三个 adaptor 一律改调 `service.ConvertRequest(c, info, types.RelayFormatClaude, request)` 再断言 `result.Value.(*dto.ClaudeRequest)`（`upstream/main:relay/channel/claude/adaptor.go:122`、`aws/adaptor.go:130`、`vertex/adaptor.go:281`）。**故 4.5.5 表首行的「relaykit 对应 = `relayconvert.OpenAIChatRequestToClaudeMessages`」只是底层入口，实际落点是 `service.ConvertRequest`** | 4.5.5、12.20 |
 | 4 个非 WithError 旧包装的生产调用 | 0 | 不涉及（本就只有测试引用） | 12.3 |
@@ -1983,4 +1983,4 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 | C5 | 流式路径构造 `relayconvert.NewResponseStreamState`（上游 6 处构造点，全部实测、全部 `upstream/main:` 口径：`upstream/main:relay/channel/claude/relay-claude.go:195`、`upstream/main:relay/channel/claude/relay_responses.go:22`、`upstream/main:relay/channel/gemini/relay_responses.go:84`、`upstream/main:relay/channel/openai/helper.go:89`、`upstream/main:relay/channel/openai/chat_via_responses.go:181`、`upstream/main:relay/channel/openai/responses_via_chat.go:73`） | 同上游各处 | 流式 golden 仍绿 |
 | C6 | 通道级 **4 个非 WithError 函数**改保为一行 facade（`relay-claude.go` 的 `StreamResponseClaude2OpenAI`/`ResponseClaude2OpenAI`、`relay-gemini.go` 的 `responseGeminiChat2OpenAI`/`streamResponseGeminiChat2OpenAI`），`*WithError` 变体删除；**`RequestOpenAI2ClaudeMessage` 不能保 facade——上游已删该函数**，3 个 adaptor 调用点（`relay/channel/claude/adaptor.go:100`、`aws/adaptor.go:173`、`vertex/adaptor.go:302`）改调 `service.ConvertRequest`（见生产侧表） | `upstream/main:relay/channel/{claude/relay-claude.go,gemini/relay-gemini.go,claude/adaptor.go,aws/adaptor.go,vertex/adaptor.go}` | 4.5.5 表 **5 行 9 个函数**的「阶段 6 删除」判据随之改写：4 个保 facade、5 个真删（`RequestOpenAI2ClaudeMessage` + 4 个 `*WithError`）——**选 C 时须改阶段 6 判据，否则判据与形态矛盾** |
 
-**C 的回滚点**：阶段 4 的切换集中在 2 个既有文件的函数体（`service/convert.go` + 通道级 4 行）与 3 个新增文件（`request_converter.go`、`response_converter.go`、`conversion_diagnostics.go`）——回滚 = 删 3 新文件 + revert 2 个既有文件 + revert `*WithError` 的 9 处生产改写（4 个文件）。与 §8.1「单点可逆」的关系：facade 层本身单点（一个文件的函数体），`*WithError` 的 9 处是 12.3 已决定的固定删除项，不随形态变化。
+**C 的回滚点**：阶段 4 的切换集中在 2 个既有文件的函数体（`service/convert.go` + 通道级 4 行）与 3 个新增文件（`request_converter.go`、`response_converter.go`、`conversion_diagnostics.go`）——回滚 = 删 3 新文件 + revert 2 个既有文件 + revert **生产改写 16 处**（`service.*WithError` 改指 8 处 / 4 个文件，加通道级 `*WithError` 5 处 / 3 个文件，加 `RequestOpenAI2ClaudeMessage` 生产改指 3 处 / 3 个文件；**第 40 轮修正**：原文只写「`*WithError` 的 9 处生产改写（4 个文件）」，漏了通道级行的 5 处与请求方向行的 3 处，与本节上方生产表 8+5+3+0 的逐行合计不闭合——按生产表自己的计数应为 16 处、7 个文件）。与 §8.1「单点可逆」的关系：facade 层本身单点（一个文件的函数体），生产改写项（12.3 的 `*WithError` 固定删除 + 12.20.1 生产表的改指点）是随形态落地的固定清单，不随形态在 A/B/C 间消失、只随形态变化落点文件数。

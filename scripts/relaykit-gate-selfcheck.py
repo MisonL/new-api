@@ -25,12 +25,18 @@ import argparse
 import io
 import os
 import re
+import shlex
 import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DOC = "docs/superpowers/specs/2026-09-30-relaykit-migration-design.md"
 CR_DOC = "docs/reviews/CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md"
+# 文档自己声明的上游锚点（第 40 轮）。上游 main 漂到 04c597bf6 后，默认 ref
+# 下 citation 与 dto-compat 都会因移动的 ref 变红，而文档的计数声明是对钉死
+# 锚点的声明——用 upstream/main 去核对钉死声明必然报错。升降锚点只改这里
+# 加文档里对应的一处。
+UPSTREAM_PIN = "789c97019"
 
 
 def read_text(path):
@@ -110,7 +116,9 @@ def collect_actual(quiet):
             actual[key] = value
         return value
 
-    code, out = run([sys.executable, "scripts/relaykit-citation-check.py"])
+    # citation 必须钉在设计文档自己声明的锚点上跑（第 40 轮；UPSTREAM_PIN）。
+    code, out = run([sys.executable, "scripts/relaykit-citation-check.py",
+                     "--ref", UPSTREAM_PIN])
     if code != 0:
         failures.append(f"relaykit-citation-check.py 退出码 {code}")
     parsed_or_fail("citation", parse_citation(out), "citation",
@@ -154,7 +162,10 @@ def collect_actual(quiet):
     doc_lines = read_text(os.path.join(ROOT, DEFAULT_DOC)).count("\n")
     actual["doc_lines"] = doc_lines
 
-    code, out = run("bash scripts/relaykit-dto-compat.sh --strict")
+    # 环境变量逃生通道用于本地配平/调试；CI 必须钉死。设了就按环境走，
+    # 未设一律用文档锚点（第 40 轮修掉「注释钉死、代码仍用 upstream/main」）。
+    kit_ref = os.environ.get("KIT_REF", UPSTREAM_PIN)
+    code, out = run(f"KIT_REF={shlex.quote(kit_ref)} bash scripts/relaykit-dto-compat.sh --strict")
     if code != 0:
         failures.append(f"relaykit-dto-compat.sh --strict 退出码 {code}")
     parsed_or_fail("dto", parse_dto(out), "dto",
@@ -193,8 +204,12 @@ def extract_claims(doc):
         # 「（relaykit 51 + 宿主 107 + upstream 全路径 24）」
         for m in re.finditer(r"relaykit (\d+) \+ 宿主 (\d+) \+ upstream 全路径 (\d+)", line):
             add(i, "citation 三元组", tuple(int(g) for g in m.groups()))
-        # 「**51/51**（`ref=upstream/main`）」
-        for m in re.finditer(r"\*\*(\d+)/(\d+)\*\*（`ref=upstream/main`）", line):
+        # 「**51/51**（`ref=<UPSTREAM_PIN>`）」——ref 必须钉文档锚点（第 40 轮；
+        # 旧句式 `ref=upstream/main` 随上游漂移已从文档移除，不作兼容）。
+        # 正则从 UPSTREAM_PIN 现拼，升锚时不会漏改这里。
+        for m in re.finditer(
+            r"\*\*(\d+)/(\d+)\*\*（`ref=" + re.escape(UPSTREAM_PIN) + r"`）", line,
+        ):
             add(i, "citation relaykit 分子/分母", (int(m.group(1)), int(m.group(2))))
         # 「**宿主 107/107**（`baseline=dbfbc096f`）」
         for m in re.finditer(r"\*\*宿主 (\d+)/(\d+)\*\*（`baseline=dbfbc096f`）", line):
