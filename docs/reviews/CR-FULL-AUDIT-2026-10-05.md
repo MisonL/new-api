@@ -1450,6 +1450,10 @@ sora adaptor:261。两层都不属于无界。
 实施时每个值需按端点复核，并按仓库模式加命名常量与超限显式错误
 （`io.ReadAll(io.LimitReader(r, limit+1))` 后判长度，禁止静默截断）。
 
+（本节建议值已于同日第十四批实施，实际取值见 §23.1；实施时把 gemini
+文本生成一处的建议值从 64MB 上调为 128MB，理由是原生响应可能内联
+base64 媒体。在途文件仍留待其会话落地后处理。）
+
 ### 22.6 两个相关事实（记录不改）
 
 - 共享 relay client 默认无超时：`RELAY_TIMEOUT` 默认 0（common/init.go:120），
@@ -1469,3 +1473,49 @@ sora adaptor:261。两层都不属于无界。
 上游 QuantumNous/new-api 的同名 handler 同样无界（2026-10-08 用
 raw.githubusercontent 实测：claude:435、rerank:20、audio:60/121、
 xai:83），不是本仓引入的回归。
+
+## 23. 2026-10-08 十二个干净文件的有界读取实施（第十四批）
+
+### 23.1 实施内容
+
+承接 §22 的清单：12 个干净生产文件的 14 处无界 `io.ReadAll(resp.Body)`
+全部替换为共享 helper `common.ReadAllWithLimit`（新增 `common/io.go`）。
+语义与仓库既有约束一致：`io.ReadAll(io.LimitReader(reader, limit+1))`
+后判长度，超限返回显式错误，绝不静默截断（relay_task.go:78 的同款注释）。
+
+| 文件:函数 | 上限 | 依据 |
+| --- | --- | --- |
+| claude ClaudeHandler | 64MB | 非流式 JSON 信封 |
+| xai xAIHandler | 64MB | 非流式 JSON 信封 |
+| gemini GeminiTextGenerationHandler | 128MB | 可能内联 base64 媒体（较 §22.5 建议上调） |
+| gemini NativeGeminiEmbeddingHandler | 64MB | 嵌入向量 JSON |
+| ali aliImageHandler | 128MB | 图像 base64 |
+| minimax miniMaxImageHandler | 128MB | 图像 base64 |
+| zhipu_4v zhipu4vImageHandler | 128MB | 图像 base64 |
+| openai OpenaiTTSHandler | 64MB | 音频字节 |
+| openai OpenaiSTTHandler | 16MB | 转录 JSON |
+| openai buildSyntheticResponsesCompaction | 64MB | Responses JSON 负载 |
+| common_handler RerankHandler | 2 乘请求入口上限 | 回显文档，随入口上限缩放（默认 128MB 时为 256MB） |
+| service FetchCodexWhamUsage | 8MB | 用量 JSON |
+| service DoMidjourneyHttpRequest | 16MB | 任务 JSON |
+| service CreateWaffoPancakeCheckoutSession | 8MB | 支付 JSON |
+
+错误路径全部沿用各站点原有的失败分支，无新增静默回退；10 个文件因
+`io` 不再使用同步移除了导入。
+
+### 23.2 验证
+
+- helper 单测 `common/io_test.go`（6 例）：上限内、恰好等于上限、超限、
+  只读到 limit+1、nil reader、非正上限。反向验证：把实现改成
+  `LimitReader(reader, limit)`（静默截断写法）后，「超限拒绝」与
+  「只读到 limit+1」两例失败，恢复后通过——测试能抓到要防的缺陷。
+- `go build ./...` exit 0；`go test ./common/ ./service/
+  ./relay/channel/{claude,gemini,ali,minimax,zhipu_4v,openai}/ -count=1`
+  全部 ok（xai 与 common_handler 无测试文件）。
+- 覆盖边界：helper 的上限语义已测；各端点的端到端超限行为未逐一测试，
+  与仓库既有 task submit / ollama 上限的测试粒度一致。
+
+### 23.3 未覆盖
+
+- §22 的 23 个在途文件仍为无界，留待其会话落地后按 §22.5 处理；
+- §22.6 的 FetchModels 裸 client 同样在途，未动。
