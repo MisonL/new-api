@@ -1223,3 +1223,56 @@ $ systemd-analyze verify fixed.service
 - `go vet ./...` 全仓 0 问题；
 - 桌面端 `cargo test --test runtime_support` 22 项全过；
 - §17 新钉的 4 个 action SHA 经 `git ls-remote` 复核，与对应 tag 一致。
+
+## 20. 2026-10-08 桌面端与 CI 门禁复核（第十一批，无改动）
+
+本轮针对此前未覆盖的桌面端维度做只读复核，结论全部为"已验证、无需改动"。
+记录在此以免未来重复排查。
+
+### 20.1 桌面端 CSP 的 `'unsafe-eval'` 是必需的
+
+`desktop/tauri-app/src-tauri/tauri.conf.json` 的 CSP 含
+`script-src 'self' 'unsafe-inline' 'unsafe-eval'`。该 CSP 是
+`f56ab6fc8`（CodeRabbit 建议）从 `null` 收紧而来的。
+
+初看 `'unsafe-eval'` 像是可以收紧的过度授权，但桌面端打包的是
+`web/classic`（见 `desktop/tauri-app/scripts/lib/project.mjs` 的
+`webDir = web/classic`），实测其生产产物有 3 处 `new Function`：
+
+| 产物 | 位置 | 用途 |
+| --- | --- | --- |
+| `index-*.js` | `cost:new Function(...Object.keys(r), ...)` | 计费表达式求值 |
+| `visactor-*.js` | `new Function("d","return {...}")` | 图表库表达式 |
+| `semi-ui-*.js` | `new Function(String(r))(e)` | Semi Design 表达式渲染 |
+
+即 `'unsafe-eval'` 是功能必需，不能移除。`'unsafe-inline'` 同理（内联样式
+与 Semi/Rsbuild 的运行时注入）。CSP 保持原样。
+
+### 20.2 桌面端 CI 门禁本地复跑（全过）
+
+`tauri-build.yml` 的步骤在本地逐一执行：
+
+```console
+$ cd desktop/tauri-app && bun run check:version
+desktop version files are in sync: 1.1.0
+$ bun run check:rust
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 41.66s
+$ bun run test:rust          # 22 passed
+$ cd web/classic && bun run test:node
+ℹ tests 137  ℹ pass 137  ℹ fail 0
+```
+
+### 20.3 Tauri 权限面（最小化，无需改动）
+
+`src-tauri/capabilities/default.json` 只授 `core:default`，未放开
+fs/shell/dialog 的 webview 侧权限。Rust 侧虽然 `plugin()` 注册了
+`shell`/`dialog`/`log`/`single_instance`，但前端源码（`web/default/src`、
+`web/classic/src`）无任何 `@tauri-apps/plugin-*` 调用或 `invoke(` ——插件只由
+Rust 侧使用，权限面与使用面一致。
+
+### 20.4 未覆盖的边界
+
+- 桌面端 CSP 的实际运行行为未做真机验证（需构建并启动 Tauri 应用）；
+  本节的结论只来自产物静态分析与 CI 门禁复跑。
+- `bun run build`（Tauri bundle）未执行：它需要 `@tauri-apps/cli` 与平台
+  原生依赖，属长时构建，本轮以 `check:rust` + `test:rust` 代替。
