@@ -1390,6 +1390,10 @@ git grep -c "io\.ReadAll(resp\.Body)" -- '*.go'   # 合计 61 处
 git status --porcelain -- <上述文件>               # 在途判定
 ```
 
+口径说明：该模式是字面量，只认变量名写作 `resp.Body` 的调用；2026-10-08
+复核发现换了变量名的同源读取整批落在该命令之外，见 §22.8。上面两个数是
+**清点当日**的历史记录，不改写；当前量以 §22.8 的命令与数字为准。
+
 46 个文件中：23 个正被其他会话修改（本轮不介入）；23 个干净，其中
 10 个是 task adaptor、1 个是测试文件、12 个是生产文件（14 处无界读取）。
 
@@ -1483,6 +1487,58 @@ base64 媒体。在途文件仍留待其会话落地后处理。）
 raw.githubusercontent 实测：claude:435、rerank:20、audio:60/121、
 xai:83），不是本仓引入的回归。
 
+### 22.8 清点模式的盲区（2026-10-08 复核发现，第十五批修复）
+
+§22.1 的清点命令以字面量 `io\.ReadAll(resp\.Body)` 为模式，只匹配变量名
+恰好写作 `resp.Body` 的调用。同一行为写在别的变量名上（`res.Body`、
+`response.Body`、形参 `body`、`reader`）就落在清点之外。
+
+以下数字为 2026-10-08 第十五批修复**之后**在当前工作区实测，口径同下述
+命令；换口径即不可比：
+
+```bash
+git grep -n "io\.ReadAll(" -- '*.go'                # 全部读取点
+# 逐行剔除同行可见的 LimitReader / ReadAllWithLimit，再剔除整行注释
+git status --porcelain -- <上述文件>                 # 在途判定
+```
+
+- 生产代码（`_test.go` 除外）共 87 处 `io.ReadAll(`：20 处同行已带界、
+  65 处不带界、2 处是注释行（`relay/channel/api_request.go:804`、
+  `relay/channel/jimeng/sign.go:26`）。
+- 65 处不带界中，在途文件占 45 处，干净文件占 20 处。
+- 干净文件的 20 处按可达性分：10 处是 §22.2 已由
+  `boundedTaskSubmitResponseBody` 中心封顶的 task adaptor 读取（运行时
+  不属于无界）；5 处是请求体（`aws/converse.go` 出站体、jimeng adaptor
+  与三个 topup/webhook 的入站体，受请求入口上限约束）；3 处是本地文件
+  （`common/audio.go`、`task/gemini/image.go`、jimeng adaptor 的
+  `io.ReadAll(file)`）；1 处实际已被 `LimitReader` 包住、只是同行看不到
+  （`controller/ratio_sync.go:310` 的 `io.ReadAll(limited)`）；1 处只经死
+  代码可达（`service/image.go:163`）。
+- 对照口径：同一条字面量模式在当前工作区数出 42 处生产读取（含
+  `_test.go` 则 47 处 / 34 个文件），与清点当日的 61 处 / 46 个文件不同
+  ——第十四批已封顶 14 处，且当日口径含测试文件。两个数不可混用。
+
+本轮修复的 4 处（3 个文件）不在上面的 20 处之内：扫描在修复之后运行。
+
+字面量模式漏掉、且所在文件当前为干净态的站点：
+
+| 文件:行 | 读取对象 | 结论 |
+| --- | --- | --- |
+| relay/channel/openai/responses_response_body_read.go:14 | `resp.Body`（形参 `body`，唯一调用点 chat_via_responses.go:235 传 `resp.Body`） | 确认无界，第十五批修复 |
+| oauth/generic.go:146、:232 | `res.Body`（配置端点的 token/userinfo 响应） | 确认无界，第十五批修复 |
+| controller/channel-billing.go:175 | `res.Body`（`GetResponseBody`，13 个调用点：余额、用量、/v1/models） | 确认无界，第十五批修复 |
+| oauth/github.go:127 | `res.Body` | 在途，不动 |
+| relay/channel/gemini/relay-gemini.go:2005、:2011 | `response.Body` | 在途，不动 |
+| controller/channel-test.go:802 | `body`（非流式测试响应） | 在途，不动 |
+| relay/responses_handler.go:1366 | `reader`（Codex 折叠请求体回放） | 在途，不动 |
+| service/image.go:163 | `reader`（`getImageConfig`） | 仅两条上游（`DecodeUrlImageData`）可达，而 `DecodeUrlImageData` 全仓无调用点（死代码）；另两条是本地 base64 解码。不改 |
+| common/audio.go:318 | `r`（`io.ReadSeeker`） | 本地文件时长解析，非上游响应，不改 |
+| relay/channel/aws/converse.go:38 | `requestBody` | 出站请求体（受入口上限约束），不改 |
+
+字面量模式漏掉、但属于上游在途的 4 处与 §22.4 原有 23 个在途文件一并
+留待各自会话；「46 个文件 / 61 处」仍是清点当日的历史记录，不改写，新增
+量以本节的命令与表格为准。
+
 ## 23. 2026-10-08 十二个干净文件的有界读取实施（第十四批）
 
 ### 23.1 实施内容
@@ -1527,4 +1583,61 @@ xai:83），不是本仓引入的回归。
 ### 23.3 未覆盖
 
 - §22 的 23 个在途文件仍为无界，留待其会话落地后按 §22.5 处理；
+- §22.6 的 FetchModels 裸 client 同样在途，未动。
+
+## 24. 2026-10-08 清点盲区三站点的有界读取实施（第十五批）
+
+### 24.1 实施内容
+
+承接 §22.8 的三个干净站点，全部替换为 `common.ReadAllWithLimit`：
+
+| 文件:函数 | 上限 | 依据 |
+| --- | --- | --- |
+| openai readResponsesNonStreamingResponseBody | 64MB | 非流式 JSON 信封，与 claude/xai/合成压缩一致 |
+| oauth generic ExchangeToken / GetUserInfo | 1MB | 同包 `jwt_direct.go`、`cas.go` 既有的 `1<<20` |
+| controller GetResponseBody | 10MB | 同仓 `model_sync.go`（`SYNC_HTTP_MAX_MB` 默认 10）与 `ratio_sync.go`（10MB）对同类上游 JSON 的上限 |
+
+`relay/channel/openai/responses_response_body_read.go` 的超限错误走既有
+`newResponsesNonStreamingResponseBodyReadError` 分类；该分类器本就把
+`*http.MaxBytesError` 判为不可重试，`ReadAllWithLimit` 返回的是普通
+`fmt.Errorf`，同样落入「非传输中断 → 不可重试 500」分支，分类语义不变。
+`controller/channel-billing.go` 与 `oauth/generic.go` 因 `io` 不再使用
+同步移除导入；`responses_response_body_read.go` 仍需 `io.Reader` 形参，
+导入保留但新增 `common`。
+
+### 24.2 验证
+
+- 先写测试再实现，三组用例在修复前全部失败：
+  - openai：`TestReadResponsesNonStreamingResponseBodyRejectsOversizedBody`
+    断言 `require.Nil(t, body)` —— 未封限时 `io.ReadAll` 返回满载切片，
+    断言失败（该失败即 RED 证据）；
+  - oauth：`TestGenericOAuthExchangeTokenRejectsOversizedBody` 与
+    `TestGenericOAuthGetUserInfoRejectsOversizedBody` 在未封限时断言
+    `exceeds` 失败，实际拿到 `oauth.token_failed` / `oauth.user_info_empty`
+    （NUL 填充的响应体解析为空）；
+  - controller：`TestGetResponseBodyRejectsOversizedUpstreamBody` 未封限时
+    返回 `nil` 错误，`require.Error` 失败。
+- 反向验证（2026-10-08，脚本在 /tmp 已删除）：把三处 helper 调用还原为
+  `io.ReadAll` 并补回 `io` 导入后，三组测试 exit=1 全部失败；还原实现后
+  三组全部通过。
+- 上限内对照用例各一组，确保封顶不会截断正常响应：
+  `AcceptsBodyWithinLimit`（openai/oauth）、`AcceptsBodyWithinLimit` 与
+  `StillRejectsNonOKStatus`（controller，后者确认 401 错误串不受影响）。
+- `go build ./...` exit 0；`go test ./controller ./model ./relay/common
+  ./relay/helper ./service ./middleware ./router ./oauth
+  ./relay/channel/openai -count=1` 九包全部 ok，exit 0。`gofmt` 六个
+  触碰文件全部干净。
+- 覆盖边界：断言的是行为（超限报错、上限内不截断），未断言具体字节数
+  常量——常量变动不会让测试变脆；超限的字节边界语义由
+  `common/io_test.go` 的 6 例（恰好等于上限、limit+1 等）覆盖。
+- 未覆盖：`GetResponseBody` 13 个调用点的端到端超限行为未逐一验证，
+  与 §23.2 的粒度一致；10MB 上限是否会拒掉某个真实上游的极大余额/模型
+  列表，需真实上游验证，本轮无此类上游。
+
+### 24.3 未覆盖
+
+- §22.8 表中 4 个在途站点（github.go、gemini、channel-test、
+  responses_handler）仍无界，留待其会话；
+- 65 处不带界读取里其余为请求体、本地文件与上游在途文件，见 §22.8 表
+  的结论列；
 - §22.6 的 FetchModels 裸 client 同样在途，未动。
