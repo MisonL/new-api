@@ -74,6 +74,9 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", anonymousRequestBodyLimit, controller.CreemWebhook)
 		apiRouter.POST("/waffo/webhook", anonymousRequestBodyLimit, controller.WaffoWebhook)
+		// Re-enabling this route also means mounting anonymousRequestBodyLimit
+		// on it: WaffoPancakeWebhook buffers the client body, and the /api group
+		// only backstops it at MAX_REQUEST_BODY_MB (default 128MB).
 		//apiRouter.POST("/waffo-pancake/webhook", controller.WaffoPancakeWebhook)
 
 		// Universal secure verification routes
