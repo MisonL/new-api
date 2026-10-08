@@ -145,15 +145,61 @@ SPA——路由本身大小写敏感，这是刻意保留的行为。新增 6 �
 上游 `QuantumNous/new-api` 的 `router/web-router.go` 没有这个分类函数
 （结构不同），本修复无上游对齐问题。
 
-### 3.3 P3：安全响应头缺失
+### 3.3 P3：安全响应头缺失（同日实施低风险子集）
 
 3001 响应未观察到 `X-Content-Type-Options`、`X-Frame-Options`、
 `Content-Security-Policy`、`Referrer-Policy`、`Permissions-Policy`、
 `Strict-Transport-Security`；仓库 Go 侧也没有任何安全响应头配置。生产
 macOS 环境的 Caddy 代理（`deploy/proxy/macos-docker-tun/Caddyfile`）只做
-`reverse_proxy`、未设置任何头，故也不存在外部代理层补齐。属真实的加固
-候选，但下线需决策（加哪些头、CSP 与前端 inline script 的兼容），本轮
-只记录。非本轮改动引入，也无证据表明当前构成漏洞。
+`reverse_proxy`、未设置任何头，故也不存在外部代理层补齐。非本轮改动引入，
+也无证据表明当前构成漏洞。
+
+**同日实施**：新增
+`middleware/security_headers.go`，在 `main.go` 全局中间件链上于
+`middleware.I18n()` 之后、`sessions.Sessions` 之前注册。注册点在
+`router.SetRouter`（`main.go:228`）之前，因此覆盖全部路由，包括 SPA 兜底
+与 relay 404 走到的 NoRoute 链。
+
+默认开启的两个头及依据：
+
+| 头 | 值 | 依据 |
+| --- | --- | --- |
+| `X-Content-Type-Options` | `nosniff` | 全仓响应都显式声明类型：静态资源经 `static.Serve` → `http.FileServer` → `http.ServeContent` 按扩展名取 `mime.TypeByExtension`，其余为 `c.JSON` / `c.Data` / 显式 `Set("Content-Type", ...)`；实测 SPA 入口引用的 9 个资源类型全部正确（见下） |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | 控制台 URL 带查询参数，避免整串 URL 进入他源 Referer；该值同时是现代浏览器默认值，对老浏览器是补齐 |
+
+刻意不设的三个头与理由：
+
+- `X-Frame-Options` / `Content-Security-Policy`：能否被 iframe 嵌入取决于
+  部署形态，CSP 还要和两个前端产出的 inline script 对齐；在这一层猜一个
+  策略只会误伤嵌入而不是提供保护。
+- `Strict-Transport-Security`：只有 TLS 终结者才知道自己是否在 HTTPS 上，
+  浏览器对经 HTTP 送达的该头直接忽略，从本进程发出等于装饰。
+
+`TestSecurityHeadersLeaveFramingAndTransportPoliciesUnset` 把这三个头的
+「缺席」钉成断言：将来要加必须显式改测试，而不是顺手加一行。
+
+验证：
+
+- 单测 3 例（`middleware/security_headers_test.go`）覆盖普通路由、NoRoute
+  兜底、三个头的缺席。反向验证：删掉 `nosniff` 那一行后两例失败
+  （`X-Content-Type-Options = ""`），恢复后通过。
+- 修复前基线（旧容器，2026-10-08T06:38:03Z）：`GET /api/status` 与
+  `GET /` 均无上述六个头中的任何一个。
+- 修复后实测（镜像 `new-api-local:dev`
+  `82ca75ce99cf9dc787f5752020382d69ab663d0b-dirty`，容器
+  `new-api-dev-isolated-new-api-1`）：`/api/status` 200 JSON、
+  `/` 200 HTML、`/console/midjourney` 200 HTML、`//api/status` 404 JSON、
+  `/v1/models` 401 JSON 五类响应都带上了两个头，且都不含被刻意排除的三个。
+- nosniff 的风险点逐项核对：SPA 入口引用的 9 个资源返回类型为
+  `text/javascript; charset=utf-8`（7 个）、`text/css; charset=utf-8`
+  （2 个）、`image/png`（1 个 `/logo.png`），与浏览器按上下文期望的类型
+  一致，不存在会被 nosniff 拦下的资源。
+- 未覆盖：classic 与 default 两个主题的完整资源树只抽查了当前生效主题的
+  入口引用清单；SSE 流式响应（需可用 token）与 `Content-Disposition` 下载
+  路径未实测。源码层面确认 goroutine 内写响应体的站点（`video_proxy`、
+  `mjproxy`、`relay_task`）都显式设置了 `Content-Type`，`videoProxyError`
+  另有 `c.Writer.Written()` 守卫，不会二次写头。
+
 
 ### 3.4 P3（文档准确性）：在途 CORS 注释的前提不成立
 
@@ -167,14 +213,40 @@ macOS 环境的 Caddy 代理（`deploy/proxy/macos-docker-tun/Caddyfile`）只�
 理由（`AllowAllOrigins=true` 硬编码 `ACAO: *`，跨源凭证请求本就无效；
 要支持需回显具体 Origin）。
 
-### 3.5 记录：普通 `/api` 路由与其预检的 CORS 头不一致
+建议改写的措辞（本轮未执行，原因见下）：把最后一句
+「Browser clients on this gateway authenticate with a bearer token, not
+cookies.」换为「The console and the admin API authenticate with a session
+cookie (`middleware/auth.go` reads the session before `Authorization`, and
+`web/default` sends `withCredentials`), which the wildcard cannot pair
+with.」——即保留删头的理由，去掉与本仓库代码不符的前提。
 
-CORS 中间件在 `router/relay-router.go:14` 以 `engine.Use` 注册，晚于
-`SetApiRouter`/`SetDashboardRouter` 的路由注册（`router/main.go:16-18`），
-因此只覆盖其后注册的路由与 NoRoute 链。实测：`GET /api/status` 带
-`Origin` 无任何 CORS 头，而 `OPTIONS /api/status` 预检返回
-`ACAO: *`（走 NoRoute 链）。二者不一致属既有状态，非本轮改动；仅在
-有跨源读取 `/api/*` 需求的部署下才有影响。
+本轮不改这一句：`middleware/cors.go` 是其他会话的在途文件（同一改动还带
+`middleware/cors_test.go` 两个用例），改动它等于介入他人的未提交工作。
+§3.4 属文档准确性问题，不影响行为，留待该会话落地时一并处理。
+
+### 3.5 记录：`/api/*` 与其预检的 CORS 头不一致（本轮核查后决定不改）
+
+CORS 中间件以 `engine.Use` 注册在 `router/relay-router.go:14`，晚于
+`router/main.go:16-17` 的 `SetApiRouter` / `SetDashboardRouter`，因此只覆盖
+其后注册的路由与 NoRoute 链。实测（2026-10-08，`Origin: https://probe.test`）：
+
+| 请求 | 结果 |
+| --- | --- |
+| `GET /api/status` | 200，无任何 CORS 头 |
+| `GET /dashboard/billing/subscription` | 401，`Access-Control-Allow-Origin: *` |
+| `OPTIONS /api/status`（预检） | 204，`ACAO: *` + `ACAM` + `ACAH` + `ACAMax-Age: 43200` |
+
+即只有控制台自己的 `/api/*` 缺 CORS，其余对外的 API 面都有。**决定不改**：
+
+- 跨源带凭证请求在本进程已被 `SameSite=StrictMode` 的会话 cookie 挡住
+  （`main.go:220`），所以给 `/api/*` 加通配 CORS 不会新增可写向量，但也
+  没有任何已知消费者；把通配头铺到控制台 API 上属于没有收益的扩大面。
+- 反方向（让 `/api/*` 的预检也不返回通配头）能让两边一致，但要改的是
+  `middleware/cors.go`——其他会话的在途文件；且当前不一致只在「部署把
+  控制台放在另一个源」时才有影响，而那种部署在改动前后都不可用
+  （通配 `ACAO` 与凭证本就互斥）。
+- 因此这一条按「已知且无影响」保留，需要时连同 3.4 一起由该文件的会话
+  处理。
 
 ## 4. 被推翻或收窄的代理结论
 
