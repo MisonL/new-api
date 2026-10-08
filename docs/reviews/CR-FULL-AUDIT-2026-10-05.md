@@ -1368,3 +1368,104 @@ default 六个 locale 的 missing / extras / untranslated 均为 0。
 补充事实：门禁未接入 CI（`grep i18n .github/workflows/*.yml` 为空），
 只在 `web/classic` 的 `bun run i18n:lint` 手动触发。若要把"新硬编码
 字符串"变成硬门禁，需先把它接进某个 workflow——属独立决策，记录不执行。
+
+## 22. 2026-10-08 上游响应体无界读取清点（第十三批；记录不改）
+
+### 22.1 清点方法与结果
+
+采样时间 2026-10-08，基于工作区（含其他会话在途改动）：
+
+```bash
+git grep -l "io\.ReadAll(resp\.Body)" -- '*.go'   # 46 个文件
+git grep -c "io\.ReadAll(resp\.Body)" -- '*.go'   # 合计 61 处
+git status --porcelain -- <上述文件>               # 在途判定
+```
+
+46 个文件中：23 个正被其他会话修改（本轮不介入）；23 个干净，其中
+10 个是 task adaptor、1 个是测试文件、12 个是生产文件（14 处无界读取）。
+
+共享出口 `doRequestWithClient`/`wrapUpstreamTimingBody`
+（relay/channel/api_request.go）只记录时延、不设字节上限；service 级
+调用（codex_wham_usage 等）也不经过该出口。
+
+### 22.2 已被中心包装覆盖（10 个 task adaptor 与轮询路径，不属于无界）
+
+10 个 task adaptor 文件的读取全部位于 `TaskAdaptor.DoResponse`：
+agnes:490、ali:381、doubao:211、gemini:125、hailuo:84、jimeng:192、
+kling:194、suno:97、vertex:196、vidu:187（均在
+`relay/channel/task/*/adaptor.go`）。该签名（返回
+`(taskID, taskData, taskErr)`）的唯一调用点是 `relay/relay_task.go:895`，
+之前 :859 已无条件包上 `boundedTaskSubmitResponseBody`（1MB，常量 :73；
+注释明说 "Every task adaptor reads resp.Body directly. Install one shared
+bounded reader"；测试在 `relay/relay_task_response_test.go`）。轮询侧读取
+统一走 `service.ReadTaskPollingResponseBody`（128MB，
+service/task_polling.go:44），8 个调用点含 relay_task.go:1276 与
+sora adaptor:261。两层都不属于无界。
+
+### 22.3 干净且无界的 12 个生产文件（14 处）
+
+| 文件:行 | 函数 | 响应内容 |
+| --- | --- | --- |
+| relay/channel/claude/relay-claude.go:1397 | ClaudeHandler | 非流式 JSON |
+| relay/channel/xai/text.go:83 | xAIHandler | 非流式 JSON |
+| relay/channel/gemini/relay-gemini-native.go:25 | GeminiTextGenerationHandler | 非流式 JSON（可含 inline base64） |
+| relay/channel/gemini/relay-gemini-native.go:57 | NativeGeminiEmbeddingHandler | JSON |
+| relay/channel/ali/image.go:396 | aliImageHandler | 图像（URL 或 base64） |
+| relay/channel/minimax/image.go:179 | miniMaxImageHandler | 图像 |
+| relay/channel/zhipu_4v/image.go:58 | zhipu4vImageHandler | 图像 |
+| relay/channel/openai/audio.go:60 | OpenaiTTSHandler | 音频字节 |
+| relay/channel/openai/audio.go:120 | OpenaiSTTHandler | JSON |
+| relay/channel/openai/relay_responses_synthetic_compact.go:110 | buildSyntheticResponsesCompaction | JSON |
+| relay/common_handler/rerank.go:19 | RerankHandler | JSON（可含回显文档） |
+| service/codex_wham_usage.go:51 | FetchCodexWhamUsage | JSON |
+| service/midjourney.go:284 | DoMidjourneyHttpRequest | JSON |
+| service/waffo_pancake.go:135 | CreateWaffoPancakeCheckoutSession | JSON |
+
+另有 relay/channel/api_request_test.go:1313 属测试 helper，不构成运行时面。
+
+### 22.4 本轮不改的原因
+
+1. 23/46 在途（含 openai/relay-openai.go、gemini/relay-gemini.go 等主链路），
+   清扫无法闭合该类，半闭合状态比完整清单更难跟踪；
+2. 每端点上限是设计决策，不能套一个常数：rerank 响应会回显请求文档
+   （cohere 转换强制 `ReturnDocuments: true`，
+   relay/channel/cohere/relay-cohere.go:84），上限必须与请求入口上限
+   （`common.RequestBodyIngressLimit`，common/gin.go:49）挂钩；图像/音频
+   端点的合法上限本就大；
+3. 仓库既有做法是逐端点命名常量、随文件改动增量添加（1MB task submit /
+   8MB ollama / 64MB dify / 128MB task polling / 8KB mjproxy 错误体）。
+
+### 22.5 后续批量处理的建议值（未经本轮验证）
+
+| 端点 | 建议上限 |
+| --- | --- |
+| claude / xai / gemini-native / synthetic compact 的 JSON | 64MB（与 dify 同级） |
+| ali / minimax / zhipu_4v 图像 | 128MB（base64 图加元数据） |
+| TTS 音频 | 64MB |
+| STT JSON | 16MB |
+| rerank | 请求入口上限加余量（因回显文档） |
+| codex usage / waffo | 8MB |
+| midjourney | 16MB |
+
+实施时每个值需按端点复核，并按仓库模式加命名常量与超限显式错误
+（`io.ReadAll(io.LimitReader(r, limit+1))` 后判长度，禁止静默截断）。
+
+### 22.6 两个相关事实（记录不改）
+
+- 共享 relay client 默认无超时：`RELAY_TIMEOUT` 默认 0（common/init.go:120），
+  `InitHttpClient` 在该值下构建不带 `Timeout` 的 client
+  （service/http_client.go:383-394）。对流式响应是刻意设计；但对无界
+  `ReadAll` 而言，唯一的分配上界就是内存。
+- `FetchModels`（controller/channel.go:1712，仅 RootAuth）用
+  `&http.Client{}`：无超时、无 SSRF 防护 transport、无默认
+  UA、无 CheckRedirect；对照共享 client（service/http_client.go:385）与
+  保存渠道路径（FetchUpstreamModels → fetchChannelUpstreamModelIDs →
+  GetResponseBody → NewProxyHttpClient，controller/channel-billing.go:157）。
+  该函数正被其他会话修改（同一函数内的 auth header 逻辑），本轮不介入，
+  留给该会话。
+
+### 22.7 上游对照
+
+上游 QuantumNous/new-api 的同名 handler 同样无界（2026-10-08 用
+raw.githubusercontent 实测：claude:435、rerank:20、audio:60/121、
+xai:83），不是本仓引入的回归。
