@@ -1567,10 +1567,13 @@ git status --porcelain -- <上述文件>                 # 在途判定
 | --- | --- | --- |
 | `POST /v1/chat/completions`，`Content-Encoding: gzip` + 非 gzip 体 | 400 | relay 链含解压中间件，非法 gzip 在读体前被拒 |
 | `POST /api/user/reset`，同样请求 | 200 `无效的参数` | handler 收到原始字节（非法 JSON），链上无该中间件 |
-| `POST /api/user/reset`，33MiB 合法 JSON（含 `email`/`token` 字段） | 200 `重置链接非法或已过期` | 超过 32MiB 默认上限仍被完整解码并进入验证码校验；若存在 32MiB 上限会在解码时回到 `无效的参数`，故此探针可判别 |
+| `POST /api/user/reset`，130MiB 合法 JSON（含 `email`/`token` 字段） | 200 `重置链接非法或已过期` | 入口上限默认 128MiB（`MAX_REQUEST_BODY_MB`，common/init.go:190；隔离容器未设该变量），130MiB 超过它仍被完整解码并进入验证码校验；若上限生效，解码会在 `MaxBytesReader` 处失败并回到 `无效的参数`，故此探针可判别 |
 
-（补充：同一路由只发 38MiB「无字段」体时得到 `无效的参数`，与「解码
-失败」落在同一分支，不能判别，已弃用该口径。）
+（口径修正：本节初稿写「33MiB 超过 32MiB 默认上限」，其中 32 只是
+`maxMB <= 0` 时的兜底值（middleware/gzip.go:31-34），默认值是
+`MAX_REQUEST_BODY_MB` 的 128；已改用 130MiB 探针，结论不变。另：同一
+路由只发 38MiB「无字段」体时得到 `无效的参数`，与「解码失败」落在同一
+分支，不能判别，该口径已弃用。）
 
 据此更正 §22.8 的分类：
 
@@ -1744,3 +1747,31 @@ relay 出站体（`aws/converse.go`、jimeng adaptor）与 `controller/channel.g
   入口上限约束）；
 - `topup_waffo_pancake.go:219` 路由被注释，无界状态保留但不可达；
 - §22.8 表中其余在途站点未动。
+
+### 25.4 上游对照（2026-10-08 核对 upstream/main @ 6370b2942）
+
+- relay 路径：上游与 fork 相同，`DecompressRequestMiddleware` 唯一注册在
+  `SetRelayRouter`（上游 router/relay-router.go:17），`/api`、`/dashboard`
+  上游同样不在其覆盖内。
+- 匿名 `/api` 端点：上游**有**一层 fork 没有的防护——
+  `middleware.AnonymousRequestBodyLimit()`（middleware/request_body_limit.go，
+  2026-06 由 PR #5244 引入）：默认 **512KB**
+  （`ANONYMOUS_REQUEST_BODY_LIMIT_KB`，负数回落 512，0 放行），读完
+  `limit+1` 字节判超限，返回 413（其它读取错误 400），并把请求体换成
+  可重放的 `io.NopCloser(bytes.NewReader(...))` 且修正 `ContentLength`。
+  它是**逐路由**挂在 18 个匿名可达 POST 上的，不是整组中间件：
+  `/api/setup`、`/api/user/reset`、`/api/oauth/state`、四个 webhook
+  （stripe/creem/waffo/waffo-pancake）、`/api/user/register|login|
+  login/2fa|login/verify`、passkey 登录 4 条、`/api/user/epay/notify`、
+  `/api/subscription/epay/notify|return`。
+- 鉴权后的 `/api` 路由：上游**没有**统一上限，与本 fork 相同（上游
+  webhook handler 内的 `io.ReadAll(c.Request.Body)` 依旧无界，靠的正是
+  路由层的这层 512KB）。
+- 响应侧：上游没有 fork 的 `ReadAllWithLimit` 系列（上游仍有 58 处
+  无界 `io.ReadAll(resp.Body)`）；fork 的 deferred opaque replay body /
+  Codex local compaction 为 fork 自研，上游没有。
+- fork 现状：`middleware/request_body_limit.go` 与
+  `common/request_body_limit.go` 在 fork 中不存在，`router/api-router.go`
+  未引用任何请求体上限中间件。若决定收口该缺口，与上游对齐的选项是移植
+  这套逐路由匿名上限（覆盖面即上列 18 条路由，含本批两处 handler 已覆盖
+  的 webhook），而非新增整组中间件。
