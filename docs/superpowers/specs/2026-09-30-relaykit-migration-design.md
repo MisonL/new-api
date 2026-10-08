@@ -1116,7 +1116,7 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 
 **二、Go 类型差异：真差异 6 处，另有等价拼写 21 处（**第 30 轮修正**：原文写「21 处，其中真差异 6 处、等价拼写 15 处」，三处数字全错——等价拼写组实测 **21** 项，不是 15）
 
-口径：工具的「类型不同」维度报 **6 处**（`[]constant.EndpointType` 被单列，因为它不是拼写等价）。**等价拼写是工具单列的第三组，不并入类型维度**（`main.go:166-171`：类型不同且 `spellingsEquivalent` 为真时进 `tagEquivalents`，否则才进 `typeSet`）——实测该组 **21 项 = 20 个字段 + `NewNotify` 的 1 个形参**，涉及 **7 个类型 + 1 个函数**。两组合计 **27 处**。
+口径：工具的「类型不同」维度报 **6 处**（`[]constant.EndpointType` 被单列，因为它不是拼写等价）。**等价拼写是工具单列的一组，不并入类型维度**（`tools/relaykit-dto-compat/main.go` 的 `build()` 里两处 `spellingsEquivalent` 分支：类型或签名文本不同且拼写等价时进 `tagEquivalents`，否则分别进 `typeSet` / `sigDiff`；此处按符号而非行号引用——该文件是本地新增、不在任何基线提交里，行号引用会随工具演进漂移且不被 citation 门禁覆盖）——实测该组 **21 项 = 20 个字段 + `NewNotify` 的 1 个形参**，涉及 **7 个类型 + 1 个函数**。两组合计 **27 处**。
 
 **类别 A——纯写法差异，无语义变化（21 项 = 20 个字段 + 1 个形参；**第 30 轮修正**，原文写「15 处」，与紧随其后的枚举相加不符）**：`interface{}` 与 `any` 是同一类型的两种拼写。逐类型计数（工具实测）：`GeminiModel` 13、`DifferenceItem` 2、`GeminiFunctionResponse` 1、`Notify` 1、`RealtimeSession` 1、`ResponsesOutputContent` 1、`Tool.InputSchema` 1 = **20 个字段**，加 `NewNotify` 的形参 1 = **21 项**。**无需动作**，但会在 diff 里产生噪音，评审时不要误判为不兼容——本工具把它们单列一组正是为此。
 
@@ -1130,7 +1130,7 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 | `GeminiThinkingConfig.IncludeThoughts` | `bool` | `*bool` | 同上，且这是**思考等级**链路的一环。本地 `relay/channel/gemini/relay-gemini.go` 有 **8 处**直接赋值/读取（`:148`、`:167`、`:171`、`:192` 字面量 `true`；`:302`/`:305` 赋 `true`/`false`；`:315` 赋变量；`:339` 读取），改为指针后每处都要改成 `common.GetPointer[...]` 或解引用 |
 | `OpenAIResponsesResponse.CreatedAt`、`OpenAIResponsesCompactionResponse.CreatedAt` | `int` | `IntValue` | `IntValue`（`relaykit/dto/values.go:32`）自定义了 `UnmarshalJSON`，**接受 int / float / string 三种形态**；本地 `int` 只接受数字。取 relaykit 版是**能力增强**，但需确认本地没有依赖「字符串形态应当报错」的行为 |
 
-**计数口径（第 15 轮用工具复核；第 30 轮修正三处数字）**：类型维度 = **真差异 6**（类别 B 1 + 类别 C **4 个类型共 5 个字段**——`ResponsesStreamResponse` 的 `Text`/`Arguments` 各算一个字段）；**等价拼写 21 项是工具的独立第三组，不并入类型维度**（原文写「等价拼写 15 + 真差异 6」把两者相加，实为并列关系且 15 应为 21）。签名维度 = 12（12 个 `IsStream`；`NewNotify` 的 `interface{}`/`any` 已归入等价拼写，不计入签名差异）。**上一轮曾把这两个数写成「类型真差异 3 处」「签名差异 13 处」，前者漏了 `OpenAIModels`、后者把等价拼写算作了差异**，见第 15 轮说明。
+**计数口径（第 15 轮用工具复核；第 30 轮修正三处数字）**：类型维度 = **真差异 6**（类别 B 1 + 类别 C **4 个类型共 5 个字段**——`ResponsesStreamResponse` 的 `Text`/`Arguments` 各算一个字段）；**等价拼写 21 项是工具的独立组，不并入类型维度**（原文写「等价拼写 15 + 真差异 6」把两者相加，实为并列关系且 15 应为 21）。签名维度 = 12（12 个 `IsStream`；`NewNotify` 的 `interface{}`/`any` 已归入等价拼写，不计入签名差异）。**上一轮曾把这两个数写成「类型真差异 3 处」「签名差异 13 处」，前者漏了 `OpenAIModels`、后者把等价拼写算作了差异**，见第 15 轮说明。
 
 **结论**：12.0.5 第五节「17 个取 relaykit 即纯增益」的表述**不完整**——那 17 个是**按字段名集合**判定的；按 tag 与类型两个维度复核后，其中 `ChatCompletionsStreamResponseChoice`、`GeminiChatRequest`、`ToolCallRequest`、`IncompleteDetails`、`ClaudeServerToolUse`、`ResponsesStreamResponse`、`OpenAIResponsesResponse`、`OpenAIResponsesCompactionResponse`、`GeminiThinkingConfig`、`OpenAIModels` **10 个另有 tag 或类型差异，须逐项确认**（工具实测：tag 组 5 个类型 + type 组 5 个类型，两组无交集）。**第 30 轮修正**：紧接的「真正的『零动作』只有类别 A 的 **8 个类型**」——实测是 **7 个类型 + 1 个函数**（`DifferenceItem`、`GeminiFunctionResponse`、`GeminiModel`、`Notify`、`RealtimeSession`、`ResponsesOutputContent`、`Tool.InputSchema`，加 `NewNotify` 的形参），不是 8 个类型。
 
