@@ -1092,3 +1092,77 @@ $ git ls-remote https://github.com/actions/checkout.git refs/tags/v4
   tauri/glib 等上游传递依赖，需等上游升级。
 - action 钉版未在真实 CI 运行验证（本地无 CI 运行环境）；SHA 由 `git ls-remote`
   解析并做了一致性交叉验证，但工作流本身未触发。
+
+## 18. 2026-10-08 运行时镜像底座：alpine 3.22.2 → 3.22.6（第九批）
+
+### 18.1 触发与取证
+
+§15 处理了构建工具链（golang builder），本轮轮到运行时底座。生产
+Dockerfile 运行时阶段钉的是 `alpine:3.22.2@sha256:4bcff639...`（2026-04
+构建），而 3.22 线已发布到 3.22.6（2026-09-17）。用 docker 实测两版镜像
+内包版本：
+
+```console
+$ docker run --rm alpine:3.22.2 sh -c "apk info -v | grep -E '^(musl|busybox|zlib|libcrypto3|libssl3)-'"
+musl-1.2.5-r10   busybox-1.37.0-r19   zlib-1.3.1-r2
+libcrypto3-3.5.4-r0   libssl3-3.5.4-r0
+$ docker run --rm alpine:3.22.6 sh -c "apk info -v | grep ..."
+musl-1.2.5-r12   busybox-1.37.0-r20   zlib-1.3.2-r0
+libcrypto3-3.5.8-r0   libssl3-3.5.8-r0
+```
+
+对照 Alpine secdb（v3.22/main.json），3.22.2 携带的是以下 CVE 的**修复前**
+版本：musl（CVE-2026-6042、CVE-2026-40200）、busybox（CVE-2025-46394、
+CVE-2024-58251）、zlib（CVE-2026-22184、CVE-2026-27171）、openssl
+（3.5.5–3.5.8 各批共约 40 条，含 CVE-2026-14456 等）。
+
+### 18.2 处理（`ec5c724eb`）
+
+- `Dockerfile` 运行时 FROM：`alpine:3.22.2@sha256:4bcff639...` →
+  `alpine:3.22.6@sha256:5291449c...`（index digest，buildx imagetools
+  取得并经 registry API 复核）；
+- 恢复 `apk upgrade --no-cache`（在 `apk add` 之前）。原因：3.22.6 镜像
+  自身仍落后于仓库 —— 实测 3.22.6 内 zlib 是 1.3.2-r0、openssl 3.5.8，
+  而 3.22 仓库已有 zlib 1.3.2-r1（CVE-2026-85091，`gz_vacate` 堆溢出）
+  和 openssl 3.5.9。只有 upgrade 能拿到这批。该行在最初的 Dockerfile 里
+  就有（`4cbef0780`），切 debian 时丢失，切回 alpine 时（`95fdc63d7`）
+  没有恢复。
+
+可达性说明：容器只运行静态 Go 二进制（CGO_ENABLED=0），zlib/openssl 的
+使用方只有 apk 与 busybox ssl_client，healthcheck 的 wget 走明文 http。
+所以这批修复是纵深防御 + 消除镜像扫描噪音，不是运行时可达漏洞。
+
+### 18.3 验证
+
+```console
+$ docker build --check -f Dockerfile .
+Check complete, no warnings found.
+$ docker build -t apitest /tmp/apitest   # 同 digest + 同 RUN 序列的抛掷构建
+apk upgrade + apk add + update-ca-certificates 全过，
+zlib-1.3.2-r1  libcrypto3-3.5.9-r0  musl-1.2.5-r12  busybox-1.37.0-r20
+$ sh scripts/build-docker-local.sh new-api-local:verify-alpine326
+built image=new-api-local:verify-alpine326 version=v1.1.0 commit=ec5c724eb-dirty
+```
+
+全量镜像实测（`docker run --entrypoint sh`）：
+
+```console
+$ cat /etc/alpine-release          # 3.22.6
+$ apk info -v | grep -E "^(zlib|libcrypto3|libssl3|musl|busybox)-"
+busybox-1.37.0-r20  libcrypto3-3.5.9-r0  libssl3-3.5.9-r0
+musl-1.2.5-r12  zlib-1.3.2-r1
+$ /new-api --build-info            # version/commit/date/source 正常
+```
+
+首次构建曾因 module proxy 下载 `klauspost/compress@v1.18.7` 时 EOF 失败
+（`storage.googleapis.com` 瞬时网络故障）；本地 `go mod download` 复核通过后
+重试即成功，非 Dockerfile 问题。
+
+### 18.4 边界
+
+- 全量构建用抛掷 tag `new-api-local:verify-alpine326`，未触碰
+  `new-api-local:dev`（隔离环境镜像）与任何运行中容器；构建完成后抛掷镜像
+  已删除。
+- 前端产物来自当前 dirty 工作区（含其他会话在途改动），构建成功只证明
+  Dockerfile 可构建，不代表这些前端改动已验收。
+- 生产与隔离环境仍运行旧镜像；本次只影响后续构建。
