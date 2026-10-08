@@ -1369,6 +1369,15 @@ default 六个 locale 的 missing / extras / untranslated 均为 0。
 只在 `web/classic` 的 `bun run i18n:lint` 手动触发。若要把"新硬编码
 字符串"变成硬门禁，需先把它接进某个 workflow——属独立决策，记录不执行。
 
+**2026-10-08 补测**：`node web/scripts/i18nLintGate.mjs` 在当前工作区
+（含其他会话的在途改动）EXIT=0，输出"未发现超出基线的 i18n lint 新问题"，
+即门禁本身是绿的，接进 CI 不会一上线就红。但没有接：仓库目前唯一的 PR
+工作流是 `.github/workflows/pr-check.yml`，触发方式是 `pull_request_target`
+且不 checkout 仓库（只跑 anti-slop），要跑 i18n 门禁就得新增 checkout 与
+bun 依赖安装；在 `pull_request_target` 下 checkout 并执行 PR 代码是已知的
+危险模式，正确做法是改用 `pull_request` 触发或严格隔离。这是一个需要
+安全考量的独立改动，不是加一行 `run:`，故仍按记录处理。
+
 ## 22. 2026-10-08 上游响应体无界读取清点（第十三批；记录不改）
 
 ### 22.1 清点方法与结果
