@@ -455,7 +455,7 @@ python3 scripts/relaykit-citation-check.test.py # 25 个单测
 
 它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。当前实测三组全绿：**51/51**（`ref=upstream/main`）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 24/24**（**第 38 轮**：第 37 轮为 50/103/24）。已做**反向验证**（五次扰动全部退出码 1）：relaykit 全路径 `:99999` → `out of range`；改文件名 → `file not found`；简写路径 `:99999`；宿主 `<宿主文件>:99999` → `out of range at dbfbc096f`；**去掉一个 `upstream/main:` 前缀 → 报「not found at baseline but found at upstream/main: add an upstream/main: prefix」**。还原后退出码 0、文档字节一致。
 
-**简写路径的支持（第 28 轮补充）**：文档大量用省略 `relaykit/relayconvert/` 前缀的写法，形如 `internal/oai_chat/<文件>.go:<行>`、`oai_chat/<文件>.go:<行>`、`convmeta/<文件>.go:<行>`、`shared/claude/<文件>.go:<行>`。旧版正则要求 `relaykit/` 前缀，**这 23 处唯一简写引用全部在门禁之外**，而检查器仍报 18/18 绿——与第 26 轮的假绿同类（那次是新表缺前缀）。现按**显式映射表**（`SHORT_PACKAGES`，逐个核实过真实目录）扩展：`internal`/`oai_chat`/`oai_responses`/`claude_messages`/`gemini_chat`/`shared`/`media`/`convdiag` → `relaykit/relayconvert/internal/...`；`convmeta`/`kitutil` → `relaykit/relayconvert/...`；`reasonmap` → `relaykit/reasonmap/...`。**宿主路径（`relay/`、`service/`、`controller/`、`common/`、`setting/`、`aws/`、`vertex/` 与裸 `dto/`、`types/`）一律不扩展**——宿主有自己的 `dto/`、`types/`，文档里的 `dto/...:NN` 指宿主，误扩展会造出假引用。15 个单测覆盖了「宿主路径不得被扩展」这一条。**注意本段自身不能用真引用作示例**——写成 `foo.go:12` 会被检查器当成待解析的引用（本轮就踩过一次），故示例一律用 `<文件>`/`<行>` 占位。
+**简写路径的支持（第 28 轮补充）**：文档大量用省略 `relaykit/relayconvert/` 前缀的写法，形如 `internal/oai_chat/<文件>.go:<行>`、`oai_chat/<文件>.go:<行>`、`convmeta/<文件>.go:<行>`、`shared/claude/<文件>.go:<行>`。旧版正则要求 `relaykit/` 前缀，**这 23 处唯一简写引用全部在门禁之外**，而检查器仍报 18/18 绿——与第 26 轮的假绿同类（那次是新表缺前缀）。现按**显式映射表**（`SHORT_PACKAGES`，逐个核实过真实目录）扩展：`internal`/`oai_chat`/`oai_responses`/`claude_messages`/`gemini_chat`/`shared`/`media`/`convdiag` → `relaykit/relayconvert/internal/...`；`convmeta`/`kitutil` → `relaykit/relayconvert/...`；`reasonmap` → `relaykit/reasonmap/...`。**宿主路径（`relay/`、`service/`、`controller/`、`common/`、`setting/`、`aws/`、`vertex/` 与裸 `dto/`、`types/`）一律不扩展**——宿主有自己的 `dto/`、`types/`，文档里的 `dto/...:NN` 指宿主，误扩展会造出假引用。**3 个单测**覆盖了「宿主路径不得被扩展」这一条（`test_does_not_expand_host_paths`、`test_does_not_extract_upstream_prefixed_host_paths`、`test_does_not_extract_sha_prefixed_host_paths`）——**第 38 轮修正**：原文写「15 个单测」，那是当时该文件的总用例数、且并非都测这一条；此处改为按用例名指认（总用例数由 §9.3 的门禁自述检查覆盖）。**注意本段自身不能用真引用作示例**——写成 `foo.go:12` 会被检查器当成待解析的引用（本轮就踩过一次），故示例一律用 `<文件>`/`<行>` 占位。
 
 **固有边界（不得声称已覆盖）**：文档还有大量**裸 `:NNN`** 引用（如 `:749`、`:1049`、`:345`、`:247`、`:463`），它们不带路径，**无法机械归属**到某个文件（同一节里可能同时指上游与本地），故**不在门禁内**。凡关键行号，应写成带路径的形式以进入门禁。
 
@@ -754,14 +754,14 @@ python3 scripts/relaykit-citation-check.test.py  # 25 个单测
 
 ```bash
 python3 scripts/relaykit-doc-structure-check.py        # 两份文档均 0 问题时退出码 0
-python3 scripts/relaykit-doc-structure-check.test.py   # 13 个单测
+python3 scripts/relaykit-doc-structure-check.test.py   # 17 个单测
 ```
 
 **门禁自述计数**（第 38 轮新增：把「门禁改了、描述没改」变成门禁——这一盲区此前复发三次：第 36 轮的 34/15、第 38 轮的 §9.3 47/98/21、以及 `relaykit-citation-check.py` docstring 里长期滞留的 「13 citations across 9 files」）：
 
 ```bash
 python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对
-python3 scripts/relaykit-gate-selfcheck.test.py       # 17 个单测
+python3 scripts/relaykit-gate-selfcheck.test.py       # 21 个单测
 ```
 
 它只检查**本文档的当前口径声明**；CR 记录里的计数是历史记录（「第 37 轮为 50/103/24」这类），记的是「当时为真」，不随门禁演进失效，故不在射程内。

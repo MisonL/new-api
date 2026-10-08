@@ -156,6 +156,16 @@ def extract_claims(doc):
         # 「relaykit-gate-selfcheck.test.py   # 14 个单测」
         for m in re.finditer(r"relaykit-gate-selfcheck\.test\.py[^\n]*?(\d+) 个单测", line):
             add(i, "自检单测数", int(m.group(1)))
+        # 「本文档 relaykit 行引用现为 **51 处唯一**」（§11 口径，与 §9.3 的
+        # 「relaykit 51 + 宿主 107 + ...」是同一批门禁计数，但句式不同——
+        # 第 38 轮补入：此前抽取器只认 §9.3 句式，§11 这三处整类漏检）
+        for m in re.finditer(r"现为 \*\*(\d+) 处唯一\*\*", line):
+            add(i, "§11 relaykit 引用数", int(m.group(1)))
+        for m in re.finditer(r"裸宿主引用 \*\*(\d+) 处\*\*", line):
+            add(i, "§11 宿主引用数", int(m.group(1)))
+        for m in re.finditer(r"全路径 \*\*(\d+) 处\*\*", line):
+            add(i, "§11 全路径引用数", int(m.group(1)))
+
         # 「# 计数: fieldSet=33 tag=5 type=6 embed=0 order=4 sig=12 equiv=21」
         for m in re.finditer(
             r"#\s*计数:\s*fieldSet=(\d+)\s+tag=(\d+)\s+type=(\d+)\s+embed=(\d+)\s+"
@@ -203,6 +213,18 @@ def compare(claims, actual):
             real = actual.get("selfcheck_tests")
             if real is not None and claimed != real:
                 mismatches.append((line_no, desc, claimed, real))
+        elif desc == "§11 relaykit 引用数":
+            real = actual.get("citation")
+            if real is not None and claimed != real[0]:
+                mismatches.append((line_no, desc, claimed, real[0]))
+        elif desc == "§11 宿主引用数":
+            real = actual.get("citation")
+            if real is not None and claimed != real[1]:
+                mismatches.append((line_no, desc, claimed, real[1]))
+        elif desc == "§11 全路径引用数":
+            real = actual.get("citation")
+            if real is not None and claimed != real[2]:
+                mismatches.append((line_no, desc, claimed, real[2]))
         elif desc in ("dto 七维（命令行注释）", "dto 七维（正文）"):
             real = actual.get("dto")
             if real is not None and claimed != real:
@@ -238,7 +260,13 @@ def main():
 
     if not failures and not mismatches:
         if not args.quiet:
-            print("全部门禁自述计数与实际输出一致")
+            # 跳过 ≠ 通过：置位递归守卫时「自检单测数」整类未被核对，
+            # 此时不能打印「全部一致」——那会让一次未覆盖的检查读起来像已覆盖。
+            if actual.get("selfcheck_tests") is None:
+                print("已核对的声明与实际输出一致；**自检单测数未核对**"
+                      "（RELAYKIT_SELFCHECK_SKIP_RECURSE 已置位，该条声明被跳过而非放行）")
+            else:
+                print("全部门禁自述计数与实际输出一致")
         return 0
     return 1
 

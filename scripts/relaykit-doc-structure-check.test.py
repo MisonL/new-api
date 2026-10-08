@@ -46,6 +46,33 @@ class TestTables(unittest.TestCase):
         text = "| # | x |\n|---|---|\n| 1 | a |\n| 2 | a |\n| 3 | a |\n| 3 | a |\n| 5 | a |\n"
         self.assertEqual(kinds(run_text(text)), ["A"])
 
+    def test_lettered_sub_rows_ordered(self):
+        """9.2.3 表用 5a/5b 子编号，排序键是 (N, 后缀)：5a < 5b < 6。"""
+        text = "| # | x |\n|---|---|\n| 1 | a |\n| 5a | a |\n| 5b | a |\n| 6 | a |\n"
+        self.assertEqual(run_text(text), [])
+
+    def test_lettered_sub_rows_out_of_order_caught(self):
+        text = "| # | x |\n|---|---|\n| 1 | a |\n| 5b | a |\n| 5a | a |\n| 6 | a |\n"
+        self.assertEqual(kinds(run_text(text)), ["A"])
+
+    def test_two_row_table_is_a_known_blind_spot(self):
+        """已知边界（有意保留）：少于 3 个编号行的表格不检查行序。
+
+        两行表格反序（2 然后 1）当前**不被抓住**——阈值是 len(seq) >= 3。
+        此用例把边界钉住：若将来改了阈值，这里会红，提醒同步文档说明。
+        """
+        text = "| # | x |\n|---|---|\n| 2 | a |\n| 1 | a |\n"
+        self.assertEqual(run_text(text), [])
+
+    def test_number_gap_is_a_known_blind_spot(self):
+        """已知边界（有意保留）：只查单调与重复，不查跳号（1,5,9 通过）。
+
+        跳号在手工编辑里完全可能是有意的（删了一行没重排是缺陷，但删了一行
+        本就该重排、而「有意留空」无法与缺陷区分），故不设为失败条件。
+        """
+        text = "| # | x |\n|---|---|\n| 1 | a |\n| 5 | a |\n| 9 | a |\n"
+        self.assertEqual(run_text(text), [])
+
     def test_monotonic_rows_pass(self):
         text = "| # | x |\n|---|---|\n| 1 | a |\n| 2 | a |\n| 3 | a |\n"
         self.assertEqual(run_text(text), [])

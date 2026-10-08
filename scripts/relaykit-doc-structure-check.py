@@ -2,10 +2,21 @@
 """结构完整性检查：文档自身的结构是否自洽（不查事实，只查可机械判定的结构缺陷）。
 
 四类检查：
-  A. 表格行序号是否单调递增（新条目插到中间、后来没重排）
+  A. 表格行序号是否单调递增（新条目插到中间、后来没重排）。
+     行首编号支持 `N` 与 `Na`/`Nb` 子编号（9.2.3 表用 5a/5b），排序键 (N, 后缀)。
+     既抓乱序，也抓重复；**不查跳号**（见下）。
   B. 表格每个数据行的单元格数是否等于表头列数（未转义的 | 会撑破单元格）
   C. 交叉引用的章节号是否真实存在（误报白名单见 SECTION_ALLOWLIST）
   D. 跨表引用的「未决项 N」是否在被引用的编号体系里存在
+
+**有意不检查的边界**（写在这里，免得被当成「已覆盖」）：
+  - A 只在表格有 >= 3 个编号行时才检查。**两行表格反序不被抓住**。
+  - A 不查跳号：`1,5,9` 通过。删了一行未重排是缺陷，但「有意留空」与之无法
+    从文本区分，故不设为失败条件（有单测钉住此边界）。
+  - B 只比数量，不比内容：单元格数正确但文字错位不在此检查范围。
+  - C 只验章节号**存在**，不验指向是否正确：引用 §12.2 而内容其实属 §12.1 不被抓住。
+  - D 只验编号存在，不验内容与标题是否相符。
+  - 四类都不检查正文的语义一致性——那是事实核验的职责，不是本工具的。
 
 用法：
     python3 scripts/relaykit-doc-structure-check.py [文档路径 ...]
@@ -39,6 +50,11 @@ def is_separator(line):
     return re.fullmatch(r"\|[\s\-:|]+\|", line.strip()) is not None
 
 
+def _fmt(key):
+    """(4, '') -> '4'；(5, 'a') -> '5a'。"""
+    return f"{key[0]}{key[1]}"
+
+
 def split_row(line):
     body = line.strip()
     if not (body.startswith("|") and body.endswith("|")):
@@ -65,9 +81,11 @@ def check_tables(lines):
                     problems.append(
                         (j + 1, "B", f"单元格数 {len(cells)} != 表头 {ncols}（未转义的 | 会撑破单元格）")
                     )
-                m = re.match(r"\s*(\d+)\s*$", cells[0])
+                # 行首编号支持 `N` 与 `Na`/`Nb` 子编号（设计文档的 9.2.3 表用了
+                # 5a/5b）。子编号排序键是 (N, 后缀)，故 5a < 5b < 6。
+                m = re.match(r"\s*(\d+)([a-z]?)\s*$", cells[0])
                 if m:
-                    nums.append((j + 1, int(m.group(1))))
+                    nums.append((j + 1, (int(m.group(1)), m.group(2))))
                 j += 1
             seq = [n for _, n in nums]
             # 必须**严格递增**：既抓乱序，也抓重复编号
@@ -75,9 +93,9 @@ def check_tables(lines):
             if len(seq) >= 3:
                 dup = next((seq[k] for k in range(1, len(seq)) if seq[k] == seq[k - 1]), None)
                 if seq != sorted(seq):
-                    problems.append((i + 1, "A", f"表格行序号非单调：{seq}"))
+                    problems.append((i + 1, "A", f"表格行序号非单调：{[_fmt(s) for s in seq]}"))
                 elif dup is not None:
-                    problems.append((i + 1, "A", f"表格行序号有重复：{dup}（{seq}）"))
+                    problems.append((i + 1, "A", f"表格行序号有重复：{_fmt(dup)}（{[_fmt(s) for s in seq]}）"))
             i = j
         else:
             i += 1

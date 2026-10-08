@@ -65,6 +65,7 @@ python3 scripts/relaykit-citation-check.test.py  # 25 个单测
 python3 scripts/relaykit-doc-structure-check.test.py   # 13 个单测
 # 计数: fieldSet=33 tag=5 type=6 embed=0 order=4 sig=12 equiv=21
 `--strict` 把当前基线（fieldSet=33、tag=5、type=6、embed=0、**order=4**、sig=12、**equiv=21**）变成门禁
+本文档 relaykit 行引用现为 **51 处唯一**（**第 38 轮**）；裸宿主引用 **107 处**；全路径 **24 处**。
 """
 
 ACTUAL = {
@@ -111,6 +112,23 @@ class TestClaims(unittest.TestCase):
         self.assertEqual(len(mismatches), 1)
         self.assertEqual(mismatches[0][1], "citation 单测数")
 
+    def test_section11_phrasing_is_extracted(self):
+        """§11 用「N 处唯一 / 裸宿主引用 N 处 / 全路径 N 处」表述同一批门禁计数。
+
+        第 38 轮之前抽取器只认 §9.3 的句式，这三处整类漏检——本条钉住不再复发。
+        """
+        claims = selfcheck.extract_claims(DOC)
+        descs = [d for _, d, _ in claims]
+        self.assertIn("§11 relaykit 引用数", descs)
+        self.assertIn("§11 宿主引用数", descs)
+        self.assertIn("§11 全路径引用数", descs)
+
+    def test_section11_drift_is_caught(self):
+        drifted = DOC.replace("裸宿主引用 **107 处**", "裸宿主引用 **999 处**")
+        mismatches = selfcheck.compare(selfcheck.extract_claims(drifted), ACTUAL)
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(mismatches[0][1], "§11 宿主引用数")
+
     def test_selfcheck_test_count_is_a_claim(self):
         doc = DOC + "python3 scripts/relaykit-gate-selfcheck.test.py  # 14 个单测\n"
         claims = selfcheck.extract_claims(doc)
@@ -135,6 +153,35 @@ class TestClaims(unittest.TestCase):
         self.assertEqual(len(mismatches), 2)
         self.assertEqual(sorted(m[1] for m in mismatches),
                          ["dto 七维（命令行注释）", "dto 七维（正文）"])
+
+
+class TestSkipIsNotPass(unittest.TestCase):
+    """置位递归守卫时该条声明「跳过」，主流程不得打印「全部一致」。
+
+    跳过与放行必须可区分：否则一次未覆盖的检查会读起来像已覆盖。
+    """
+
+    def test_skipped_claim_does_not_match(self):
+        doc = DOC + "python3 scripts/relaykit-gate-selfcheck.test.py  # 99 个单测\n"
+        actual = dict(ACTUAL, selfcheck_tests=None)
+        self.assertEqual(selfcheck.compare(selfcheck.extract_claims(doc), actual), [])
+
+    def test_summary_text_distinguishes_skip_from_pass(self):
+        import io as _io
+        import contextlib
+        import subprocess
+        import sys as _sys
+
+        env = dict(os.environ, RELAYKIT_SELFCHECK_SKIP_RECURSE="1")
+        proc = subprocess.run(
+            [_sys.executable, os.path.join(_HERE, "relaykit-gate-selfcheck.py"),
+             "--doc", os.path.join(os.path.dirname(_HERE), selfcheck.DEFAULT_DOC)],
+            cwd=os.path.dirname(_HERE), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("自检单测数未核对", proc.stdout)
+        self.assertNotIn("全部门禁自述计数与实际输出一致", proc.stdout)
 
 
 class TestRealDoc(unittest.TestCase):
