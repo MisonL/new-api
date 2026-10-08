@@ -206,6 +206,9 @@ func main() {
 	server.Use(middleware.RequestId())
 	server.Use(middleware.PoweredBy())
 	server.Use(middleware.I18n())
+	// Before the session middleware so the headers reach the login page and the
+	// SPA fallback too, not only authenticated responses.
+	server.Use(middleware.SecurityHeaders())
 	middleware.SetUpLogger(server)
 	// Initialize session store
 	store := cookie.NewStore([]byte(common.SessionSecret))
