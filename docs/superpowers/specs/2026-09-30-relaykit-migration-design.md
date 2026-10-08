@@ -754,7 +754,7 @@ python3 scripts/relaykit-citation-check.test.py  # 25 个单测
 
 ```bash
 python3 scripts/relaykit-doc-structure-check.py        # 两份文档均 0 问题时退出码 0
-python3 scripts/relaykit-doc-structure-check.test.py   # 17 个单测
+python3 scripts/relaykit-doc-structure-check.test.py   # 19 个单测
 ```
 
 **门禁自述计数**（第 38 轮新增：把「门禁改了、描述没改」变成门禁——这一盲区此前复发三次：第 36 轮的 34/15、第 38 轮的 §9.3 47/98/21、以及 `relaykit-citation-check.py` docstring 里长期滞留的 「13 citations across 9 files」）：

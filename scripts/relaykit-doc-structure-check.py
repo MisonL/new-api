@@ -96,6 +96,16 @@ def check_tables(lines):
                     problems.append((i + 1, "A", f"表格行序号非单调：{[_fmt(s) for s in seq]}"))
                 elif dup is not None:
                     problems.append((i + 1, "A", f"表格行序号有重复：{_fmt(dup)}（{[_fmt(s) for s in seq]}）"))
+            # 子编号 `5a` 是「把基行 5 拆开」的标记，自身不要求基行存在
+            # （9.2.3 表就是把第 5 条拆成 5a/5b，没有裸 5 行）。
+            # 但 `5b` 及以后要求前一个字母存在——否则读者会去找不存在的 5a，
+            # 多半是「后来补记的行被误标成 5b」。
+            for n, sfx in seq:
+                if sfx and sfx != "a" and (n, chr(ord(sfx) - 1)) not in seq:
+                    problems.append(
+                        (i + 1, "A", f"子编号 {_fmt((n, sfx))} 没有前一个子编号 "
+                                     f"{_fmt((n, chr(ord(sfx) - 1)))}（是补记就应独立编号）")
+                    )
             i = j
         else:
             i += 1

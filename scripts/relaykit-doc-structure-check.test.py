@@ -55,6 +55,16 @@ class TestTables(unittest.TestCase):
         text = "| # | x |\n|---|---|\n| 1 | a |\n| 5b | a |\n| 5a | a |\n| 6 | a |\n"
         self.assertEqual(kinds(run_text(text)), ["A"])
 
+    def test_orphan_sub_letter_caught(self):
+        """`5b` 无 `5a` 多半是「补记的行被误标成 5b」——读者会去找不存在的 5a。"""
+        text = "| # | x |\n|---|---|\n| 1 | a |\n| 2 | a |\n| 5b | a |\n| 6 | a |\n"
+        self.assertEqual(kinds(run_text(text)), ["A"])
+
+    def test_legit_split_without_base_row_passes(self):
+        """9.2.3 把第 5 条拆成 5a/5b，没有裸 5 行——这是合法的。"""
+        text = "| # | x |\n|---|---|\n| 1 | a |\n| 5a | a |\n| 5b | a |\n| 6 | a |\n"
+        self.assertEqual(run_text(text), [])
+
     def test_two_row_table_is_a_known_blind_spot(self):
         """已知边界（有意保留）：少于 3 个编号行的表格不检查行序。
 
