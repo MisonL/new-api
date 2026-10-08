@@ -55,6 +55,40 @@ func makeRelayInfo(expr string, groupRatio float64, estPrompt, estCompletion int
 // Existing tests (preserved)
 // ---------------------------------------------------------------------------
 
+func TestBuildTieredTokenParamsFromRealtime_NormalizesSubcategories(t *testing.T) {
+	usage := &dto.RealtimeUsage{
+		InputTokens:  130,
+		OutputTokens: 50,
+		InputTokenDetails: dto.InputTokenDetails{
+			CachedTokens: 20,
+			TextTokens:   10,
+			AudioTokens:  100,
+			ImageTokens:  0,
+		},
+		OutputTokenDetails: dto.OutputTokenDetails{
+			TextTokens: 10,
+			AudioTokens: 40,
+			ImageTokens: 0,
+		},
+	}
+	usedVars := billingexpr.UsedVars(`tier("default", p + c + cr + ai + ao)`)
+
+	params := buildTieredTokenParamsFromRealtime(usage, usedVars)
+
+	if params.P != 10 {
+		t.Fatalf("P = %f, want 10 after removing cached and audio input tokens", params.P)
+	}
+	if params.C != 10 {
+		t.Fatalf("C = %f, want 10 after removing audio output tokens", params.C)
+	}
+	if params.Len != 130 {
+		t.Fatalf("Len = %f, want 130 from total input tokens", params.Len)
+	}
+	if params.CR != 20 || params.AI != 100 || params.AO != 40 {
+		t.Fatalf("subcategories = CR:%f AI:%f AO:%f, want 20/100/40", params.CR, params.AI, params.AO)
+	}
+}
+
 func TestTryTieredSettleUsesFrozenRequestInput(t *testing.T) {
 	exprStr := `param("service_tier") == "fast" ? tier("fast", p * 2) : tier("normal", p)`
 	relayInfo := &relaycommon.RelayInfo{

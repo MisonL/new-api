@@ -188,6 +188,59 @@ func TestRealtimeBilling_TurnDebitAndSettleMustNotBothDebitWallet(t *testing.T) 
 		"终态结算不得再次扣减已被逐 turn 扣过的同一份用量")
 }
 
+// TestRealtimeBilling_TieredSettleChargesAudioSubcategory 是 §3.1 的回归：
+// realtime 收尾结算在 tiered_expr 模式下必须把 audio/cached 细分传给表达式，
+// 而不是只传总量。表达式 ai*12 + ao*50 若拿到 AI=0/AO=0 会少收音频费用。
+// 语料：输入 1000（其中音频 900、缓存 100）+ 输出 200（其中音频 150），
+// 表达式 tier("base", p * 1 + c * 1 + cr * 0.5 + ai * 12 + ao * 50)。
+// P = 1000-900-100 = 0；C = 200-150 = 50。
+// cost = 0*1 + 50*1 + 100*0.5 + 900*12 + 150*50 = 18400
+// quota = 18400 / 1e6 * QuotaPerUnit(500000) = 9200。
+func TestRealtimeBilling_TieredSettleChargesAudioSubcategory(t *testing.T) {
+	setupRealtimeBillingProbe(t)
+
+	const userQuota = 1_000_000
+	seedUser(t, 5, userQuota)
+	seedToken(t, 5, 5, "realtime-probe-key-5", userQuota)
+
+	c, _ := newRealtimeProbeContext()
+	info := newRealtimeProbeInfo(5, 5, "realtime-probe-key-5")
+	info.PriceData.ModelRatio = 1
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
+
+	// tiered 快照：与生产预扣路径同构（makeRelayInfo 会算 EstimatedQuotaAfterGroup）。
+	const expr = `tier("base", p * 1 + c * 1 + cr * 0.5 + ai * 12 + ao * 50)`
+	snapInfo := makeRelayInfo(expr, 1.0, 0, 0)
+	info.TieredBillingSnapshot = snapInfo.TieredBillingSnapshot
+	info.FinalPreConsumedQuota = snapInfo.FinalPreConsumedQuota
+
+	// 预扣 0（信任额度旁路），使结算 delta 恰为实际用量。
+	require.Nil(t, PreConsumeBilling(c, 0, info))
+
+	usage := &dto.RealtimeUsage{
+		TotalTokens:  1200,
+		InputTokens:  1000,
+		OutputTokens: 200,
+		InputTokenDetails: dto.InputTokenDetails{
+			CachedTokens: 100,
+			TextTokens:   0,
+			AudioTokens:  900,
+		},
+		OutputTokenDetails: dto.OutputTokenDetails{
+			TextTokens:  50,
+			AudioTokens: 150,
+		},
+	}
+
+	PostWssConsumeQuota(c, info, realtimeDoubleChargeModel, usage, "")
+
+	const wantQuota = 9200
+	require.Equal(t, userQuota-wantQuota, readUserQuota(t, 5),
+		"tiered 结算必须按细分变量计费（音频 900*12 + 150*50 等），而不是只按总量")
+	require.Equal(t, userQuota-wantQuota, readTokenRemainQuota(t, 5),
+		"令牌余额必须与钱包一致")
+}
+
 // TestRealtimeBilling_TrustedUserStillChargedOnce 钉住信任额度旁路分支。
 // trusted 时 Reserve 直接返回 nil（不预扣），收尾 Settle 必须按全额扣一次；
 // 若修复让 trusted 用户变成零扣款，本用例失败。

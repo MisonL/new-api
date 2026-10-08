@@ -88,6 +88,31 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	}
 }
 
+// buildTieredTokenParamsFromRealtime maps a RealtimeUsage into the same
+// TokenParams contract BuildTieredTokenParams applies to dto.Usage. Realtime
+// upstreams report input_tokens/output_tokens as totals that include cached,
+// audio, and image tokens, so P and C must be normalized to text-only when the
+// expression prices those sub-categories separately. Without this mapping the
+// tiered expression sees AI/AO/CR as zero and bills audio tokens at the text
+// rate.
+func buildTieredTokenParamsFromRealtime(usage *dto.RealtimeUsage, usedVars map[string]bool) billingexpr.TokenParams {
+	usageDto := &dto.Usage{
+		PromptTokens:     usage.InputTokens,
+		CompletionTokens: usage.OutputTokens,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         usage.InputTokenDetails.CachedTokens,
+			CachedCreationTokens: usage.InputTokenDetails.CachedCreationTokens,
+			ImageTokens:          usage.InputTokenDetails.ImageTokens,
+			AudioTokens:          usage.InputTokenDetails.AudioTokens,
+		},
+		CompletionTokenDetails: dto.OutputTokenDetails{
+			ImageTokens: usage.OutputTokenDetails.ImageTokens,
+			AudioTokens: usage.OutputTokenDetails.AudioTokens,
+		},
+	}
+	return BuildTieredTokenParams(usageDto, false, usedVars)
+}
+
 // TryTieredSettle checks if the request uses tiered_expr billing and, if so,
 // computes the actual quota using the frozen BillingSnapshot. Returns:
 //   - ok=true, quota, result  when tiered billing applies
@@ -105,6 +130,12 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 
 	tr, err := billingexpr.ComputeTieredQuotaWithRequest(snap, params, requestInput)
 	if err != nil {
+		// The frozen expression failed to evaluate or produced a value the quota
+		// column cannot represent. Billing the pre-consumed estimate is the
+		// deliberate choice: the request already ran, so failing it here would
+		// hand the caller a free request, and charging the clamped maximum
+		// would not represent the configured price either. TestTryTieredSettle-
+		// FallsBackToFrozenPreConsumeOnExprError pins this.
 		quota = relayInfo.FinalPreConsumedQuota
 		if quota <= 0 {
 			quota = snap.EstimatedQuotaAfterGroup
