@@ -1,15 +1,23 @@
 // Command relaykit-dto-compat compares the local dto package against the
-// relaykit dto package across dimensions that a field-name diff misses:
+// relaykit dto package across the dimensions a field-name diff misses, and
+// reports one section per dimension:
 //
 //  1. field names        - which fields exist on same-named structs
 //  2. JSON tags          - same name, different serialized key or omitempty
 //  3. Go types           - same name, different type
 //  4. embedded fields    - ast.Field.Names is empty for these, so they are
-//     invisible to the name and type diffs, and function signatures, which a
-//     name-only method diff never compares
+//     invisible to the name and type diffs
 //  5. declaration order  - encoding/json emits struct fields in declaration
 //     order, so two sides with identical names/tags/types still serialize to
 //     different bytes when a shared field is declared in a different position
+//  6. function signatures - a name-only method diff never compares parameters
+//     or return values
+//  7. spelling equivalences - interface{} vs any is the same type spelled two
+//     ways, so it is reported separately rather than counted as a difference
+//
+// Every section is gated by -strict: the printed sections and the expected
+// counts come from one table (reportGroups), so a section cannot be printed
+// without also being gated.
 //
 // Usage:
 //
@@ -287,6 +295,48 @@ func build(localDir, kitDir string) (*report, error) {
 	return r, nil
 }
 
+// group is one reported section: the title it prints under, the lines it
+// prints, and the count -strict expects. Printing and gating both walk the
+// same table, so a section cannot be printed without also being gated -- the
+// 30th review round found the spelling group printed for many rounds while
+// -strict silently ignored it, which is what two parallel lists eventually do.
+type group struct {
+	key   string // name in the counts line
+	title string
+	lines []string
+	want  int
+}
+
+// reportGroups is the single table behind both the report and -strict. The
+// recorded expectations are a point-in-time baseline (the 15th review round,
+// 2026-10-04, against HEAD:dto and upstream/main:relaykit/dto): when the local
+// dto changes (another session commits) or the pinned relaykit commit moves,
+// the numbers change and -strict fails until the baseline is re-recorded
+// deliberately. That is the point -- it is a gate against silent drift, not a
+// permanent invariant.
+func reportGroups(r *report) []group {
+	const (
+		wantFieldSet = 33 // types whose field-name sets differ
+		wantTag      = 5
+		wantType     = 6 // excludes interface{}/any spellings, reported separately
+		wantEmbed    = 0
+		wantOrder    = 4 // package-wide; only 2 of them (ClaudeMediaMessage,
+		// FunctionRequest) are reachable from the 3 golden output roots -- see
+		// the 31st review round in the design doc
+		wantSig   = 12 // all IsStream; NewNotify's interface{}/any is a spelling
+		wantEquiv = 21 // 20 fields + NewNotify's one parameter, in its own group
+	)
+	return []group{
+		{"fieldSet", "字段名集合不同", r.fieldSetDiff, wantFieldSet},
+		{"tag", "JSON tag 不同", r.tagDiff, wantTag},
+		{"type", "Go 类型不同", r.typeDiff, wantType},
+		{"embed", "嵌入字段不同", r.embedDiff, wantEmbed},
+		{"order", "共有字段声明顺序不同", r.orderDiff, wantOrder},
+		{"sig", "函数/方法签名不同", r.sigDiff, wantSig},
+		{"equiv", "等价拼写（interface{} vs any），不计为差异", r.tagEquivalents, wantEquiv},
+	}
+}
+
 func main() {
 	local := flag.String("local", "", "directory with the local dto .go sources")
 	kit := flag.String("kit", "", "directory with the relaykit dto .go sources")
@@ -320,45 +370,22 @@ func main() {
 	} else {
 		fmt.Printf("shared types=%d shared funcs=%d\n", r.sharedTypes, r.sharedFuncs)
 	}
-	section("字段名集合不同", r.fieldSetDiff)
-	section("JSON tag 不同", r.tagDiff)
-	section("Go 类型不同（含 interface{}/any 等价项）", r.typeDiff)
-	section("嵌入字段不同", r.embedDiff)
-	section("共有字段声明顺序不同", r.orderDiff)
-	section("函数/方法签名不同", r.sigDiff)
-	section("等价拼写（interface{} vs any），仅供参考", r.tagEquivalents)
 
-	fmt.Printf("\n计数: fieldSet=%d tag=%d type=%d embed=%d order=%d sig=%d equiv=%d\n",
-		len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.orderDiff),
-		len(r.sigDiff), len(r.tagEquivalents))
+	groups := reportGroups(r)
+	for _, g := range groups {
+		section(g.title, g.lines)
+	}
 
-	// Recorded expectation as of the 15th review round (2026-10-04), against
-	// HEAD:dto and upstream/main:relaykit/dto. This is a point-in-time
-	// baseline: when the local dto changes (another session commits) or the
-	// pinned relaykit commit moves, these numbers change and -strict fails
-	// until the baseline is re-recorded deliberately. That is the point -- it
-	// is a gate against silent drift, not a permanent invariant.
-	//
-	// equiv is included because the 30th review round found the design doc
-	// claiming 15 interface{}/any spellings when the tool has always reported
-	// 21. The group was printed but never gated, so nothing caught it.
-	const (
-		wantFieldSet = 33 // types whose field-name sets differ
-		wantTag      = 5
-		wantType     = 6 // excludes interface{}/any spellings, reported separately
-		wantEmbed    = 0
-		wantOrder    = 4 // package-wide; only 2 of them (ClaudeMediaMessage,
-		// FunctionRequest) are reachable from the 3 golden output roots -- see
-		// the 31st review round in the design doc
-		wantSig   = 12 // all IsStream; NewNotify's interface{}/any is a spelling
-		wantEquiv = 21 // 20 fields + NewNotify's one parameter, in its own group
-	)
+	counts := make([]string, len(groups))
+	for i, g := range groups {
+		counts[i] = fmt.Sprintf("%s=%d", g.key, len(g.lines))
+	}
+	fmt.Printf("\n计数: %s\n", strings.Join(counts, " "))
+
 	if *strict {
-		got := []int{len(r.fieldSetDiff), len(r.tagDiff), len(r.typeDiff), len(r.embedDiff), len(r.orderDiff), len(r.sigDiff), len(r.tagEquivalents)}
-		want := []int{wantFieldSet, wantTag, wantType, wantEmbed, wantOrder, wantSig, wantEquiv}
-		for i := range want {
-			if got[i] != want[i] {
-				fmt.Fprintf(os.Stderr, "strict: dimension %d changed: got %d want %d\n", i, got[i], want[i])
+		for _, g := range groups {
+			if len(g.lines) != g.want {
+				fmt.Fprintf(os.Stderr, "strict: %s changed: got %d want %d\n", g.key, len(g.lines), g.want)
 				os.Exit(1)
 			}
 		}

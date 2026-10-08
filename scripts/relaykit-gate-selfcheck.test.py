@@ -155,6 +155,31 @@ class TestClaims(unittest.TestCase):
                          ["dto 七维（命令行注释）", "dto 七维（正文）"])
 
 
+class TestDtoSectionCount(unittest.TestCase):
+    """工具打印的分节数也是当前口径声明。
+
+    第 38 轮之前设计文档写「六维比较」，而工具一直打印 7 组（含等价拼写组）——
+    两边都对不上任何东西，且没有任何门禁能发现。
+    """
+
+    def test_section_count_claim_extracted(self):
+        doc = "至此，dto 的兼容性核查覆盖 **7 组**（以工具输出为准）：..."
+        claims = selfcheck.extract_claims(doc)
+        self.assertEqual(claims, [(1, "dto 分节数", 7)])
+
+    def test_section_count_drift_is_caught(self):
+        doc = "至此，dto 的兼容性核查覆盖 **6 组**（以工具输出为准）：..."
+        actual = dict(ACTUAL, dto_sections=7)
+        mismatches = selfcheck.compare(selfcheck.extract_claims(doc), actual)
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(mismatches[0][1], "dto 分节数")
+
+    def test_missing_sections_is_a_failure_not_a_skip(self):
+        """工具输出里没有 ### 行时必须记失败，不能静默跳过该组声明。"""
+        src = open(os.path.join(_HERE, "relaykit-gate-selfcheck.py"), encoding="utf-8").read()
+        self.assertIn("输出无分节", src)
+
+
 class TestStructureProblemClaim(unittest.TestCase):
     """结构检查器的「0 问题」是当前口径声明。
 
@@ -296,7 +321,7 @@ class TestSkipIsNotPass(unittest.TestCase):
 
 class TestRealDoc(unittest.TestCase):
     def test_real_doc_matches_real_gates(self):
-        """端到端：实跑四个门禁，与设计文档的自述计数比对。
+        """端到端：实跑各门禁，与设计文档的自述计数比对。
 
         置 RELAYKIT_SELFCHECK_SKIP_RECURSE 断开自指：selfcheck 会跑本文件，
         本用例又调 collect_actual——不置位就是无限递归。

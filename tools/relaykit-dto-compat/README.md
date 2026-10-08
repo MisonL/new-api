@@ -1,24 +1,31 @@
 # relaykit-dto-compat
 
 Compares the local `dto` package against upstream relaykit's `relaykit/dto`
-across four dimensions, so a routine bump of the pinned relaykit commit can be
-re-checked mechanically instead of by hand.
+across every dimension a name-only diff misses, so a routine bump of the pinned
+relaykit commit can be re-checked mechanically instead of by hand.
 
-## Why four dimensions
+## Why a name-only diff is not enough
 
 A field-name diff is the obvious comparison and the one a naive script does. It
-misses three things that break just as badly:
+misses these, each of which breaks just as badly:
 
 | Dimension | What a name-only diff misses |
 | --- | --- |
 | JSON tags | Same field name, different serialized key or `omitempty`. Compiles fine; the wire format silently changes |
 | Go types | Same field name, different type. Usually a compile break, and `omitempty` means different things for `string` vs `*string` |
 | Embedded fields | `ast.Field.Names` is empty for an anonymous embedded field, so it is invisible to both the name diff and the type diff |
+| Declaration order | `encoding/json` emits struct fields in declaration order, so identical names/tags/types still serialize to different bytes when a shared field moves |
 | Function signatures | A name-only method diff never compares parameters or return values |
 
 `interface{}` and `any` are the same type spelled two ways, so they are
 reported in a separate "spelling" group rather than counted as differences.
 The same goes for a spelling-only signature change.
+
+The tool prints one section per dimension and `--strict` gates every printed
+section, both driven by one table in `main.go` (`reportGroups`) -- a section
+cannot be printed without also being gated. The report itself prints the
+current count of sections and of differences; this file deliberately restates
+neither, because a number written here is a number nothing checks.
 
 ## Usage
 

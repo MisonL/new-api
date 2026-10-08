@@ -6,7 +6,7 @@
 across 9 files）。每次都是「门禁改了、描述没改」，且没有任何门禁能发现。
 
 本脚本把这条规则变成门禁：
-  1. 实跑四个门禁，解析它们的真实输出；
+  1. 实跑各门禁脚本与单测（条数见运行输出，不在此复述），解析真实输出；
   2. 从设计文档抽出「当前口径」的自述计数；
   3. 逐一比对，任一不一致即退出码 1。
 
@@ -92,7 +92,7 @@ def extract_line_claims(cr_path):
 
 
 def collect_actual(quiet):
-    """实跑四个门禁，返回 (计数 dict, 失败列表)。
+    """实跑各门禁脚本与单测，返回 (计数 dict, 失败列表)。
 
     **fail-closed**：任何一条门禁的输出解析失败都记为失败，不放行。解析
     失败意味着「这条声明没有被核对」，若静默跳过，门禁会以绿的形式掩盖
@@ -159,6 +159,13 @@ def collect_actual(quiet):
         failures.append(f"relaykit-dto-compat.sh --strict 退出码 {code}")
     parsed_or_fail("dto", parse_dto(out), "dto",
                    "relaykit-dto-compat.sh --strict 输出无法解析（该组声明未核对）")
+    # 工具打印的分节数（`### ` 行）。设计文档自称「覆盖 N 组」，N 应与它一致——
+    # 第 38 轮之前文档写「六维」，而工具一直打印 7 组，两边都对不上任何东西。
+    sections = len(re.findall(r"^### ", out, re.M))
+    if sections == 0:
+        failures.append("relaykit-dto-compat.sh 输出无分节（### 行），组数声明无法核对")
+    else:
+        actual["dto_sections"] = sections
 
     if not quiet:
         print("门禁实际输出：")
@@ -169,6 +176,7 @@ def collect_actual(quiet):
         print(f"  结构单测        {actual.get('structure_tests', '无法解析')}")
         print(f"  自检单测        {actual.get('selfcheck_tests', '无法解析')}")
         print(f"  dto 七维        {actual.get('dto', '无法解析')}")
+        print(f"  dto 分节数      {actual.get('dto_sections', '无法解析')}")
         print()
     return actual, failures
 
@@ -212,6 +220,10 @@ def extract_claims(doc):
             add(i, "§11 宿主引用数", int(m.group(1)))
         for m in re.finditer(r"全路径 \*\*(\d+) 处\*\*", line):
             add(i, "§11 全路径引用数", int(m.group(1)))
+
+        # 「至此，dto 的兼容性核查覆盖 **7 组**」——工具分节数的当前口径声明
+        for m in re.finditer(r"dto 的兼容性核查覆盖 \*\*(\d+) 组\*\*", line):
+            add(i, "dto 分节数", int(m.group(1)))
 
         # 「# 两份文档均 0 问题时退出码 0」——结构检查器的当前口径声明。
         # 第 39 轮补入：此前 structure_problems 被采集、被打印，却从未进入
@@ -264,6 +276,10 @@ def compare(claims, actual):
                 mismatches.append((line_no, desc, claimed, real))
         elif desc == "自检单测数":
             real = actual.get("selfcheck_tests")
+            if real is not None and claimed != real:
+                mismatches.append((line_no, desc, claimed, real))
+        elif desc == "dto 分节数":
+            real = actual.get("dto_sections")
             if real is not None and claimed != real:
                 mismatches.append((line_no, desc, claimed, real))
         elif desc == "结构问题数":

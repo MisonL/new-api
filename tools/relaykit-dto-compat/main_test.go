@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,39 @@ func twoSides(t *testing.T, local, kit string) (string, string) {
 	write(t, ld, "a.go", local)
 	write(t, kd, "a.go", kit)
 	return ld, kd
+}
+
+// TestEveryDiffFieldIsPrintedAndGated pins the structural invariant behind
+// the 30th review round's bug: the spelling group was printed for many rounds
+// while -strict silently ignored it, because the printed sections and the
+// gated counts were two parallel lists that drifted. They are now one table
+// (reportGroups); this test fails if a diff field is added to report without
+// also entering the table, which is the only way the drift could come back.
+func TestEveryDiffFieldIsPrintedAndGated(t *testing.T) {
+	rt := reflect.TypeOf(report{})
+	var diffFields []string
+	for i := 0; i < rt.NumField(); i++ {
+		if rt.Field(i).Type.Kind() == reflect.Slice {
+			diffFields = append(diffFields, rt.Field(i).Name)
+		}
+	}
+	groups := reportGroups(&report{})
+	if len(groups) != len(diffFields) {
+		t.Fatalf("report has %d diff fields %v but reportGroups has %d groups; "+
+			"every diff field must be printed and gated", len(diffFields), diffFields, len(groups))
+	}
+	// Each group must carry a non-empty key (the counts-line name) and a
+	// recorded expectation; a zero-length table or missing want is a bug.
+	seen := map[string]bool{}
+	for _, g := range groups {
+		if g.key == "" || g.title == "" {
+			t.Errorf("group %+v has an empty key or title", g)
+		}
+		if seen[g.key] {
+			t.Errorf("duplicate group key %q", g.key)
+		}
+		seen[g.key] = true
+	}
 }
 
 func TestTagDifferenceIsDetected(t *testing.T) {

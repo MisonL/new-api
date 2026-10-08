@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Flatten the local dto and the relaykit dto from git, then compare them
-# across four dimensions. Run it after bumping the pinned upstream relaykit
-# commit to see exactly what widened.
+# across every dimension a name-only field diff misses. Run it after bumping
+# the pinned upstream relaykit commit to see exactly what widened.
 #
 # Usage:
 #   scripts/relaykit-dto-compat.sh [--strict] [--markdown]

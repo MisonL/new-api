@@ -735,7 +735,7 @@ cd relaykit && GOWORK=off go test ./relayconvert -run TestGolden -count=1
 
 **前端改动**：`cd web/default && bun run lint && bun run build`（AGENTS.md 第 4 节）。
 
-**dto 兼容性六维比较**（阶段 2 前必跑，上游 relaykit 每次变动后重跑）：
+**dto 兼容性七组比较**（阶段 2 前必跑，上游 relaykit 每次变动后重跑；工具实际打印 7 组、`--strict` gate 7 个计数——「七组」以工具输出为准，组数与分节名见下）：
 
 ```bash
 scripts/relaykit-dto-compat.sh --strict
@@ -761,7 +761,7 @@ python3 scripts/relaykit-doc-structure-check.test.py   # 20 个单测
 
 ```bash
 python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对
-python3 scripts/relaykit-gate-selfcheck.test.py       # 30 个单测
+python3 scripts/relaykit-gate-selfcheck.test.py       # 33 个单测
 ```
 
 它只检查**本文档的当前口径声明**；CR 记录里的计数是历史记录（「第 37 轮为 50/103/24」这类），记的是「当时为真」，不随门禁演进失效，故不在射程内。
@@ -1143,9 +1143,9 @@ relaykit/dto 有、本地 dto 无：`alpha_search_request.go`、`billing_usage.g
 - **嵌入（匿名）字段**：本地 7 个、relaykit 7 个，**逐类型对比零差异**（都在 `embedding.go`、`openai_response.go`，均为 `Usage`/`Message` 的 JSON 嵌入）
 - **函数/方法签名**（此前只比了名字，没比参数与返回值）：135 个同名函数中 **13 处签名文本不同**——12 个是 `IsStream` 的 `*gin.Context → *http.Request`（与 §7「阶段 2 的前置」记录的 12 个方法完全一致，互为印证），1 个是 `NewNotify` 的 `interface{} → any`（等价写法，工具归入等价拼写组，**故签名真差异为 12**）。**无未知项**
 
-至此，dto 的兼容性核查覆盖五个维度：字段名（12.0.5）、JSON tag、Go 类型（本节）、嵌入字段与函数签名、**共有字段的声明顺序**（第 31 轮新增，见下）。**第 31 轮修正**：原文写「四个维度」并把「嵌入字段与函数签名」并作一项，实际工具一直报 5 组（字段名/tag/类型/嵌入/签名），第 31 轮再加顺序组，共 6 组。
+至此，dto 的兼容性核查覆盖 **7 组**（以 `tools/relaykit-dto-compat/` 的实际输出为准）：字段名（12.0.5）、JSON tag、Go 类型（本节）、嵌入字段、**共有字段的声明顺序**（第 31 轮新增，见下）、函数/方法签名，以及等价拼写组（单列、不计为差异但同样进 `--strict` gate）。**第 31 轮修正**：原文写「四个维度」并把「嵌入字段与函数签名」并作一项，随后又写「实际工具一直报 5 组……共 6 组」——两次都漏了等价拼写组（它自初版起就打印，第 30 轮起也进 gate）。组数以工具打印的 `###` 分节数为准。
 
-**四、工具化（第 15 轮新增；第 31 轮补第五维）**
+**四、工具化（第 15 轮新增；第 31 轮补声明顺序组）**
 
 本节与 12.0.5 的全部数字，已固化为可重跑的工具：
 
@@ -1777,7 +1777,7 @@ go test ./service -run TestGolden -count=1 -update   # 重录
 
    **结论不变但理由要换**：本基线 8 个快照**不会因字段顺序而漂移**——不是因为「所有类型同序」，而是因为**被交换的那对字段在快照里恰好都不非空**。这是**运气，不是保证**：本地若产出带 `signature` 的 thinking 块或带 `strict` 的 tool 定义，同一份快照就会因纯序列化顺序而红。**阶段 4 改指后若快照出现「内容相同、顺序不同」的差异，先核字段顺序再谈回归**（这仍是本段原来的正确部分）。
 
-   **已工具化，不再靠人肉**：第 31 轮给 `tools/relaykit-dto-compat/` 加了**第五维 `共有字段声明顺序不同`**（`orderDiff`，嵌入字段也计入顺序），当前包级基线 **order=4**，已进 `--strict` 门禁并经**反转验证**（改成 3 → 退出码 1 报 `dimension 4 changed`）。三条新增单测覆盖「顺序不同要报」「同序不报」「单边字段不算顺序差异（那是 name 维度，避免重复计数）」。
+   **已工具化，不再靠人肉**：第 31 轮给 `tools/relaykit-dto-compat/` 加了**声明顺序组 `共有字段声明顺序不同`**（`orderDiff`，嵌入字段也计入顺序），当前包级基线 **order=4**，已进 `--strict` 门禁并经**反转验证**（改成 3 → 退出码 1 报 `order changed: got 3 want 4`；第 38 轮把消息从 `dimension N changed` 改为按组名报，组名即 `reportGroups` 表里的 `key`）。三条新增单测覆盖「顺序不同要报」「同序不报」「单边字段不算顺序差异（那是 name 维度，避免重复计数）」。
 
    **另一个前置**：本基线声明了 5 个 fixture 常量，但**只有 3 个真被引用**——`fixtureOpenAIChatRequest`（`:121`）与 `fixtureClaudeResponse`（`:181`）在全 `service/` 包内零引用，是死代码（**第 30 轮实测**：两者各自只出现在自己的声明行）。实际用到的输入类型是 `dto.ChatCompletionsStreamResponse`、`dto.ClaudeRequest`、`dto.GeminiChatRequest`、`dto.OpenAITextResponse` 与 `dto.UserSetting`，输出侧是 `GeneralOpenAIRequest`、`ClaudeResponse`、`GeminiChatResponse`。**第 30 轮修正**：原文写「与 12.0.8 那 15 处差异涉及的字段**无一重叠**」——**该断言不成立**。逐条核后的实际情况是**有重叠，且输出侧也重叠**：
 
