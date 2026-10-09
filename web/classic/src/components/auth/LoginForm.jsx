@@ -217,6 +217,12 @@ const LoginForm = () => {
       );
       const { success, message, data } = res.data;
       if (success) {
+        if (data && data.require_2fa) {
+          // 两步验证：待验证码通过后再完成登录
+          startTwoFAChallenge();
+          setShowWeChatLoginModal(false);
+          return;
+        }
         const postLoginTarget = getPostLoginTarget('/');
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
@@ -238,6 +244,12 @@ const LoginForm = () => {
   const handleBrowserOAuthResult = (result) => {
     if (!result?.user) {
       return false;
+    }
+
+    if (result.user.require_2fa) {
+      // 桌面轮询停在了两步验证挑战上：待验证码通过后再完成登录
+      startTwoFAChallenge();
+      return true;
     }
 
     const postLoginTarget = getPostLoginTarget('/console/token');
@@ -339,6 +351,11 @@ const LoginForm = () => {
       const res = await API.get(`/api/oauth/telegram/login`, { params });
       const { success, message, data } = res.data;
       if (success) {
+        if (data && data.require_2fa) {
+          // 两步验证：待验证码通过后 handle2FASuccess 再完成登录
+          startTwoFAChallenge();
+          return;
+        }
         const postLoginTarget = getPostLoginTarget('/');
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
@@ -536,6 +553,11 @@ const LoginForm = () => {
       );
       const finish = finishRes.data;
       if (finish.success) {
+        if (finish.data && finish.data.require_2fa) {
+          // 两步验证：待验证码通过后再完成登录
+          startTwoFAChallenge();
+          return;
+        }
         const postLoginTarget = getPostLoginTarget('/console');
         userDispatch({ type: 'login', payload: finish.data });
         setUserData(finish.data);
@@ -578,6 +600,20 @@ const LoginForm = () => {
     updateAPI();
     showSuccess('登录成功！');
     navigate(postLoginTarget);
+  };
+
+  // OAuth 回调页跳转过来的两步验证要求（跨路由传递，见 OAuth2Callback）
+  useEffect(() => {
+    if (location.state?.require_2fa) {
+      setShowTwoFA(true);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.state, location.pathname, navigate]);
+
+  // 服务端把 require_2fa 挂在 response.data 上：登录出口收到挑战时不派发会话，
+  // 直接打开两步验证弹窗，验证码通过后由 handle2FASuccess 完成登录。
+  const startTwoFAChallenge = () => {
+    setShowTwoFA(true);
   };
 
   // 返回登录页面

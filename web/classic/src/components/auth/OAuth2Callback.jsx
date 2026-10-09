@@ -81,6 +81,12 @@ const OAuth2Callback = (props) => {
       return;
     }
 
+    if (data?.require_2fa) {
+      // 两步验证：没有会话可言，去登录页完成验证码
+      navigate('/login', { state: { require_2fa: true } });
+      return;
+    }
+
     userDispatch({ type: 'login', payload: data });
     setUserData(data);
     updateAPI();

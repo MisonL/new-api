@@ -174,6 +174,11 @@ export function UserAuthForm({
     try {
       const res = await wechatLoginByCode(wechatCode)
       if (res?.success) {
+        if ((res.data as { require_2fa?: boolean } | null)?.require_2fa) {
+          redirectTo2FA()
+          handleWeChatDialogChange(false)
+          return
+        }
         await handleLoginSuccess(res.data as { id?: number } | null, redirectTo)
         toast.success(t('Signed in via WeChat'))
         handleWeChatDialogChange(false)
@@ -235,6 +240,10 @@ export function UserAuthForm({
 
       if (!finish.data) {
         throw new Error(t('Missing user data from Passkey login response'))
+      }
+      if ((finish.data as { require_2fa?: boolean }).require_2fa) {
+        redirectTo2FA()
+        return
       }
 
       await handleLoginSuccess(
