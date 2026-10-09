@@ -53,6 +53,9 @@ EXPECTED_CLAIM_KINDS = (
     "§11 relaykit 引用数",
     "§11 宿主引用数",
     "§11 全路径引用数",
+    "§11 裸引用 ok 数",
+    "§11 裸引用未解析数",
+    "citation 裸引用（§9.3）",
     "dto 分节数",
     "结构问题数",
     "dto 七维（命令行注释）",
@@ -77,20 +80,30 @@ def run(cmd):
 
 
 def parse_citation(out):
-    """relaykit-citation-check.py 的输出 → (relaykit, host, upstream_full)。
+    """relaykit-citation-check.py 的输出 → (relaykit, host, upstream_full, bare_ok)。
 
-    三行的 failed 必须存在且为 0。退出码与输出通常一致，但一旦失配
+    四行的 failed 必须存在且为 0。退出码与输出通常一致，但一旦失配
     （例如子进程被包装层改写退出码、或输出被部分截断），只读 ok= 会把
     「有失败」当成功放行——解析层自己也要 fail-closed，不能只押退出码。
+    裸引用组（第 43 轮）的 failed 为 0 是硬条件；unresolved 单独解析：
+    它不是失败（占位符与工作区文件落在那里是设计如此），而是文档第 11 节
+    必须声明的数字——声明与实测不符由 compare 抓。
     """
     rk = re.search(r"citations=(\d+)\s+ok=(\d+)\s+failed=(\d+)", out)
     host = re.search(r"host-citations ok=(\d+)\s+failed=(\d+)", out)
     full = re.search(r"upstream-full ok=(\d+)\s+failed=(\d+)", out)
-    if not (rk and host and full):
+    bare = re.search(r"bare ok=(\d+)\s+unresolved=(\d+)\s+failed=(\d+)", out)
+    if not (rk and host and full and bare):
         return None
-    if int(rk.group(3)) or int(host.group(2)) or int(full.group(2)):
+    if int(rk.group(3)) or int(host.group(2)) or int(full.group(2)) or int(bare.group(3)):
         return None
-    return int(rk.group(1)), int(host.group(1)), int(full.group(1))
+    return (
+        int(rk.group(1)),
+        int(host.group(1)),
+        int(full.group(1)),
+        int(bare.group(1)),
+        int(bare.group(2)),
+    )
 
 
 def parse_ran(out):
@@ -209,7 +222,8 @@ def collect_actual(quiet):
     if not quiet:
         print("门禁实际输出：")
         cite = actual.get("citation")
-        print(f"  citation        {('relaykit=%d host=%d full=%d' % cite) if cite else '无法解析'}")
+        print(f"  citation        "
+              f"{('relaykit=%d host=%d full=%d bare_ok=%d unresolved=%d' % cite) if cite else '无法解析'}")
         print(f"  citation 单测   {actual.get('citation_tests', '无法解析')}")
         print(f"  结构问题        {actual.get('structure_problems', '无法解析')}")
         print(f"  结构单测        {actual.get('structure_tests', '无法解析')}")
@@ -263,6 +277,16 @@ def extract_claims(doc):
             add(i, "§11 宿主引用数", int(m.group(1)))
         for m in re.finditer(r"全路径 \*\*(\d+) 处\*\*", line):
             add(i, "§11 全路径引用数", int(m.group(1)))
+        # 第 43 轮：裸 `X.go:NN` 组进门禁后，§11 必须声明 ok 数与未解析数。
+        # 检查器的 docstring 承诺了这条对账——声明消失或漂移都要变红。
+        for m in re.finditer(r"裸引用 ok \*\*(\d+)\*\*", line):
+            add(i, "§11 裸引用 ok 数", int(m.group(1)))
+        for m in re.finditer(r"未解析 \*\*(\d+)\*\* 处", line):
+            add(i, "§11 裸引用未解析数", int(m.group(1)))
+        # §9.3 门禁命令注释里的裸组计数：裸引用 ok=N/未解析=M
+        for m in re.finditer(r"裸引用 ok=(\d+)/未解析=(\d+)", line):
+            add(i, "citation 裸引用（§9.3）",
+                (int(m.group(1)), int(m.group(2))))
 
         # 「至此，dto 的兼容性核查覆盖 **7 组**」——工具分节数的当前口径声明
         for m in re.finditer(r"dto 的兼容性核查覆盖 \*\*(\d+) 组\*\*", line):
@@ -295,8 +319,10 @@ def compare(claims, actual):
     for line_no, desc, claimed in claims:
         if desc == "citation 三元组":
             real = actual.get("citation")
-            if real is not None and claimed != real:
-                mismatches.append((line_no, desc, claimed, real))
+            # 比对前三位：第 43 轮起 parse_citation 追加了裸组两位，三元组声明
+            # 仍是前三维的声明，不因位宽变化误报。
+            if real is not None and claimed != real[:3]:
+                mismatches.append((line_no, desc, claimed, real[:3]))
         elif desc == "citation relaykit 分子/分母":
             real = actual.get("citation")
             if real is not None and claimed != (real[0], real[0]):
@@ -345,6 +371,18 @@ def compare(claims, actual):
             real = actual.get("citation")
             if real is not None and claimed != real[2]:
                 mismatches.append((line_no, desc, claimed, real[2]))
+        elif desc == "§11 裸引用 ok 数":
+            real = actual.get("citation")
+            if real is not None and claimed != real[3]:
+                mismatches.append((line_no, desc, claimed, real[3]))
+        elif desc == "§11 裸引用未解析数":
+            real = actual.get("citation")
+            if real is not None and claimed != real[4]:
+                mismatches.append((line_no, desc, claimed, real[4]))
+        elif desc == "citation 裸引用（§9.3）":
+            real = actual.get("citation")
+            if real is not None and claimed != (real[3], real[4]):
+                mismatches.append((line_no, desc, claimed, (real[3], real[4])))
         elif desc in ("dto 七维（命令行注释）", "dto 七维（正文）"):
             real = actual.get("dto")
             if real is not None and claimed != real:

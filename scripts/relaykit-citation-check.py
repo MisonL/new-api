@@ -20,6 +20,22 @@ verifies, against the pinned ref, that:
   2. the line number is in range
   3. the cited line is not blank
 
+A fourth group (round 43) resolves **bare** `X.go:<line>` references -- those
+written without any directory prefix, e.g. `relay-claude.go:37`,
+`request_compat.go:16`. They were previously invisible to every extractor, so
+dozens of such references sat outside the gate while it reported green. A bare
+reference is resolved by suffix match against the two trees: if it matches
+exactly one file under `relaykit/` at the pinned ref (and no host file) it is
+a relaykit citation; if it matches exactly one file in the baseline tree (and
+no relaykit file) it is a host citation. A bare reference that matches more
+than one file on either side is **ambiguous and fails** -- the author must
+write the full path. One that matches nothing is counted under
+`unresolved` and listed: that is where prose placeholders (`foo.go:12`) and
+workspace-only files (`convert_golden_test.go`, absent at both refs) land.
+The doc declares the unresolved count in section 11; gate-selfcheck compares
+it, so a new typo path turning unresolved reds the selfcheck rather than
+slipping through.
+
 It does NOT assert what the line says -- that is the reviewer's job when a
 citation moves. It only catches the mechanical failure (file gone, line out of
 range, blank line) that means "the doc's anchor has drifted".
@@ -144,6 +160,111 @@ def read_at(ref, path):
     if result.returncode != 0:
         return None
     return result.stdout.split("\n")
+
+
+def list_go_files(ref, prefix=None):
+    """Return every .go path at ref (optionally under prefix). Cached per call site."""
+    cmd = ["git", "ls-tree", "-r", "--name-only", ref]
+    if prefix:
+        cmd += ["--", prefix]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return []
+    return [p for p in result.stdout.split("\n") if p.endswith(".go")]
+
+
+# A bare reference is a `path.go:line` written with no directory prefix at all
+# (`relay-claude.go:37`) or a partial one (`aws/adaptor.go:130`,
+# `gemini/relay-gemini.go:1784`). Those were invisible to the three extractors
+# above (which all require a known root), so they sat outside the gate. The
+# lookbehind keeps the match from starting mid-path or just after a `:` --
+# the latter also excludes `upstream/main:<path>` and `dbfbc096f:<path>` forms,
+# which the upstream-full extractor handles.
+BARE_CITATION = re.compile(r"(?<![A-Za-z0-9_./:-])([A-Za-z0-9_./-]+\.go):(\d+)")
+
+
+def _raw_claimed(text):
+    """(path, line) as written, for the three extractors that resolve directly.
+
+    Used only to subtract, so a bare scan does not recount a fully-qualified
+    citation. Group(1) of each extractor is the path as it appears in the doc.
+    """
+    claimed = set()
+    for path, line in CITATION.findall(text):
+        claimed.add(("relaykit/" + path, int(line)))
+    for path, line in SHORT_CITATION.findall(text):
+        claimed.add((path, int(line)))
+    for path, line in HOST_CITATION.findall(text):
+        claimed.add((path, int(line)))
+    return claimed
+
+
+def extract_bare_citations(text):
+    """Bare `path.go:line` refs not already covered by the three extractors."""
+    claimed = _raw_claimed(text)
+    seen = {}
+    for path, line in BARE_CITATION.findall(text):
+        if path.startswith("relaykit/"):
+            continue
+        key = (path, int(line))
+        if key in claimed:
+            continue
+        seen.setdefault(key, None)
+    return sorted(seen)
+
+
+def check_bare(doc_text, ref, baseline, kit_files, host_files, reader=read_at):
+    """Resolve bare refs by unique suffix match; return (ok, failures, unresolved).
+
+    A bare ref matching exactly one file under relaykit/ (and no host file) is
+    checked at ref; one matching exactly one host file (and no relaykit file)
+    at baseline. Anything matching two or more files is ambiguous and fails --
+    the author must write the full path. Anything matching nothing is returned
+    in `unresolved` for the caller to count and list (prose placeholders and
+    workspace-only files); it is not itself a failure.
+    """
+    failures = []
+    unresolved = []
+    ok = 0
+    for path, line in extract_bare_citations(doc_text):
+        kit = [p for p in kit_files if p == path or p.endswith("/" + path)]
+        host = [p for p in host_files if p == path or p.endswith("/" + path)]
+        if kit and host:
+            failures.append(
+                (path, line, f"ambiguous: matches {kit + host}; write the full path")
+            )
+            continue
+        if len(kit) > 1:
+            failures.append(
+                (path, line, f"ambiguous: matches {kit} under relaykit; write the full path")
+            )
+            continue
+        if len(host) > 1:
+            failures.append(
+                (path, line, f"ambiguous: matches {host} in the host tree; write the full path")
+            )
+            continue
+        if kit:
+            resolved, at = kit[0], ref
+        elif host:
+            resolved, at = host[0], baseline
+        else:
+            unresolved.append((path, line))
+            continue
+        lines = reader(at, resolved)
+        if lines is None:
+            failures.append((path, line, f"{resolved} not found at {at}"))
+            continue
+        if not 1 <= line <= len(lines):
+            failures.append(
+                (path, line, f"{resolved}:{line} out of range at {at} (file has {len(lines)} lines)")
+            )
+            continue
+        if not lines[line - 1].strip():
+            failures.append((path, line, f"{resolved}:{line} is blank at {at}"))
+            continue
+        ok += 1
+    return ok, failures, unresolved
 
 
 def check_host(doc_text, ref, upstream_ref=DEFAULT_REF, reader=read_at):
@@ -281,7 +402,19 @@ def main(argv=None):
     for path, line, why in u_failures:
         print(f"  FAIL upstream {path}:{line}  {why}", file=sys.stderr)
 
-    return 1 if (failures or h_failures or u_failures) else 0
+    # Bare refs (round 43) resolve by unique suffix match against the two trees.
+    kit_files = list_go_files(args.ref, "relaykit/")
+    host_files = list_go_files(args.baseline)
+    b_ok, b_failures, b_unresolved = check_bare(
+        doc_text, args.ref, args.baseline, kit_files, host_files
+    )
+    print(f"bare ok={b_ok}  unresolved={len(b_unresolved)}  failed={len(b_failures)}")
+    for path, line in b_unresolved:
+        print(f"  UNRESOLVED bare {path}:{line} (no file at either ref)")
+    for path, line, why in b_failures:
+        print(f"  FAIL bare {path}:{line}  {why}", file=sys.stderr)
+
+    return 1 if (failures or h_failures or u_failures or b_failures) else 0
 
 
 if __name__ == "__main__":

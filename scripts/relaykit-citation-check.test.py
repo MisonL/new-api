@@ -237,5 +237,112 @@ class HostCitationTests(unittest.TestCase):
         self.assertEqual((ok, failures), (1, []))
 
 
+class BareCitationTests(unittest.TestCase):
+    """Round 43: bare `X.go:NN` (a filename with no directory prefix) is now
+    gated. Before this every such reference sat outside the gate while it
+    reported green; section 11 documented the gap as 79 refs.
+
+    A bare reference resolves by unique suffix match against the two trees.
+    Ambiguity (a name present on both sides, or two files on one side) fails
+    rather than guessing; a name present nowhere is counted as unresolved.
+    """
+
+    def test_extracts_bare_refs(self):
+        text = "see relay-claude.go:37 and request_compat.go:16"
+        self.assertEqual(
+            MODULE.extract_bare_citations(text),
+            [("relay-claude.go", 37), ("request_compat.go", 16)],
+        )
+
+    def test_full_and_host_paths_are_not_bare(self):
+        # A fully-qualified citation is subtracted so the bare scan does not
+        # recount it: relaykit/... by prefix, service/... by host extraction.
+        text = "relaykit/dto/values.go:2 and service/convert.go:749"
+        self.assertEqual(MODULE.extract_bare_citations(text), [])
+
+    def test_upstream_prefixed_paths_are_not_bare(self):
+        text = "upstream/main:relay/channel/aws/adaptor.go:130"
+        self.assertEqual(MODULE.extract_bare_citations(text), [])
+
+    def test_unique_host_ref_checks_at_baseline(self):
+        doc = "relay-claude.go:2"
+        seen = []
+
+        def reader(ref, path):
+            seen.append(ref)
+            return ["package claude", "func f() {}", ""]
+
+        ok, failures, unresolved = MODULE.check_bare(
+            doc, "ref", "base",
+            kit_files=["relaykit/x.go"],
+            host_files=["relay/channel/claude/relay-claude.go"],
+            reader=reader,
+        )
+        self.assertEqual((ok, failures, unresolved), (1, [], []))
+        self.assertEqual(seen, ["base"])
+
+    def test_unique_kit_ref_checks_at_ref(self):
+        doc = "request_compat.go:2"
+        seen = []
+
+        def reader(ref, path):
+            seen.append(ref)
+            return ["package rc", "func f() {}", ""]
+
+        ok, failures, unresolved = MODULE.check_bare(
+            doc, "ref", "base",
+            kit_files=["relaykit/relayconvert/request_compat.go"],
+            host_files=[],
+            reader=reader,
+        )
+        self.assertEqual((ok, failures, unresolved), (1, [], []))
+        self.assertEqual(seen, ["ref"])
+
+    def test_ambiguous_both_sides_fails(self):
+        doc = "pricing.go:1"
+
+        ok, failures, _ = MODULE.check_bare(
+            doc, "ref", "base",
+            kit_files=["relaykit/dto/pricing.go"],
+            host_files=["dto/pricing.go"],
+            reader=lambda r, p: ["x"],
+        )
+        self.assertEqual(ok, 0)
+        self.assertIn("ambiguous", failures[0][2])
+
+    def test_ambiguous_multi_match_fails(self):
+        doc = "gemini.go:1"
+
+        ok, failures, _ = MODULE.check_bare(
+            doc, "ref", "base",
+            kit_files=[],
+            host_files=["relay/channel/gemini/gemini.go", "setting/model_setting/gemini.go"],
+            reader=lambda r, p: ["x"],
+        )
+        self.assertEqual(ok, 0)
+        self.assertIn("ambiguous", failures[0][2])
+
+    def test_unresolved_is_counted_not_failed(self):
+        doc = "foo.go:12 convert_golden_test.go:255"
+
+        ok, failures, unresolved = MODULE.check_bare(
+            doc, "ref", "base", kit_files=[], host_files=[],
+            reader=lambda r, p: None,
+        )
+        self.assertEqual((ok, failures), (0, []))
+        self.assertEqual(unresolved, [("convert_golden_test.go", 255), ("foo.go", 12)])
+
+    def test_blank_cited_line_fails(self):
+        doc = "relay-claude.go:2"
+
+        ok, failures, _ = MODULE.check_bare(
+            doc, "ref", "base", kit_files=[],
+            host_files=["relay/channel/claude/relay-claude.go"],
+            reader=lambda r, p: ["package claude", "   "],
+        )
+        self.assertEqual(ok, 0)
+        self.assertIn("blank at base", failures[0][2])
+
+
 if __name__ == "__main__":
     unittest.main()

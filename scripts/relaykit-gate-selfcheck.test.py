@@ -23,6 +23,7 @@ CITATION_OUT = (
     "ref=789c97019  citations=51  ok=51  failed=0\n"
     "baseline=dbfbc096f  host-citations ok=107  failed=0  skipped=0\n"
     "upstream-full ok=24  failed=0\n"
+    "bare ok=41  unresolved=2  failed=0\n"
 )
 
 DTO_OUT = (
@@ -33,11 +34,11 @@ DTO_OUT = (
 
 class TestParsers(unittest.TestCase):
     def test_citation_parsed(self):
-        self.assertEqual(selfcheck.parse_citation(CITATION_OUT), (51, 107, 24))
+        self.assertEqual(selfcheck.parse_citation(CITATION_OUT), (51, 107, 24, 41, 2))
 
     def test_citation_changed_count_is_visible(self):
         out = CITATION_OUT.replace("citations=51", "citations=52")
-        self.assertEqual(selfcheck.parse_citation(out), (52, 107, 24))
+        self.assertEqual(selfcheck.parse_citation(out), (52, 107, 24, 41, 2))
 
     def test_citation_garbage_returns_none(self):
         self.assertIsNone(selfcheck.parse_citation("nothing here"))
@@ -49,6 +50,19 @@ class TestParsers(unittest.TestCase):
         self.assertIsNone(selfcheck.parse_citation(bad_nonzero))
         missing_field = CITATION_OUT.replace("  failed=0", "")
         self.assertIsNone(selfcheck.parse_citation(missing_field))
+
+    def test_bare_failed_must_be_zero(self):
+        # 第 43 轮：裸组单独 fail-closed。failed!=0 或整行缺失 → None。
+        bad = CITATION_OUT.replace("bare ok=41  unresolved=2  failed=0",
+                                    "bare ok=41  unresolved=2  failed=3")
+        self.assertIsNone(selfcheck.parse_citation(bad))
+        no_bare = CITATION_OUT.replace(
+            "bare ok=41  unresolved=2  failed=0\n", "")
+        self.assertIsNone(selfcheck.parse_citation(no_bare))
+
+    def test_bare_unresolved_is_parsed(self):
+        out = CITATION_OUT.replace("unresolved=2", "unresolved=7")
+        self.assertEqual(selfcheck.parse_citation(out), (51, 107, 24, 41, 7))
 
     def test_ran_parsed(self):
         self.assertEqual(selfcheck.parse_ran("Ran 25 tests in 0.001s"), 25)
@@ -68,16 +82,17 @@ class TestParsers(unittest.TestCase):
 DOC = """\
 `upstream/main` = `789c97019`（2026-09-28）
 当前实测三组全绿：**51/51**（`ref=789c97019`）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 24/24**（**第 38 轮**：第 37 轮为 50/103/24）。
-scripts/relaykit-citation-check.py            # 全部引用可解析时退出码 0（relaykit 51 + 宿主 107 + upstream 全路径 24）
+scripts/relaykit-citation-check.py            # 全部引用可解析时退出码 0（relaykit 51 + 宿主 107 + upstream 全路径 24，裸引用 ok=41/未解析=2）
 python3 scripts/relaykit-citation-check.test.py  # 25 个单测
 python3 scripts/relaykit-doc-structure-check.test.py   # 13 个单测
 # 计数: fieldSet=33 tag=5 type=6 embed=0 order=4 sig=12 equiv=21
 `--strict` 把当前基线（fieldSet=33、tag=5、type=6、embed=0、**order=4**、sig=12、**equiv=21**）变成门禁
 本文档 relaykit 行引用现为 **51 处唯一**（**第 38 轮**）；裸宿主引用 **107 处**；全路径 **24 处**。
+裸引用 ok **41**、未解析 **2** 处（占位符与工作区文件）。
 """
 
 ACTUAL = {
-    "citation": (51, 107, 24),
+    "citation": (51, 107, 24, 41, 2),
     "citation_tests": 25,
     "structure_problems": 0,
     "structure_tests": 13,
@@ -166,6 +181,25 @@ class TestClaims(unittest.TestCase):
         mismatches = selfcheck.compare(selfcheck.extract_claims(drifted), ACTUAL)
         self.assertEqual(len(mismatches), 1)
         self.assertEqual(mismatches[0][1], "§11 宿主引用数")
+
+    def test_bare_claims_are_extracted(self):
+        """§11 的裸组声明（ok 数、未解析数）是当前口径，第 43 轮起必须在册。"""
+        claims = selfcheck.extract_claims(DOC)
+        descs = [d for _, d, _ in claims]
+        self.assertIn("§11 裸引用 ok 数", descs)
+        self.assertIn("§11 裸引用未解析数", descs)
+        self.assertIn("citation 裸引用（§9.3）", descs)
+
+    def test_bare_claim_drift_is_caught(self):
+        for old, desc, new in (
+            ("裸引用 ok **41**", "§11 裸引用 ok 数", "裸引用 ok **42**"),
+            ("未解析 **2** 处（占位符", "§11 裸引用未解析数", "未解析 **3** 处（占位符"),
+            ("裸引用 ok=41/未解析=2", "citation 裸引用（§9.3）", "裸引用 ok=41/未解析=9"),
+        ):
+            drifted = DOC.replace(old, new)
+            mismatches = selfcheck.compare(selfcheck.extract_claims(drifted), ACTUAL)
+            self.assertEqual(len(mismatches), 1, (desc, mismatches))
+            self.assertEqual(mismatches[0][1], desc)
 
     def test_selfcheck_test_count_is_a_claim(self):
         doc = DOC + "python3 scripts/relaykit-gate-selfcheck.test.py  # 14 个单测\n"
