@@ -129,6 +129,12 @@ func TestSSRFGuardedTransportRejectsSOCKSRemoteDNSPrivateResolutionWhenDomainIPF
 	require.Empty(t, dialAddress)
 }
 
+// The point of this test is the proxy endpoint, not the target: an HTTP proxy
+// is dialed by its own address, so it must not be rewritten to a validated
+// target IP. That requires a target the SSRF gate can validate without a
+// resolver — an IP literal. Using the proxy hostname as the request URL (as an
+// earlier version did) made the gate fail on DNS resolution before any dial, so
+// the assertion could never observe the dial address at all.
 func TestSSRFGuardedTransportDoesNotPinHTTPProxyEndpoint(t *testing.T) {
 	fetchSetting := system_setting.GetFetchSetting()
 	previousSetting := *fetchSetting
@@ -152,7 +158,7 @@ func TestSSRFGuardedTransportDoesNotPinHTTPProxyEndpoint(t *testing.T) {
 		},
 	}
 	client := &http.Client{Transport: withSSRFProtectionTransport(base, true)}
-	req, err := http.NewRequest(http.MethodGet, "http://proxy.example:8080/", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://203.0.113.10/resource", nil)
 	require.NoError(t, err)
 	req = req.WithContext(common.WithSSRFValidation(req.Context()))
 

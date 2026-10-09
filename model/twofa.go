@@ -53,15 +53,6 @@ func GetTwoFAByUserId(userId int) (*TwoFA, error) {
 	return &twoFA, nil
 }
 
-// IsTwoFAEnabled 检查用户是否启用了2FA
-func IsTwoFAEnabled(userId int) bool {
-	twoFA, err := GetTwoFAByUserId(userId)
-	if err != nil || twoFA == nil {
-		return false
-	}
-	return twoFA.IsEnabled
-}
-
 // CreateTwoFA 创建2FA设置
 func (t *TwoFA) Create() error {
 	// 检查用户是否已存在2FA设置
