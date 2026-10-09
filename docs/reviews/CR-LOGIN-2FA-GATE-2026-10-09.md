@@ -107,16 +107,35 @@ GREEN 阶段结果：
 
 ## 未覆盖边界
 
-- 既有失败 `TestSSRFGuardedTransportDoesNotPinHTTPProxyEndpoint`（`service` 包）与本轮改动无关：
-  该文件与测试相对 HEAD 未改动，在干净的 `HEAD` 检出上同样失败。
 - 桌面端挑战的端到端仅在 Go 侧固定（poll 返回挑战 + 同会话验证码通过）；未在真实 Tauri 应用中走一遍。
 - 前端挑战分支未做浏览器端交互测试，仅有 lint/typecheck/build 与代码走查。
 - 会话通过标记的生命周期等于会话 cookie；同一会话内再次登录同一账号不再重复索要验证码，
   这是有意的（与上游「会话内一次验证」一致），未做超时收窄。
+- `web/default/src/routes/oauth/$provider.tsx`、`web/default/src/features/auth/hooks/use-oauth-login.ts`
+  与 `docs/reviews/README.md` 中本任务的改动，与其他会话的在途重写交错在同一 hunk 内
+  （前者整段重写 CAS/JWT/ticket 回调，后者重写 isDesktopApp 分支），无法在不带走他人
+  未提交工作的前提下分离提交，故保留在工作区未提交。这三处的挑战分支已在工作区生效并通过
+  lint/typecheck/build。
+
+## 附带处理
+
+- 既有失败 `TestSSRFGuardedTransportDoesNotPinHTTPProxyEndpoint` 已查明并修复（提交 `c47a22bd2`）：
+  不是代码缺陷，而是用例前提写错——它把请求 URL 与代理地址设为同一个不可解析的
+  `proxy.example:8080`，期望门控跳过目标解析，但门控对启用校验的请求必先解析目标，
+  解析失败即返回，DialContext 永不被调用。改为 IP 字面量目标后拨号真正发生，断言回到
+  用例名所称的语义。探针取证：原用例 `dialAddress=""`，改后 `dialAddress="proxy.example:8080"`。
+- 门控改造使 `model.IsTwoFAEnabled` 变为零调用点，已删除（同一提交）。其语义（查询出错
+  返回 false 即放行）正是门控刻意规避的写法，留下易被误用。
 
 ## 提交状态
 
-未提交。改动文件：
+已提交为三个原子提交（dev 分支，未推送）：
+
+- `6cc446dff` fix(auth): 二次验证门控统一收口到 setupLoginWithResult
+- `5893114ac` fix(auth): 密码表单之外的登录出口补 require_2fa 分支（前端其一）
+- `c47a22bd2` fix(test,model): 修 SSRF 代理拨号用例的失效前提，删除门控改造后的死代码
+
+后端与可整文件分离的前端改动均已入库：
 
 ```
 controller/user.go
@@ -126,11 +145,19 @@ controller/custom_oauth_external.go
 controller/custom_oauth_jwt_test.go
 controller/custom_oauth_external_test.go
 controller/login_twofa_gate_test.go   (新增)
-web/default/src/routes/oauth/$provider.tsx
-web/default/src/features/auth/hooks/use-oauth-login.ts
+model/twofa.go
+service/http_client_ssrf_test.go
 web/default/src/features/auth/sign-in/components/user-auth-form.tsx
 web/classic/src/components/auth/LoginForm.jsx
 web/classic/src/components/auth/OAuth2Callback.jsx
+docs/reviews/CR-LOGIN-2FA-GATE-2026-10-09.md   (新增)
+```
+
+仍留在工作区未提交（与他人改动交错，见「未覆盖边界」）：
+
+```
+web/default/src/routes/oauth/$provider.tsx
+web/default/src/features/auth/hooks/use-oauth-login.ts
 docs/reviews/README.md
 ```
 
