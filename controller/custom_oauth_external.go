@@ -132,6 +132,11 @@ func completeCustomOAuthIdentityLogin(
 func finalizeCustomOAuthIdentityLogin(c *gin.Context, provider oauth.Provider, result *customOAuthJWTLoginResult, audit *customOAuthJWTAuditInfo) bool {
 	if result.Action == "bind" {
 		recordCustomOAuthJWTAudit(audit)
+		// Spend the nonce before the response is written, so the deletion is
+		// part of the cookie this response sets. Deleting it afterwards would
+		// emit a second Set-Cookie whose precedence over the first is up to the
+		// client.
+		consumeOAuthState(c)
 		common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
 			"action": "bind",
 		})
@@ -153,11 +158,17 @@ func finalizeCustomOAuthIdentityLogin(c *gin.Context, provider oauth.Provider, r
 		}
 	}
 
-	if !setupLoginWithResult(result.User, c) {
+	// Spend the nonce before setupLoginWithResult saves the session, so the
+	// cookie it writes already lacks the state.
+	consumeOAuthState(c)
+	issued, failureReason := setupLoginWithResult(result.User, c)
+	if !issued {
 		if !c.Writer.Written() {
 			common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
 		}
-		audit.FailureReason = "session_save_failed"
+		// A two-factor challenge is not a session failure: the reason names
+		// which of the two stopped the login.
+		audit.FailureReason = failureReason
 		recordCustomOAuthJWTAudit(audit)
 		return false
 	}

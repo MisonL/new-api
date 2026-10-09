@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,14 +10,13 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
-
-	"github.com/QuantumNous/new-api/constant"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -35,7 +33,7 @@ func Login(c *gin.Context) {
 		return
 	}
 	var loginRequest LoginRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&loginRequest)
+	err := common.DecodeJson(c.Request.Body, &loginRequest)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -64,47 +62,75 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// 检查是否启用2FA
-	if model.IsTwoFAEnabled(user.Id) {
-		// 设置pending session，等待2FA验证
-		session := sessions.Default(c)
-		session.Set("pending_username", user.Username)
-		session.Set("pending_user_id", user.Id)
-		err := session.Save()
-		if err != nil {
-			common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"message": i18n.T(c, i18n.MsgUserRequire2FA),
-			"success": true,
-			"data": map[string]interface{}{
-				"require_2fa": true,
-			},
-		})
-		return
-	}
-
+	// 密码校验通过后统一走 setupLogin：二次验证门控与其它登录路径共用同一处
+	// 收口（见 setupLoginWithResult），密码表单不再单独维护一份。
 	setupLogin(&user, c)
 }
 
+// 会话键。pending_* 是挑战期间等待二次验证的账号，twofa_verified_user_id 记录
+// 当前会话已经为该用户通过过二次验证。
+const (
+	sessionKeyPendingUsername = "pending_username"
+	sessionKeyPendingUserID   = "pending_user_id"
+	// sessionKeyTwoFAVerifiedUserID 的生命周期与会话一致：同一个会话再次登录同一
+	// 用户不再重复索要验证码；换成别的账号登录时会被丢弃。
+	sessionKeyTwoFAVerifiedUserID = "twofa_verified_user_id"
+)
+
 // setup session & cookies and then return user info
 func setupLogin(user *model.User, c *gin.Context) {
-	_ = setupLoginWithResult(user, c)
+	_, _ = setupLoginWithResult(user, c)
 }
 
-func setupLoginWithResult(user *model.User, c *gin.Context) bool {
+// setupLoginWithResult 是会话签发的唯一收口：密码、GitHub/OIDC/Discord/LinuxDO/
+// 微信/Telegram、Passkey、自定义 OAuth 以及桌面端 handoff 全部经过这里，因此二次
+// 验证门控也放在这里，任何一条路径都无法在缺少第二因素时拿到会话。
+//
+// 未签发会话时第二个返回值说明原因，供审计使用："twofa_required"（已写入挑战响应，
+// 等待 Verify2FALogin）、"session_save_failed"、"twofa_check_failed"。
+func setupLoginWithResult(user *model.User, c *gin.Context) (bool, string) {
 	session := sessions.Default(c)
+
+	// 直接读取 2FA 记录而不是用 IsTwoFAEnabled：后者在查询出错时返回 false（放行），
+	// 门控不能把查询错误当成"没有开启二次验证"。
+	twoFA, err := model.GetTwoFAByUserId(user.Id)
+	if err != nil {
+		common.ApiError(c, err)
+		return false, "twofa_check_failed"
+	}
+	if twoFA != nil && twoFA.IsEnabled {
+		verifiedUserID, _ := session.Get(sessionKeyTwoFAVerifiedUserID).(int)
+		if verifiedUserID != user.Id {
+			// 挑战期间丢弃别的账号留下的通过标记：它只对该标记所属用户有效。
+			session.Delete(sessionKeyTwoFAVerifiedUserID)
+			session.Set(sessionKeyPendingUsername, user.Username)
+			session.Set(sessionKeyPendingUserID, user.Id)
+			if err := session.Save(); err != nil {
+				common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
+				return false, "session_save_failed"
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"message": i18n.T(c, i18n.MsgUserRequire2FA),
+				"success": true,
+				"data": map[string]interface{}{
+					"require_2fa": true,
+				},
+			})
+			return false, "twofa_required"
+		}
+	} else {
+		session.Delete(sessionKeyTwoFAVerifiedUserID)
+	}
+
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
 	session.Set("role", user.Role)
 	session.Set("status", user.Status)
 	session.Set("group", user.Group)
-	err := session.Save()
+	err = session.Save()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
-		return false
+		return false, "session_save_failed"
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "",
@@ -118,7 +144,7 @@ func setupLoginWithResult(user *model.User, c *gin.Context) bool {
 			"group":        user.Group,
 		},
 	})
-	return true
+	return true, ""
 }
 
 func Logout(c *gin.Context) {
@@ -148,7 +174,7 @@ func Register(c *gin.Context) {
 		return
 	}
 	var user model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&user)
+	err := common.DecodeJson(c.Request.Body, &user)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -540,7 +566,7 @@ func generateDefaultSidebarConfig(userRole int) string {
 	// 普通用户不包含admin区域
 
 	// 转换为JSON字符串
-	configBytes, err := json.Marshal(defaultConfig)
+	configBytes, err := common.Marshal(defaultConfig)
 	if err != nil {
 		common.SysLog("生成默认边栏配置失败: " + err.Error())
 		return ""
@@ -578,7 +604,7 @@ func GetUserModels(c *gin.Context) {
 
 func UpdateUser(c *gin.Context) {
 	var updatedUser model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&updatedUser)
+	err := common.DecodeJson(c.Request.Body, &updatedUser)
 	if err != nil || updatedUser.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -659,7 +685,7 @@ func AdminClearUserBinding(c *gin.Context) {
 
 func UpdateSelf(c *gin.Context) {
 	var requestData map[string]interface{}
-	err := json.NewDecoder(c.Request.Body).Decode(&requestData)
+	err := common.DecodeJson(c.Request.Body, &requestData)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -723,12 +749,12 @@ func UpdateSelf(c *gin.Context) {
 
 	// 原有的用户信息更新逻辑
 	var user model.User
-	requestDataBytes, err := json.Marshal(requestData)
+	requestDataBytes, err := common.Marshal(requestData)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	err = json.Unmarshal(requestDataBytes, &user)
+	err = common.Unmarshal(requestDataBytes, &user)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -848,7 +874,7 @@ func DeleteSelf(c *gin.Context) {
 
 func CreateUser(c *gin.Context) {
 	var user model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&user)
+	err := common.DecodeJson(c.Request.Body, &user)
 	user.Username = strings.TrimSpace(user.Username)
 	if err != nil || user.Username == "" || user.Password == "" {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
@@ -895,7 +921,7 @@ type ManageRequest struct {
 // ManageUser Only admin user can do this
 func ManageUser(c *gin.Context) {
 	var req ManageRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&req)
+	err := common.DecodeJson(c.Request.Body, &req)
 
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)

@@ -41,6 +41,8 @@ func (s *failingSessionStore) Options(options sessions.Options) {
 
 func TestFinalizeCustomOAuthIdentityLoginReturnsSessionSaveError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	// The login gate reads the two-factor table before writing the session.
+	setupCustomOAuthJWTControllerTestDB(t)
 
 	router := gin.New()
 	router.Use(sessions.Sessions("session", newFailingSessionStore()))

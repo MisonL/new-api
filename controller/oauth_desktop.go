@@ -186,7 +186,13 @@ func PollDesktopOAuth(c *gin.Context) {
 		common.ApiErrorMsg(c, i18n.T(c, i18n.MsgOAuthUserBanned))
 		return
 	}
-	setupLoginWithResult(user, c)
+	issued, _ := setupLoginWithResult(user, c)
+	if !issued {
+		// 未签发分两种：2FA 挑战响应已由门控写入本 poll 响应（handoff 已消费，
+		// 桌面端拿到 require_2fa 后在本窗口 /otp 完成验证即可签发会话）；会话保存
+		// 失败也已由 setupLoginWithResult 写出错误响应。这里只需停止本次 poll。
+		return
+	}
 }
 
 func createDesktopOAuthRequest(providerSlug string, mode string, bindUserID int, affCode string) (*desktopOAuthRequest, error) {

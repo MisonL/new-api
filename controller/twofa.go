@@ -407,7 +407,7 @@ func Verify2FALogin(c *gin.Context) {
 
 	// 从会话中获取pending用户信息
 	session := sessions.Default(c)
-	pendingUserId := session.Get("pending_user_id")
+	pendingUserId := session.Get(sessionKeyPendingUserID)
 	if pendingUserId == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -477,11 +477,11 @@ func Verify2FALogin(c *gin.Context) {
 		return
 	}
 
-	// 2FA验证成功，清理pending会话信息并完成登录
-	session.Delete("pending_username")
-	session.Delete("pending_user_id")
-	session.Save()
-
+	// 2FA验证成功，清理pending会话信息并完成登录。通过标记先于 setupLogin 写入：
+	// 门控在 setupLoginWithResult 内认领它，认领后它就与 id 一起进入同一个会话快照。
+	session.Delete(sessionKeyPendingUsername)
+	session.Delete(sessionKeyPendingUserID)
+	session.Set(sessionKeyTwoFAVerifiedUserID, user.Id)
 	setupLogin(user, c)
 }
 

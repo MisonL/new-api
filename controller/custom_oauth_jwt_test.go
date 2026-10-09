@@ -104,7 +104,7 @@ func setupCustomOAuthJWTControllerTestDB(t *testing.T) {
 	}
 	model.DB = db
 	model.LOG_DB = db
-	if err := db.AutoMigrate(&model.User{}, &model.Log{}, &model.CustomOAuthProvider{}, &model.UserOAuthBinding{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Log{}, &model.CustomOAuthProvider{}, &model.UserOAuthBinding{}, &model.TwoFA{}, &model.TwoFABackupCode{}); err != nil {
 		t.Fatalf("failed to migrate test tables: %v", err)
 	}
 
@@ -1597,4 +1597,100 @@ func mustEncodeControllerRSAPublicKeyPEM(t *testing.T, publicKey *rsa.PublicKey)
 		Type:  "PUBLIC KEY",
 		Bytes: publicKeyDER,
 	}))
+}
+
+// The state parameter is a single-use CSRF nonce. It was validated but never
+// cleared, so a captured callback URL could be replayed for the lifetime of the
+// session cookie: the same login request would sign the caller in again and
+// again.
+func TestHandleCustomOAuthJWTLoginConsumesStateOnSuccess(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate private key: %v", err)
+	}
+	createJWTDirectProviderForTest(t, privateKey, jwtDirectProviderTestOptions{
+		AutoRegister: true,
+	})
+
+	router := newCustomOAuthJWTRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	client := newTestHTTPClient(t)
+	state := fetchOAuthStateForTest(t, client, server.URL)
+	token := signJWTForControllerTest(t, privateKey, jwt.MapClaims{
+		"iss":                "https://issuer.example.com",
+		"aud":                "new-api",
+		"sub":                "replay-user-1",
+		"preferred_username": "replay-user",
+		"email":              "replay@example.com",
+		"exp":                time.Now().Add(time.Hour).Unix(),
+	})
+
+	first := postJWTLoginForTest(t, client, server.URL, state, token)
+	if !first.Success {
+		t.Fatalf("expected first login to succeed, got message: %s", first.Message)
+	}
+
+	// Replaying the identical request must now fail: the nonce was spent.
+	second := postJWTLoginForTest(t, client, server.URL, state, token)
+	if second.Success {
+		t.Fatal("expected replayed callback with a consumed state to be rejected")
+	}
+}
+
+// A failed attempt must stay retryable. Consuming the nonce at validation time
+// would strand a user whose first attempt failed on the provider side, and
+// React StrictMode's double-invoked effect would surface as a spurious
+// "invalid state" on a login that actually worked.
+func TestHandleCustomOAuthJWTLoginKeepsStateAfterFailure(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate private key: %v", err)
+	}
+	createJWTDirectProviderForTest(t, privateKey, jwtDirectProviderTestOptions{
+		AutoRegister: true,
+	})
+
+	router := newCustomOAuthJWTRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	client := newTestHTTPClient(t)
+	state := fetchOAuthStateForTest(t, client, server.URL)
+
+	// A token signed by a different key is rejected, so the attempt fails.
+	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate second private key: %v", err)
+	}
+	badToken := signJWTForControllerTest(t, otherKey, jwt.MapClaims{
+		"iss":                "https://issuer.example.com",
+		"aud":                "new-api",
+		"sub":                "retry-user-1",
+		"preferred_username": "retry-user",
+		"email":              "retry@example.com",
+		"exp":                time.Now().Add(time.Hour).Unix(),
+	})
+
+	failed := postJWTLoginForTest(t, client, server.URL, state, badToken)
+	if failed.Success {
+		t.Fatal("expected the token signed by another key to be rejected")
+	}
+
+	// The same state must still be usable for a corrected retry.
+	goodToken := signJWTForControllerTest(t, privateKey, jwt.MapClaims{
+		"iss":                "https://issuer.example.com",
+		"aud":                "new-api",
+		"sub":                "retry-user-1",
+		"preferred_username": "retry-user",
+		"email":              "retry@example.com",
+		"exp":                time.Now().Add(time.Hour).Unix(),
+	})
+	retried := postJWTLoginForTest(t, client, server.URL, state, goodToken)
+	if !retried.Success {
+		t.Fatalf("expected the retry with the original state to succeed, got message: %s", retried.Message)
+	}
 }
