@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 )
 
 // ReadAllWithLimit reads a response body with an explicit byte limit. An
@@ -16,6 +17,12 @@ func ReadAllWithLimit(reader io.Reader, limit int64) ([]byte, error) {
 	}
 	if limit <= 0 {
 		return nil, errors.New("response body limit must be positive")
+	}
+	if limit == math.MaxInt64 {
+		// Detection needs a probe byte at limit+1; at MaxInt64 that offset does
+		// not exist, so accepting the call would mean truncating a body one byte
+		// over the limit without reporting it. Refuse instead of degrading.
+		return nil, errors.New("response body limit must be below MaxInt64")
 	}
 	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {

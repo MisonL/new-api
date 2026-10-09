@@ -274,3 +274,83 @@ func TestRealtimeBilling_TrustedUserStillChargedOnce(t *testing.T) {
 	require.Equal(t, userQuota-realtimeTurnQuota, readUserQuota(t, 4),
 		"信任用户必须被按实际用量扣费一次，不得零扣也不得双扣")
 }
+
+// TestRealtimeBilling_TieredMultiTurnChargesExactlyOnce 把三条独立机制合到一条
+// 时序里验证：tiered_expr 快照、逐 turn 的 PreWssConsumeQuota 直扣（走 Billing
+// 会话 Reserve 累加）、以及终态 PostWssConsumeQuota 的 tiered 结算。它们各自
+// 都有单点测试，但没有组合用例，而真实链路三者同时生效。
+//
+// 表达式与 TestRealtimeBilling_TieredSettleChargesAudioSubcategory 相同：
+// tier("base", p * 1 + c * 1 + cr * 0.5 + ai * 12 + ao * 50)。语料取两个相同的
+// turn，每个 turn 输入 1000（音频 900、缓存 100）+ 输出 200（音频 150），
+// 于是 P=0、C=50、CR=100、AI=900、AO=150，
+// cost = 50*1 + 100*0.5 + 900*12 + 150*50 = 18400，单 turn quota = 18400/1e6*500000 = 9200。
+// 两个 turn 合计 18400。断言总扣款恰为 18400：预扣（按 est 0/0 冻结为 0）
+// 与逐 turn Reserve 累加、终态 delta 补差，三者相加不得超出实际用量。
+func TestRealtimeBilling_TieredMultiTurnChargesExactlyOnce(t *testing.T) {
+	setupRealtimeBillingProbe(t)
+
+	const userQuota = 1_000_000
+	const tokenQuota = 1_000_000
+	const turnQuota = 9200
+	const turns = 2
+	const actualQuota = turns * turnQuota
+
+	seedUser(t, 6, userQuota)
+	seedToken(t, 6, 6, "realtime-probe-key-6", tokenQuota)
+
+	c, _ := newRealtimeProbeContext()
+	info := newRealtimeProbeInfo(6, 6, "realtime-probe-key-6")
+	info.PriceData.ModelRatio = 1
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
+
+	// tiered 快照与生产预扣路径同构：est 0/0 使预扣为 0，便于隔离逐 turn 与结算。
+	const expr = `tier("base", p * 1 + c * 1 + cr * 0.5 + ai * 12 + ao * 50)`
+	snapInfo := makeRelayInfo(expr, 1.0, 0, 0)
+	info.TieredBillingSnapshot = snapInfo.TieredBillingSnapshot
+	info.FinalPreConsumedQuota = snapInfo.FinalPreConsumedQuota
+	require.Zero(t, info.FinalPreConsumedQuota, "est 0/0 的 tiered 预扣应为 0")
+
+	require.Nil(t, PreConsumeBilling(c, 0, info))
+	require.Equal(t, userQuota, readUserQuota(t, 6), "预扣 0 不得改动余额")
+
+	turn := func() *dto.RealtimeUsage {
+		return &dto.RealtimeUsage{
+			TotalTokens:  1200,
+			InputTokens:  1000,
+			OutputTokens: 200,
+			InputTokenDetails: dto.InputTokenDetails{
+				CachedTokens: 100,
+				TextTokens:   0,
+				AudioTokens:  900,
+			},
+			OutputTokenDetails: dto.OutputTokenDetails{
+				TextTokens:  50,
+				AudioTokens: 150,
+			},
+		}
+	}
+
+	// 逐 turn 直扣：每次按同一份细分算 9200，累加进 Billing 会话。
+	sumUsage := &dto.RealtimeUsage{}
+	for i := 0; i < turns; i++ {
+		u := turn()
+		sumUsage.TotalTokens += u.TotalTokens
+		sumUsage.InputTokens += u.InputTokens
+		sumUsage.OutputTokens += u.OutputTokens
+		sumUsage.InputTokenDetails.CachedTokens += u.InputTokenDetails.CachedTokens
+		sumUsage.InputTokenDetails.TextTokens += u.InputTokenDetails.TextTokens
+		sumUsage.InputTokenDetails.AudioTokens += u.InputTokenDetails.AudioTokens
+		sumUsage.OutputTokenDetails.TextTokens += u.OutputTokenDetails.TextTokens
+		sumUsage.OutputTokenDetails.AudioTokens += u.OutputTokenDetails.AudioTokens
+		require.NoError(t, PreWssConsumeQuota(c, info, u))
+	}
+
+	// 终态结算：tiered 表达式按两 turn 累加的细分重算，应为 2*9200。
+	PostWssConsumeQuota(c, info, realtimeDoubleChargeModel, sumUsage, "")
+
+	require.Equal(t, userQuota-actualQuota, readUserQuota(t, 6),
+		"tiered 多 turn 总扣款必须等于表达式对合计用量的取值 %d，不得因逐 turn 与结算叠加而翻倍", actualQuota)
+	require.Equal(t, tokenQuota-actualQuota, readTokenRemainQuota(t, 6),
+		"令牌余额必须与钱包一致")
+}

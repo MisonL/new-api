@@ -2,6 +2,7 @@ package common
 
 import (
 	"io"
+	"math"
 	"strings"
 	"testing"
 
@@ -56,4 +57,20 @@ func TestReadAllWithLimitRejectsNilReader(t *testing.T) {
 func TestReadAllWithLimitRejectsNonPositiveLimit(t *testing.T) {
 	_, err := ReadAllWithLimit(strings.NewReader("hello"), 0)
 	require.Error(t, err)
+}
+
+func TestReadAllWithLimitRejectsMaxInt64Limit(t *testing.T) {
+	// At MaxInt64 the limit+1 probe overflows to a negative count, so a
+	// body one byte over the limit would be read as empty and silently
+	// accepted. The function must refuse the bound rather than truncate.
+	body, err := ReadAllWithLimit(strings.NewReader("hello"), math.MaxInt64)
+	require.Error(t, err)
+	require.Nil(t, body)
+}
+
+func TestReadAllWithLimitAcceptsLimitJustBelowMaxInt64(t *testing.T) {
+	// The rejection is exactly at MaxInt64; MaxInt64-1 still probes safely.
+	body, err := ReadAllWithLimit(strings.NewReader("hello"), math.MaxInt64-1)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(body))
 }

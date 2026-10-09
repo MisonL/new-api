@@ -23,17 +23,20 @@ def kinds(problems):
     return sorted({k for _, k, _ in problems})
 
 
-def run_text(text, defined=None, unresolved=None):
+def run_text(text, defined=None, unresolved=None, master_present=True):
     lines = text.split("\n")
     if defined is None:
         defined = checker.defined_sections(text)
     if unresolved is None:
         unresolved = checker.unresolved_master_numbers(text)
-    return (
+    problems = (
         checker.check_tables(lines)
         + checker.check_section_refs(text, defined)
         + checker.check_unresolved_refs(text, unresolved)
     )
+    if not master_present:
+        problems += checker.check_unresolved_master_present([text])
+    return problems
 
 
 class TestTables(unittest.TestCase):
@@ -110,6 +113,32 @@ class TestSectionRefs(unittest.TestCase):
         text = "## 4. 本地\n\n### 4.6 真章节\n\n见 §4.6。\n"
         self.assertEqual(run_text(text), [])
 
+    def test_prefixed_dotted_ref_of_any_depth_caught(self):
+        # 旧正则最多捕三段，四段编号的尾段被数字断开后整个不匹配；
+        # 第 41 轮补：带「§」的引用检查任意段数。
+        # 顶层号 2/10/12 都须是本组文档的真实章节头，引用才可判定。
+        defined = checker.defined_sections("## 2. x\n## 10. y\n## 12.15.4\n")
+        for ref in ("§10.999", "§2.999", "§12.15.4.99"):
+            self.assertIn("C", kinds(run_text(f"见 {ref}。", defined=defined)))
+
+    def test_ref_into_a_third_document_is_not_a_section_ref(self):
+        # CR 会引用第三份文档（如 CR-FULL-AUDIT 的 §22.4、§26.1），那些章节头
+        # 不在本组文档里；顶层号不在 defined 的无点号项里就不算引用。
+        defined = checker.defined_sections("## 12. 决策\n")
+        self.assertEqual(run_text("见 §22.4 与 §26.1。", defined=defined), [])
+
+    def test_bare_version_numbers_are_not_section_refs(self):
+        # 裸点号数只认顶层号在章节头集合里的——v1.52.0 / go 1.25.1 与章节号
+        # 同形，实测放宽会误报 12 个版本号。
+        text = "go 1.25.1，v1.52.0 与 v0.35.0 与 §4.5。\n"
+        self.assertEqual(run_text(text, defined={"4.5"}), [])
+
+    def test_bare_version_numbers_are_not_section_refs(self):
+        # 裸点号数只认顶层号在章节头集合里的——v1.52.0 / go 1.25.1 与章节号
+        # 同形，实测放宽会误报 12 个版本号。
+        text = "go 1.25.1，v1.52.0 与 v0.35.0 与 §4.5。\n"
+        self.assertEqual(run_text(text, defined={"4.5"}), [])
+
     def test_cross_file_defined_section_passes(self):
         """CR 引用设计文档的章节号：defined 是并集，不该误报。"""
         cr = "见 §12.20.1。\n"
@@ -127,9 +156,22 @@ class TestUnresolvedRefs(unittest.TestCase):
         text = self.MASTER + "见未决项 2。\n"
         self.assertEqual(run_text(text), [])
 
-    def test_no_master_table_skips_check(self):
+    def test_no_master_table_fails_check(self):
+        # 第 41 轮 Codex 报的 D 假阴性：主表小节缺失（改名/删除）时检查器
+        # 静默返回空——「未决项 N」引用无人校验，门禁照样全绿。现在判失败。
         text = "# x\n\n见未决项 9。\n"
-        self.assertEqual(run_text(text, unresolved=None), [])
+        self.assertIn("D", kinds(run_text(text, master_present=False)))
+
+    def test_no_master_table_passes_when_master_elsewhere(self):
+        # 主表存在性看的是被检查文档**的并集**（CR 的编号由设计文档供给），
+        # 不是单文件：CR 自身没有第 10 节不得因此判失败。
+        text = "# x\n\n见未决项 9。\n"
+        master = "## 10. 未决项\n\n1. a\n2. b\n"
+        self.assertEqual(
+            checker.check_unresolved_master_present([text, master]),
+            [],
+        )
+        self.assertEqual(checker.unresolved_master_numbers(master), {1, 2})
 
 
 class TestRealDocuments(unittest.TestCase):
@@ -152,6 +194,34 @@ class TestRealDocuments(unittest.TestCase):
         for path, text in zip(checker.DEFAULT_TARGETS, texts):
             problems = run_text(text, defined=defined, unresolved=unresolved or None)
             self.assertEqual(problems, [], f"{path} 有结构问题：{problems[:5]}")
+
+
+class TestCLIWiring(unittest.TestCase):
+    """端到端钉住主表缺失必须非零退出——不能只测 helper。
+
+    第 41 轮反向验证发现：helper 的单测(passing)不覆盖编排层；把 main 里的
+    check_unresolved_master_present 调用删掉后所有单测仍绿。必须有一个真跑
+    CLI 的用例，否则「删掉第 10 节」的修复可被无声移除。
+    """
+
+    def test_cli_exits_nonzero_when_master_heading_absent(self):
+        import subprocess
+        import sys
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                         encoding="utf-8") as fh:
+            fh.write("# 文档\n\n见「未决项 9」。\n")
+            path = fh.name
+        try:
+            proc = subprocess.run(
+                [sys.executable, os.path.join(_HERE, "relaykit-doc-structure-check.py"), path],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+        finally:
+            os.unlink(path)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("无正源", proc.stdout)
 
 
 class TestNoResourceLeak(unittest.TestCase):

@@ -450,7 +450,7 @@ git grep -hE '^func [A-Za-z0-9_]*[A-Za-z]2[A-Za-z][A-Za-z0-9_]*\(' dbfbc096f -- 
 ```bash
 scripts/relaykit-citation-check.py            # 校验，漂移时退出码 1
 scripts/relaykit-citation-check.py --ref <ref>  # 换锚点复核
-python3 scripts/relaykit-citation-check.test.py # 25 个单测
+python3 scripts/relaykit-citation-check.test.py # 26 个单测（第 41 轮 +1：docs/ 引用不得 fail-open）
 ```
 
 它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。**实测（第 40 轮重测，2026-10-08）三组全绿：** **51/51**（`ref=789c97019`，即本文档锚定版本）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 24/24**（**第 38 轮**：第 37 轮为 50/103/24）。**注意：不带 `--ref` 的默认运行已因 `upstream/main` 漂移而变红**——第 40 轮实测 `upstream/main` 已前进到 `04c597bf6`（PR #7698，2026-10-08 16:07），默认 ref 下得到 `50/51`（`convmeta/meta.go:58`、`relay-claude.go:37`、`:195` 三处行内容变空白）与 `upstream-full 22/24`、退出码 1；`--ref 789c97019` 恢复全绿。这正是「必须钉 ref、不能依赖移动的 `upstream/main`」的现场证据——本段旧文写「`ref=upstream/main` 51/51」，该表述自 `upstream/main` 移动起不再成立（**第 40 轮修正**）。已做**反向验证**（五次扰动全部退出码 1）：relaykit 全路径 `:99999` → `out of range`；改文件名 → `file not found`；简写路径 `:99999`；宿主 `<宿主文件>:99999` → `out of range at dbfbc096f`；**去掉一个 `upstream/main:` 前缀 → 报「not found at baseline but found at upstream/main: add an upstream/main: prefix」**。还原后退出码 0、文档字节一致。
@@ -746,27 +746,27 @@ KIT_REF=789c97019 scripts/relaykit-dto-compat.sh --strict   # relaykit 侧须钉
 **设计文档行号引用的完整性**（锚定漂移后重跑，见「阶段 1 的前置：relaykit 源码的取得与版本锚定」）：
 
 ```bash
-scripts/relaykit-citation-check.py --ref 789c97019   # 全部引用可解析时退出码 0（relaykit 51 + 宿主 107 + upstream 全路径 24；不带 --ref 时用会漂移的 upstream/main，见「阶段 1 的前置」的版本锚定段）
-python3 scripts/relaykit-citation-check.test.py  # 25 个单测
+scripts/relaykit-citation-check.py --ref 789c97019   # 全部引用可解析时退出码 0（relaykit 51 + 宿主 107 + upstream 全路径 24；不带 --ref 时用会漂移的 upstream/main，见「阶段 1 的前置」的版本锚定段；docs/ 路径只有「两处都不存在」才跳过——上游存在时必须要求 upstream/main: 前缀，第 41 轮修掉 fail-open）
+python3 scripts/relaykit-citation-check.test.py  # 26 个单测
 ```
 
 **文档结构完整性**（第 38 轮新增，与上一条正交：上一条查「引用能否解析」，本条查「文档自身结构是否自洽」）：
 
 ```bash
 python3 scripts/relaykit-doc-structure-check.py        # 两份文档均 0 问题时退出码 0
-python3 scripts/relaykit-doc-structure-check.test.py   # 20 个单测
+python3 scripts/relaykit-doc-structure-check.test.py   # 25 个单测（第 41 轮 +5：§ 任意段数、第三文档引用、版本号不误报、D 主表缺失）
 ```
 
 **门禁自述计数**（第 38 轮新增：把「门禁改了、描述没改」变成门禁——这一盲区此前复发三次：第 36 轮的 34/15、第 38 轮的 §9.3 47/98/21、以及 `relaykit-citation-check.py` docstring 里长期滞留的 「13 citations across 9 files」）：
 
 ```bash
-python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对（内部按本文档锚点 789c97019 钉 citation 的 --ref 与 dto 的 KIT_REF，见脚本 UPSTREAM_PIN）
-python3 scripts/relaykit-gate-selfcheck.test.py       # 34 个单测（第 40 轮 +1：钉死 ref 句式）
+python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对（内部按本文档锚点 789c97019 钉 citation 的 --ref 与 dto 的 KIT_REF，见脚本 UPSTREAM_PIN；citation 三行的 `failed` 必须存在且为 0；设计文档必须携带 EXPECTED_CLAIM_KINDS 声明的整类自述，删空一类即失败——第 41 轮补入的两条 fail-closed）
+python3 scripts/relaykit-gate-selfcheck.test.py       # 38 个单测（第 40 轮 +1：钉死 ref 句式；第 41 轮 +4：failed 字段、尾注句式、类别 fail-closed）
 ```
 
 它只检查**本文档的当前口径声明**；CR 记录里的计数是历史记录（「第 37 轮为 50/103/24」这类），记的是「当时为真」，不随门禁演进失效，故不在射程内。
 
-四类检查：**A** 表格行序号严格递增（含重复编号——`[1..12,13,13,15,16]` 是 sorted 的，只判非排序会漏）；**B** 每个数据行的单元格数等于表头列数（未转义的 `|` 会撑破单元格，渲染时多出一列）；**C** 交叉引用的章节号存在（`defined` 取被检查文档的**并集**，故 CR 引用设计文档章节号不误报；`SECTION_ALLOWLIST` 收 `5.6`/`4.6`/`4.7`/`4.8` 这类与模型名同形的串）；**D** 「未决项 N」的 N 必须在第 10 节的编号集合内（本轮补入 31–34 前，该项会报「主表只定义到 30」）。
+四类检查：**A** 表格行序号严格递增（含重复编号——`[1..12,13,13,15,16]` 是 sorted 的，只判非排序会漏）；**B** 每个数据行的单元格数等于表头列数（未转义的 `|` 会撑破单元格，渲染时多出一列）；**C** 交叉引用的章节号存在（`defined` 取被检查文档的**并集**，故 CR 引用设计文档章节号不误报；`SECTION_ALLOWLIST` 收 `5.6`/`4.6`/`4.7`/`4.8` 这类与模型名同形的串；带「§」的引用检查**任意段数**——旧版只捕三段，`§N.M.K.L` 这类四段编号的尾段会被数字断开、整个不匹配（示例一律用占位符，真编号会被本规则判为未定义引用）；裸点号数只在顶层号属章节头集合时才检查，因为 `go 1.25.1`、`v1.52.0` 等模块版本与章节号同形，第 41 轮实测放宽会误报 12 个版本号）；**D** 「未决项 N」的 N 必须在第 10 节的编号集合内（本轮补入 31–34 前，该项会报「主表只定义到 30」）；**主表小节缺失直接失败**——否则「删掉第 10 节」会让所有未决项引用静默失去校验（第 41 轮 Codex 复现的 D 假阴性）。
 
 **这两条门禁的失效模式不同**：引用检查锚定 `upstream/main` 与基线，上游一动就红；结构检查只读本文档自身，**改动本文档的任何一次编辑都可能让它变红**——两处表格行序、两处未转义 `|`、一处缺列、一处主表缺项都是它抓出来的，而 38 轮事实核验一轮都没碰到过这个维度。
 

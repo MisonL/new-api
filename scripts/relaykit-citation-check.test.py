@@ -209,6 +209,23 @@ class HostCitationTests(unittest.TestCase):
 
         self.assertEqual((ok, failures, skipped), (0, [], 1))
 
+    def test_check_host_fails_doc_path_absent_at_baseline_but_present_upstream(self):
+        # 第 41 轮 Codex 报的 fail-open：docs/ 路径以前无条件跳过，于是
+        # 「上游有、基线没有、行号还是错的」也被静默放过。它其实可解析——
+        # 必须要求 upstream/main: 前缀，而不是 skip。
+        doc = "docs/translation-glossary.md:999"
+
+        def reader(ref, path):
+            return ["a", "b", "c"] if ref == "upstream/main" else None
+
+        ok, failures, skipped = MODULE.check_host(
+            doc, "base", upstream_ref="upstream/main", reader=reader
+        )
+
+        self.assertEqual(ok, 0)
+        self.assertEqual(skipped, 0)
+        self.assertIn("upstream/main: prefix", failures[0][2])
+
     def test_check_upstream_full_resolves(self):
         doc = "upstream/main:relay/claude_handler.go:2"
         lines = ["package relay", "func ClaudeHelper() {}"]

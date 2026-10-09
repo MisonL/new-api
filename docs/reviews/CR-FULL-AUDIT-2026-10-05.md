@@ -1794,7 +1794,7 @@ relay 出站体（`aws/converse.go`、jimeng adaptor）与 `controller/channel.g
 | `POST /api/stripe/webhook`、`creem/webhook` | `io.ReadAll` | 是 |
 | `POST /api/waffo/webhook` | `io.ReadAll` | 是（§25 已封 1MB） |
 | `POST /api/user/epay/notify`、`/subscription/epay/notify`、`/return` | `Request.ParseForm` | 是（stdlib 对 urlencoded 已封 10MB） |
-| `POST /api/oauth/email/bind`、`/oauth/wechat/bind` | `DecodeJson` | handler 内先验会话再读体，不计入向量 |
+| `POST /api/oauth/email/bind`、`/oauth/wechat/bind` | `DecodeJson` | 是（挂 `anonymousRequestBodyLimit`：中间件在 `c.Next()` 前读完体，handler 内的会话检查在其后） |
 | `POST /api/user/passkey/login/begin` | 不读体 | 是，但无向量 |
 
 候选方案与否决依据：
@@ -1883,3 +1883,25 @@ relay 出站体（`aws/converse.go`、jimeng adaptor）与 `controller/channel.g
   （`model/user.go:37` 现为 `json:"-"`，未提交的在途改动），该发现关闭。
 - §10.3 的 P2「共享扫描器不聚合多行 `data:`」仍未修，且
   `relay/helper/stream_scanner.go` 当前在途，留待其会话。
+
+### 26.6 复核修正（2026-10-09）：`/api/oauth/*/bind` 的向量判定
+
+§26.1 原表将 `POST /api/oauth/email/bind`、`/oauth/wechat/bind` 标为
+「handler 内先验会话再读体，不计入向量」。**该判定不成立**：实现
+（`router/api-router.go:60,63`）把两条路由都挂上了
+`anonymousRequestBodyLimit`，而该中间件在 `middleware/request_body_limit.go`
+里于 `c.Next()` **之前**读完整个上限内的请求体，handler 内的
+`getSessionUser`（`controller/user.go:1058`）检查发生在读体之后。因此这是
+一条真实的鉴权前读体向量，只是上限已被 512KB 封顶。
+
+判定依据（本轮复现）：
+
+```bash
+grep -n 'oauth/email/bind\|oauth/wechat/bind' router/api-router.go
+# 60:...anonymousRequestBodyLimit, controller.EmailBind
+# 63:...anonymousRequestBodyLimit, controller.WeChatBind
+sed -n '1057,1064p' controller/user.go   # getSessionUser 先于 DecodeJson
+```
+
+该修正不改动挂载或上限，只纠正记录中的向量分类；§26.2 的「17 条匿名路由」
+与 §26.5 的「挂载点一一对应」两处计数不受影响（两条 bind 本就在 17 条内）。

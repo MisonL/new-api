@@ -42,6 +42,14 @@ class TestParsers(unittest.TestCase):
     def test_citation_garbage_returns_none(self):
         self.assertIsNone(selfcheck.parse_citation("nothing here"))
 
+    def test_citation_failed_field_must_be_present_and_zero(self):
+        # 第 41 轮 Codex 报的 P2：解析器只读 ok=，不看 failed=。退出码与输出
+        # 一旦失配，有失败的行会被当成功放行。failed!=0 或无 failed 字段 → None。
+        bad_nonzero = CITATION_OUT.replace("ok=51  failed=0", "ok=51  failed=99")
+        self.assertIsNone(selfcheck.parse_citation(bad_nonzero))
+        missing_field = CITATION_OUT.replace("  failed=0", "")
+        self.assertIsNone(selfcheck.parse_citation(missing_field))
+
     def test_ran_parsed(self):
         self.assertEqual(selfcheck.parse_ran("Ran 25 tests in 0.001s"), 25)
         self.assertEqual(selfcheck.parse_ran("Ran 1 test in 0.001s"), 1)
@@ -116,6 +124,18 @@ class TestClaims(unittest.TestCase):
         self.assertNotIn(
             "citation relaykit 分子/分母",
             [d for _, d, _ in selfcheck.extract_claims(drifted)],
+        )
+
+    def test_pinned_ref_claim_with_trailing_prose_is_extracted(self):
+        """真实文档在第 40 轮写成 `（`ref=789c97019`，即本文档锚定版本）`。
+
+        抽取器若要求右括号紧跟反引号，真实文档上零命中——整类声明静默失联
+        （第 41 轮实测：修前 present kinds 缺这一类）。本条钉住带尾注的句式。
+        """
+        real = "**51/51**（`ref=%s`，即本文档锚定版本）" % selfcheck.UPSTREAM_PIN
+        self.assertIn(
+            "citation relaykit 分子/分母",
+            [d for _, d, _ in selfcheck.extract_claims(real)],
         )
 
     def test_drifted_doc_is_caught(self):
@@ -335,6 +355,46 @@ class TestSkipIsNotPass(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertIn("自检单测数未核对", proc.stdout)
         self.assertNotIn("全部门禁自述计数与实际输出一致", proc.stdout)
+
+
+class TestRequiredClaimKinds(unittest.TestCase):
+    """第 41 轮 Codex 报的 P1：extract_claims 返回空时 compare([], actual) 也空。
+
+    删掉整类自述声明（例如删掉 §9.3 的 citation 三元组）后，门禁会全绿放行
+    一份不再自述的文档。类别级 fail-closed 必须把「整类消失」变成失败。
+    """
+
+    def test_all_expected_kinds_present_in_fixture_doc(self):
+        descs = {d for _, d, _ in selfcheck.extract_claims(DOC)}
+        missing = [k for k in selfcheck.EXPECTED_CLAIM_KINDS if k not in descs]
+        # 固定 DOC 不携带全部类别（如 §11 句式、自检单测数），只断言核心几类在。
+        self.assertNotIn("citation 三元组", missing)
+        self.assertNotIn("citation 单测数", missing)
+
+    def test_missing_kind_is_a_failure(self):
+        import io as _io
+        import contextlib
+        import subprocess
+        import sys as _sys
+        import tempfile
+
+        # 删空整份文档的声明：临时 doc 无任何自述计数。
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                         encoding="utf-8") as fh:
+            fh.write("# empty\n\nno claims here\n")
+            path = fh.name
+        try:
+            proc = subprocess.run(
+                [_sys.executable, os.path.join(_HERE, "relaykit-gate-selfcheck.py"),
+                 "--doc", path],
+                cwd=os.path.dirname(_HERE),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env=dict(os.environ, RELAYKIT_SELFCHECK_SKIP_RECURSE="1"),
+            )
+        finally:
+            os.unlink(path)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("缺少声明类别", proc.stdout)
 
 
 class TestRealDoc(unittest.TestCase):

@@ -160,7 +160,12 @@ def check_host(doc_text, ref, upstream_ref=DEFAULT_REF, reader=read_at):
         lines = reader(ref, path)
         if lines is None:
             up = reader(upstream_ref, path)
-            if path.startswith("docs/"):
+            # A docs/ path that resolves nowhere (neither at the baseline nor
+            # upstream) is a citation into this doc's own sections, not into a
+            # source tree -- skip it. Anything else IS resolvable and must be
+            # checked, so a docs/ path that exists only upstream still demands
+            # the upstream/main: prefix instead of silently passing.
+            if up is None and path.startswith("docs/"):
                 skipped += 1
                 continue
             if up is not None:

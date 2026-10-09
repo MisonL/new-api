@@ -38,6 +38,27 @@ CR_DOC = "docs/reviews/CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md"
 # 加文档里对应的一处。
 UPSTREAM_PIN = "789c97019"
 
+# 设计文档当前必须携带的声明类别（第 41 轮）。extract_claims 抽不到某一类，
+# 说明文档里那条「门禁自述」被删了——此时 compare([], actual) 恒为空，门禁会
+# 以全绿放行一份不再自述的文档。类别级检查就是防这个：删掉一整类声明必须变红，
+# 而不只是「没有不一致」。
+EXPECTED_CLAIM_KINDS = (
+    "citation 三元组",
+    "citation relaykit 分子/分母",
+    "citation 宿主 分子/分母",
+    "citation 全路径 分子/分母",
+    "citation 单测数",
+    "结构单测数",
+    "自检单测数",
+    "§11 relaykit 引用数",
+    "§11 宿主引用数",
+    "§11 全路径引用数",
+    "dto 分节数",
+    "结构问题数",
+    "dto 七维（命令行注释）",
+    "dto 七维（正文）",
+)
+
 
 def read_text(path):
     """显式关闭的读文件——`io.open(p).read()` 依赖引用计数回收，在
@@ -56,11 +77,18 @@ def run(cmd):
 
 
 def parse_citation(out):
-    """relaykit-citation-check.py 的输出 → (relaykit, host, upstream_full)。"""
-    rk = re.search(r"citations=(\d+)\s+ok=(\d+)", out)
-    host = re.search(r"host-citations ok=(\d+)", out)
-    full = re.search(r"upstream-full ok=(\d+)", out)
+    """relaykit-citation-check.py 的输出 → (relaykit, host, upstream_full)。
+
+    三行的 failed 必须存在且为 0。退出码与输出通常一致，但一旦失配
+    （例如子进程被包装层改写退出码、或输出被部分截断），只读 ok= 会把
+    「有失败」当成功放行——解析层自己也要 fail-closed，不能只押退出码。
+    """
+    rk = re.search(r"citations=(\d+)\s+ok=(\d+)\s+failed=(\d+)", out)
+    host = re.search(r"host-citations ok=(\d+)\s+failed=(\d+)", out)
+    full = re.search(r"upstream-full ok=(\d+)\s+failed=(\d+)", out)
     if not (rk and host and full):
+        return None
+    if int(rk.group(3)) or int(host.group(2)) or int(full.group(2)):
         return None
     return int(rk.group(1)), int(host.group(1)), int(full.group(1))
 
@@ -208,7 +236,7 @@ def extract_claims(doc):
         # 旧句式 `ref=upstream/main` 随上游漂移已从文档移除，不作兼容）。
         # 正则从 UPSTREAM_PIN 现拼，升锚时不会漏改这里。
         for m in re.finditer(
-            r"\*\*(\d+)/(\d+)\*\*（`ref=" + re.escape(UPSTREAM_PIN) + r"`）", line,
+            r"\*\*(\d+)/(\d+)\*\*（`ref=" + re.escape(UPSTREAM_PIN) + r"`[^）]*）", line,
         ):
             add(i, "citation relaykit 分子/分母", (int(m.group(1)), int(m.group(2))))
         # 「**宿主 107/107**（`baseline=dbfbc096f`）」
@@ -341,6 +369,16 @@ def main():
 
     if not args.quiet:
         print(f"文档自述计数 {len(claims)} 处（{args.doc}）")
+
+    # 类别级 fail-closed：与 compare 的逐条比对正交。compare 只在「声明存在
+    # 且实际值已采到」时才能发现问题；整类声明消失时它无话可说，必须由这里兜。
+    # CR 行数声明不在此列：设计文档可以合法地不留行数声明，compare 已核对在册
+    # 的每一条。
+    present_kinds = {desc for _, desc, _ in claims}
+    missing_kinds = [k for k in EXPECTED_CLAIM_KINDS if k not in present_kinds]
+    if missing_kinds:
+        failures.append("设计文档缺少声明类别：" + "、".join(missing_kinds)
+                        + "（整类删除声明必须失败，而不是放行）")
 
     if failures:
         print("\n门禁自身失败：")
