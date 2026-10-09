@@ -212,7 +212,7 @@ const (
 两点提示：
 
 - **HEAD 与工作区差 3 个方法**。`ResponsesStreamResponse.GetOpenAIError`、`ChatCompletionsStreamResponse.GetError`、`Usage.EnsureResponsesTokenDetailObjects` 只存在于工作区（`dto/openai_response.go` 工作区 25 个方法、HEAD 22 个）。这 3 个属其他会话的未提交改动。迁移评估应以工作区为准，但须与那些会话确认最终形态
-- **relaykit 独有 5 个方法（仅上述三个文件口径）**：`GeneralOpenAIRequest.MarshalJSON`、`CachedTokenDetails.HasTokens`、`InputTokenDetails.Clone`、`InputTokenDetails.CacheCreationTokensTotal`、`ResponsesOutput.MarshalJSON`。前三个对应 relaykit 的 `dto/usage_merge.go` 与 `dto/reasoning_state.go`（本地无同名文件）——本地的 `Usage.EnsureResponsesTokenDetailObjects` / `GetOutputTokenDetails` 与 relaykit 的 `InputTokenDetails.*` 是**同一能力域的两套实现**，迁移时须做语义对齐，不能简单二选一。**注意：全包口径是 31 个 relaykit 独有方法，不是 5 个**（5 个只覆盖这三个文件），见 12.0.5 第二节
+- **relaykit 独有 5 个方法（仅上述三个文件口径）**：`GeneralOpenAIRequest.MarshalJSON`（`relaykit/dto/openai_request.go:136`）、`CachedTokenDetails.HasTokens`（`relaykit/dto/openai_response.go:284`）、`InputTokenDetails.Clone`（`:290`）、`InputTokenDetails.CacheCreationTokensTotal`（`:316`）、`ResponsesOutput.MarshalJSON`（`:397`）——**四个在 `openai_response.go`、一个在 `openai_request.go`**（**第 42 轮修正**：原文写「前三个对应 relaykit 的 `dto/usage_merge.go` 与 `dto/reasoning_state.go`」，实测无一在这两个文件里；本地无同名文件的是整个 `dto/usage_merge.go`/`dto/reasoning_state.go`，不是这几个方法）。它们与本地的 `Usage.EnsureResponsesTokenDetailObjects` / `GetOutputTokenDetails` **共享 `Usage` 的 token-detail 数据域、但能力互不重叠、迁移后必须并存**（relaykit 侧是缓存写计费与存在性感知深拷贝，本地侧是两种拼写的桥接与回退读取），**不存在二选一**（**第 42 轮修正**：原文写「是同一能力域的两套实现，迁移时须做语义对齐，不能简单二选一」，前半勉强成立、后半「两套实现」会误导读者以为需取舍）。**注意：全包口径是 31 个 relaykit 独有方法，不是 5 个**（5 个只覆盖这三个文件），见 12.0.5 第二节
 
 其中 `ParseContentStrict` / `ParseToolCallsStrict` 是严格解析（失败即报错），与 AGENTS.md「禁止静默容错」一致；`EffectiveReason` 属推理相关，需单独确认 relaykit 对应机制。
 
@@ -397,7 +397,7 @@ git grep -hE '^func [A-Za-z0-9_]*[A-Za-z]2[A-Za-z][A-Za-z0-9_]*\(' dbfbc096f -- 
 |---|---|---|
 | 0 | `git fetch --unshallow upstream`；建立 CI 门禁（两个 module 分别 `go test`，`GOWORK=off`）；~~完成本地独有能力盘点~~（已完成，见第 4 节）；**把 `relay/common/responses_tool_names.go` 及 2 个测试文件纳入版本控制**（第 10 节第 19 项） | CI 能跑通现有测试；盘点清单已产出；未跟踪文件已提交 |
 | 1 | **取得 relaykit 源码**（见下「阶段 1 的前置」）；引入 relaykit module（根 `go.mod` 加 require + replace）；`types` 拆分：6 个文件迁入 `relaykit/types`，宿主保留 4 个；按符号逐个决定别名转发或改 import 路径；处置 4.3 的本地专有符号 | 两个 module 均可编译；`relaykit/` 的版本已锚定并记录 |
-| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写**（**基线口径，含测试**：基线 `dbfbc096f` 实测 205 非测试 + 122 测试 = 327；工作区已漂到 341）+ **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.8：11 处（tag 5 + type 6）全部采用 relaykit，改 8 处 `IncludeThoughts` 赋值点 + `Text`/`Arguments` 读写点 + 4 处 import）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。**另须改 `service/convert_golden_test.go` 的 import**——它是第 18 轮新增、**不在上述 327 的基线口径内**，却 import 宿主 `dto`/`constant`/`types`，`dto` 一迁即编译失败（见下「阶段 2 的前置：基线测试的 import 不在 327 内」）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**12.5 的 3 个「需实测」方法已定为 A 或 C**（`Usage.EnsureResponsesTokenDetailObjects`、`Usage.GetOutputTokenDetails`、`OpenAIResponsesResponse.HasImageGenerationCall`）——见「阶段 2 的前置」，**带着「需实测」开工即判据不可判**；**327 个 import 点全部验证**；**11 处 tag/类型差异逐项有决定（12.0.8）**；**`convert_golden_test.go` 的 import 已随之迁移且 `TestGolden` 仍绿** |
+| 2 | **（最大工作量块）** `dto` 迁移：**327 个 import 点改写**（**基线口径，含测试**：基线 `dbfbc096f` 实测 205 非测试 + 122 测试 = 327；工作区已漂到 341）+ **33 个类型字段差异逐项对齐**（基线口径，工作区 34）+ **同名字段的 JSON tag / Go 类型差异逐项对齐**（12.0.8：11 处（tag 5 + type 6）全部采用 relaykit，改 8 处 `IncludeThoughts` 赋值点 + `Text`/`Arguments` 读写点 + 4 处 import）+ 全部宿主独有方法（全包 394 vs 273 函数，含测试口径）给出出路；**清空 `dto` 对 `common`/`constant`/`logger`/gin 的 import**（否则 `relaykit/relayconvert/boundary_test.go` 红）。**另须改 `service/convert_golden_test.go` 的 import**——它是第 18 轮新增、**不在上述 327 的基线口径内**，却 import 宿主 `dto`/`constant`/`types`，`dto` 一迁即编译失败（见下「阶段 2 的前置：基线测试的 import 不在 327 内」）。开工前置：完整的**方法级差集 + import 图分析**（12.0.2、12.0.3）。另含 `IsStream` 签名迁移、补丁 2（DTO presence） | 两个 module 均可编译；DTO 测试通过；**`boundary_test.go` 通过**；**12.5 的 3 个原「需实测」方法已定案为 A**（第 42 轮；`Usage.EnsureResponsesTokenDetailObjects`、`Usage.GetOutputTokenDetails`、`OpenAIResponsesResponse.HasImageGenerationCall`）——见「阶段 2 的前置」，**带着「需实测」开工即判据不可判**；**327 个 import 点全部验证**；**11 处 tag/类型差异逐项有决定（12.0.8）**；**`convert_golden_test.go` 的 import 已随之迁移且 `TestGolden` 仍绿** |
 | 3 | `ClaudeConvertInfo` 改为 `convmeta.ClaudeConvertInfo` 别名，同步改写 `service/convert.go` 的 22 处字段引用；**`RelayInfo` 补齐 `convmeta.Meta` 的 13 个缺失方法**——接口共 15 个（已机械核验），本地 `RelayInfo` 现有 26 个方法中**只有 2 个重名**（`GetEstimatePromptTokens`、`AppendRequestConversion`），**须新增 13 个**（实现对应上游 `upstream/main:relay/common/relay_info.go` 的 `GetOriginModelName`（`:825`）至 `ConvOptions`（`:922-953`），上游已有编译期断言 `:823`）。**照抄不是纯文本搬运（第 34 轮修正）**：13 个里 **11 个是纯访问器**（只读本地已有字段），另 2 个各依赖一个本地没有的字段——`ReasoningState()` 读 `ReasoningConversion`（上游声明在 `:123`）、`ConvOptions()` 读 `convOptions`（`:201-202`；另 import `model_setting.GetClaudeSettings/GetGeminiSettings`，本地已存在：`setting/model_setting/claude.go:55`、`gemini.go:53`）；**且本地 `InitChannelMeta` 须补上游 `:311` 的重置行 `info.convOptions = nil`**（见 12.10）。**同一范围内的 `GetBillingModelName`（`:832`）不照抄**——它不在 `convmeta.Meta` 接口里，本地无 `BillingModelName` 字段也无写入方（上游写入方在 `relay/helper/price.go:73-77`，不在本迁移范围），relaykit 侧零调用 | 编译期断言 `var _ convmeta.Meta = (*RelayInfo)(nil)` 通过；**13 个方法逐个落地**（非「实现 15 个」，也不含 `GetBillingModelName`）；`ReasoningConversion`、`convOptions` 两个字段已声明；**本地 `InitChannelMeta` 置 `info.convOptions = nil`——换渠道重试后 `ConvOptions()` 反映新渠道**（`OpenRouterDialect`/`ToolLossPolicy` 不得读到上一渠道的值）；`ConvOptions` 的缓存语义按上游（首次调用建快照、同一 relay 会话复用） |
 | 4 | 协议映射切换到 relaykit（**单点可逆**，见 §8.1）；**接线 `relayconvert.SetMediaResolver`（指向 `service.GetBase64Data`）与 `convmeta.Options` 钩子（指向 `model_setting`）**，随后通道级转换器改调 relaykit（12.15.4）；打补丁 1；**打补丁 3 并落地 12.4 的响应方向门控**（`convmeta.Options` 新增 `RetainReasoningInClaudeResponse` + 宿主接线 + `oai_chat/to_claude_messages_resp.go` 两条入口加判断，处置清单 13）——**门控必须与本阶段的切换同时落地**：relaykit 默认无条件暴露 reasoning，切换而不门控即等于把非 DeepSeek 的 reasoning 泄漏给客户端（见 12.4.4）；**按下方「阶段 4 的处置清单」逐项落地**；**`*WithError` 系列直接删除**（12.3，不保留包装层；**第 39 轮修正**：形态 A 下该系列先以同名转发函数存活、阶段 6 才删，见第 14 项 A）；**把 `convert_golden_test.go` 的调用点改指 relaykit**（处置清单 12）；**落地 finish_reason 严格语义**（处置清单 9，12.11.3 的 A1/A2/B 三选一） | **`TestGolden` 改指 relaykit 后 8 个快照逐字节一致，或每一处差异都能对应到处置清单第 6 项为 9.1/9.2/9.2.1/9.2.2/9.2.3 逐条产出的「保留/放弃/改写」决定**（**第 38 轮修正**：原文只写 9.1/9.2，而第 6 项在第 37/38 轮已扩到 9.2.1/9.2.2/9.2.3——其中 9.2.1 第 9 条与 9.2.3 第 8 条**会产生快照可见的输出变化**，其余为错误路径，由专项单测而非 golden 覆盖）（12.16.2；该决定清单是**阶段 4 的产出**，不是既有物——判据引用的是它，不是预先存在的清单）；**4 个门控相关快照（`response/openai_to_claude`、`stream/openai_to_claude`、`response/openai_to_claude_deepseek`、`stream/openai_to_claude_deepseek`）不适用上述豁免**——第 6 项覆盖 9.1/9.2/9.2.1/9.2.2/9.2.3（第 37/38 轮扩），门控（12.4）不在其中，它们逐字节一致**直接证明门控已随切换落地**；grok reasoning 可见；处置清单每项已确认；**切换形态已按处置清单第 14 项三选一定案并可验证**（A 薄封装→调用点零改动且全链路绿；B 直接改写→revert 那 4 个生产文件后 `go build ./...` 与全量测试仍绿；C 照抄上游终态→按 12.20 落点逐项核，回滚＝`service/convert.go` 单文件函数体替换）——**未定案则「单点可逆」不可验证**（§8.1）；**12.15.4 的两条边界已实测且均不成立**（12.15.4.1/12.15.4.2：schema 归一化 4 处差异、媒体分派 7 处差异）——须按处置清单第 10 项连同上游实现一并改，不能只接线；**finish_reason 严格语义的 b/c/d 三条有新测试**（12.11.3——`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason` 只覆盖未知值一条，两条 golden 基线都测不到其余三条）；**快照差异先排除「字段顺序」再谈回归**——`ClaudeMediaMessage`（`Signature`/`Data`）与 `FunctionRequest`（`Strict`/`Arguments`）两侧声明顺序不同（12.16.2，第 31 轮实测），本基线因那两对字段在快照里恰好都为空而未受影响，但改动 fixture 使其非空即会纯因序列化顺序而红；**思考等级后缀填充器已接线**（处置清单第 15 项、12.19）——带后缀的跨协议请求（oai→claude 至少一条）渲染出正确 thinking 与裁剪后的上游模型名，且不带后缀的请求与现状逐字节一致 |
 | 5 | 宿主管道接入 relaykit 分派（**第 37 轮修正阶段归属**：本行只做**核验**，不落地——包装层 `request_converter.go`/`response_converter.go`、`RelayInfo.RecordConversionDiagnostics`、流式 `ResponseStreamState`（上游 6 处构造点）属**阶段 4**（处置清单第 16 项、12.20.1，随未决项 33 定案；它们是阶段 4 切换的组成部分：门控钩子依赖阶段 3 的 `convOptions` 接线、diagnostics 与流式状态在切换时一并接上）。第 35 轮补注把这些**落地**动作写进本行、与 12.20.1 的「阶段 4 一次落地」冲突，第 37 轮 Codex 复核抓出后归位到 12.20；本行保留 `matchAnyRegex` 文档化与门控位置核验两项**；**`matchAnyRegex` 空模式语义显式文档化**（12.8，采用本地语义「空 patterns = 匹配全部」）。**响应方向暴露门控已在阶段 4 落地**（12.4.4 已说明为何不能留到本阶段），本阶段只需**核验其位置语义**：门控必须在**索引分配之前**（`stopOpenBlocksAndAdvance()` 推进 `state.Index` 之前），后置过滤不可行——见 12.4.1 | 全量测试通过；空 patterns 语义已写入配置文档；**门控位置已核验**：`stream/openai_to_claude` 快照（非 DeepSeek + 输入含 `reasoning_content`）的输出为 text 在 index 0、tool 在 index 1——若门控后置于索引分配，reasoning 会先占 index 0、text 顺移到 index 1，该快照必红（12.4.4） |
@@ -445,7 +445,7 @@ git grep -hE '^func [A-Za-z0-9_]*[A-Za-z]2[A-Za-z][A-Za-z0-9_]*\(' dbfbc096f -- 
 
 **版本锚定（必须做，否则本文档全部行号失效）**：本文档所有 `relaykit/...` 行号均以 `upstream/main` = **`789c97019`**（2026-09-28）为准。拷贝后必须把该 commit 记入 `relaykit/VERSION` 或等价文件。
 
-**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档 relaykit 行引用现为 **51 处唯一**（**第 38 轮**）（第 28 轮时 34 处：18 全路径 + 23 简写 − 7 重叠；此后 29–35 轮陆续新增，本段计数此前未随批次更新——**第 36 轮修正**）。除 relaykit 外，第 36 轮起**宿主路径也进门禁**：裸宿主引用 **107 处**（在本地基线 `dbfbc096f` 解析；**第 38 轮修正**：原文写 103，与本节下一段的 107/107 及门禁实际输出均不一致）+ `upstream/main:<宿主路径>:NN` 全路径 **24 处**（在钉死的 `789c97019` 解析——即本文档的锚定版本，不用会漂移的 `upstream/main` 默认值）。**第 37 轮更新此三处计数**（36 轮为 98/21）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
+**行号引用的机械核对（已补工具，原先只有一句「须重新核对」）**：本文档 relaykit 行引用现为 **56 处唯一**（**第 42 轮**；第 38 轮为 51——本轮 12.5/4.4 补入 5 处 relaykit/dto 全路径引用，见 12.5 与本节「固有边界」段）（第 28 轮时 34 处：18 全路径 + 23 简写 − 7 重叠；此后 29–35 轮陆续新增，本段计数此前未随批次更新——**第 36 轮修正**）。除 relaykit 外，第 36 轮起**宿主路径也进门禁**：裸宿主引用 **107 处**（在本地基线 `dbfbc096f` 解析；**第 38 轮修正**：原文写 103，与本节下一段的 107/107 及门禁实际输出均不一致）+ `upstream/main:<宿主路径>:NN` 全路径 **27 处**（**第 42 轮**：第 40 轮为 24，本轮 12.19 补入 3 处；在钉死的 `789c97019` 解析——即本文档的锚定版本，不用会漂移的 `upstream/main` 默认值）。**第 37 轮更新此三处计数**（36 轮为 98/21）。原先只写「后续需要跟进上游时重新核对本文档的行号引用」，**没给任何可执行手段**——而上游 relaykit 仍在演进（见「边界与未验证项」），锚定一漂移，全部引用静默失效。现已固化为：
 
 ```bash
 scripts/relaykit-citation-check.py            # 校验，漂移时退出码 1
@@ -453,11 +453,13 @@ scripts/relaykit-citation-check.py --ref <ref>  # 换锚点复核
 python3 scripts/relaykit-citation-check.test.py # 26 个单测（第 41 轮 +1：docs/ 引用不得 fail-open）
 ```
 
-它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。**实测（第 40 轮重测，2026-10-08）三组全绿：** **51/51**（`ref=789c97019`，即本文档锚定版本）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 24/24**（**第 38 轮**：第 37 轮为 50/103/24）。**注意：不带 `--ref` 的默认运行已因 `upstream/main` 漂移而变红**——第 40 轮实测 `upstream/main` 已前进到 `04c597bf6`（PR #7698，2026-10-08 16:07），默认 ref 下得到 `50/51`（`convmeta/meta.go:58`、`relay-claude.go:37`、`:195` 三处行内容变空白）与 `upstream-full 22/24`、退出码 1；`--ref 789c97019` 恢复全绿。这正是「必须钉 ref、不能依赖移动的 `upstream/main`」的现场证据——本段旧文写「`ref=upstream/main` 51/51」，该表述自 `upstream/main` 移动起不再成立（**第 40 轮修正**）。已做**反向验证**（五次扰动全部退出码 1）：relaykit 全路径 `:99999` → `out of range`；改文件名 → `file not found`；简写路径 `:99999`；宿主 `<宿主文件>:99999` → `out of range at dbfbc096f`；**去掉一个 `upstream/main:` 前缀 → 报「not found at baseline but found at upstream/main: add an upstream/main: prefix」**。还原后退出码 0、文档字节一致。
+它从本文档抽出全部引用，逐条在指定 ref 下检查**文件存在、行号在范围内、该行非空白**，只抓机械失效（文件没了、行越界、指向空行），**不断言该行内容**——引用指向的符号变了仍需人工复核。**实测（第 42 轮重测）三组全绿：** **56/56**（`ref=789c97019`，即本文档锚定版本；第 40 轮为 51）、**宿主 107/107**（`baseline=dbfbc096f`）、**upstream 全路径 27/27**（第 40 轮为 24；本轮 12.19 补入 3 处 `upstream/main:setting/...`、`relay/common/...` 引用）。**注意：不带 `--ref` 的默认运行已因 `upstream/main` 漂移而变红**——第 40 轮实测 `upstream/main` 已前进到 `04c597bf6`（PR #7698，2026-10-08 16:07），默认 ref 下得到 `50/51`（`convmeta/meta.go:58`、`relay-claude.go:37`、`:195` 三处行内容变空白）与 `upstream-full 22/24`、退出码 1；`--ref 789c97019` 恢复全绿。这正是「必须钉 ref、不能依赖移动的 `upstream/main`」的现场证据——本段旧文写「`ref=upstream/main` 51/51」，该表述自 `upstream/main` 移动起不再成立（**第 40 轮修正**）。已做**反向验证**（五次扰动全部退出码 1）：relaykit 全路径 `:99999` → `out of range`；改文件名 → `file not found`；简写路径 `:99999`；宿主 `<宿主文件>:99999` → `out of range at dbfbc096f`；**去掉一个 `upstream/main:` 前缀 → 报「not found at baseline but found at upstream/main: add an upstream/main: prefix」**。还原后退出码 0、文档字节一致。
 
 **简写路径的支持（第 28 轮补充）**：文档大量用省略 `relaykit/relayconvert/` 前缀的写法，形如 `internal/oai_chat/<文件>.go:<行>`、`oai_chat/<文件>.go:<行>`、`convmeta/<文件>.go:<行>`、`shared/claude/<文件>.go:<行>`。旧版正则要求 `relaykit/` 前缀，**这 23 处唯一简写引用全部在门禁之外**，而检查器仍报 18/18 绿——与第 26 轮的假绿同类（那次是新表缺前缀）。现按**显式映射表**（`SHORT_PACKAGES`，逐个核实过真实目录）扩展：`internal`/`oai_chat`/`oai_responses`/`claude_messages`/`gemini_chat`/`shared`/`media`/`convdiag` → `relaykit/relayconvert/internal/...`；`convmeta`/`kitutil` → `relaykit/relayconvert/...`；`reasonmap` → `relaykit/reasonmap/...`。**宿主路径（`relay/`、`service/`、`controller/`、`common/`、`setting/`、`aws/`、`vertex/` 与裸 `dto/`、`types/`）一律不扩展**——宿主有自己的 `dto/`、`types/`，文档里的 `dto/...:NN` 指宿主，误扩展会造出假引用。**3 个单测**覆盖了「宿主路径不得被扩展」这一条（`test_does_not_expand_host_paths`、`test_does_not_extract_upstream_prefixed_host_paths`、`test_does_not_extract_sha_prefixed_host_paths`）——**第 38 轮修正**：原文写「15 个单测」，那是当时该文件的总用例数、且并非都测这一条；此处改为按用例名指认（总用例数由 §9.3 的门禁自述检查覆盖）。**注意本段自身不能用真引用作示例**——写成 `foo.go:12` 会被检查器当成待解析的引用（本轮就踩过一次），故示例一律用 `<文件>`/`<行>` 占位。
 
 **固有边界（不得声称已覆盖）**：文档还有大量**裸 `:NNN`** 引用（如 `:749`、`:1049`、`:345`、`:247`、`:463`），它们不带路径，**无法机械归属**到某个文件（同一节里可能同时指上游与本地），故**不在门禁内**。凡关键行号，应写成带路径的形式以进入门禁。
+
+**第二类边界（第 42 轮实测补入）：裸「`X.go:NN`」（有文件名、无目录前缀）同样不在门禁内。** 全文 **249 个唯一 `.go:NN` 引用中，79 个不被这四类提取器命中**（`relaykit/...` 全路径、简写包根路径、宿主目录前缀、`upstream/main:` 前后缀）。其中 **73 个可由「该 basename 只在唯一一侧存在」机械归属**（如 `relay-claude.go`/`relay-gemini.go`/`relay_claude_test.go`/`channel-test.go` 只在本地，`request_compat.go`/`response_compat.go`/`response_registry.go`/`boundary_test.go`/`golden_test.go`/`to_gemini_chat_resp.go` 只在 relaykit），**4 个两侧同名**（`gemini.go`、`openai_request.go`、`pricing.go`、`reasoning/claude.go`，但正文上下文均可定指——如 `openai_request.go` 那处明写「relaykit 的」、`gemini.go` 那处在 `setting/model_setting/` 语境下），**2 个两侧都不存在**（`foo.go` 那处是本段自己声明的占位示例、`convert_golden_test.go` 那处指第 18 轮新增的工作区文件）。**抽查结论：这些行号的内容正确**（本轮抽验 `request_compat.go:16`、`response_compat.go:38`、`:42`、`boundary_test.go:53`、`golden_test.go:290` 均指向所声称的符号），故这是**门禁覆盖缺口、不是引用错误**。**把「唯一一侧存在」的 73 个纳入门禁是一个独立决策**（须扩 `relaykit-citation-check.py` 的解析规则并重述三组计数），本轮只如实记录边界，**不声称已覆盖**。
 
 **实测补充**（阶段 1 执行时需知）：上游 relaykit **当前没有版本文件**（顶层仅 `README.md`、`go.mod`、`go.sum` 与 4 个目录），故新建 `relaykit/VERSION` 不与上游冲突；且 `relaykit/relayconvert/boundary_test.go` 只遍历 `kitDirs`（`relayconvert`/`dto`/`types`/`reasonmap`）下的 `.go` 文件，**新增 `relaykit/VERSION` 不会触发边界门禁**（已读 `boundary_test.go:53` 的过滤条件确认）。
 
@@ -533,17 +535,19 @@ python3 scripts/relaykit-citation-check.test.py # 26 个单测（第 41 轮 +1�
 
 **口径提醒**：`327` 与工作区的 `341` 差 14 个文件——其中含本轮新增的 `service/convert_golden_test.go`，也有其他会话的在途文件（如 `service/convert_effort_test.go`），**不全是本轮新增**。**凡引用「327」处都是基线口径（含测试）**，工作区数字须另行标注，不要混用。
 
-**阶段 2 的前置：12.5 的 3 个「需实测」方法必须在本阶段开工前定分类（第 32 轮补充）**
+**阶段 2 的前置：12.5 的 3 个「需实测」方法必须在本阶段开工前定分类（第 32 轮补充；第 42 轮已定案关闭）**
 
-12.5 的方法归属表里有 **3 行不是 A/B/C 而是「需实测」**，它们**此前没有任何阶段或处置项认领**——阶段 2 判据只写「全部宿主独有方法给出出路」，处置清单第 6 项只覆盖 9.1/9.2/9.2.1/9.2.2/9.2.3 的语义差异（**第 40 轮修正**：原文写「只覆盖 9.1/9.2」，第 37/38 轮已扩到 9.2.1–9.2.3），都不指向这 3 行。这与第 25 轮「门控留宿主但调用点在被删文件里」同型：**一个已知未知项，没有 owner，就会一路滑到开工当天**。
+**第 42 轮结论：三项均判 A（迁入 `relaykit/dto`），本前置已关闭。** 取证见 12.5 表与该节末段：三方法 relaykit 全仓零命中，方法体只引用 relaykit/dto 也有的字段，迁入不新增 `boundary_test.go` 违规；`EnsureResponsesTokenDetailObjects` 的最近邻 `UsageFromChatUsage` 有三处语义差、`HasImageGenerationCall` 原引的 `ImageGenerationCallCounter.Observe` 是上游**宿主**的有状态计数器（不同能力、且本地无该文件）。下表与末段保留为**取证记录**（第 32 轮的「待比对」措辞已被 12.5 的定案取代）。
 
-| 方法 | 待比对的 relaykit 侧 | 判定要点 |
+12.5 的方法归属表里曾有 **3 行不是 A/B/C 而是「需实测」**，它们**此前没有任何阶段或处置项认领**——阶段 2 判据只写「全部宿主独有方法给出出路」，处置清单第 6 项只覆盖 9.1/9.2/9.2.1/9.2.2/9.2.3 的语义差异（**第 40 轮修正**：原文写「只覆盖 9.1/9.2」，第 37/38 轮已扩到 9.2.1–9.2.3），都不指向这 3 行。这与第 25 轮「门控留宿主但调用点在被删文件里」同型：**一个已知未知项，没有 owner，就会一路滑到开工当天**。
+
+| 方法 | 待比对的 relaykit 侧 | 第 42 轮定案 |
 |---|---|---|
-| `Usage.EnsureResponsesTokenDetailObjects` | `relaykit/dto` 的 `InputTokenDetails.*` / `OutputTokenDetails.*`（`usage_merge.go`） | 可能同域。若上游已有等价能力则判 **C（删除）**，否则 **A（迁入）**。**注意此方法在 `HEAD` 上不存在**，见下 |
-| `Usage.GetOutputTokenDetails` | 同上 | 同上 |
-| `OpenAIResponsesResponse.HasImageGenerationCall` | 上游 `relay/common/tool_usage.go` 的 `ImageGenerationCallCounter.Observe` | 上游是同域的**更强**实现（四别名去重）。须确认本地这个判定的语义是否被上游覆盖：被覆盖则 **C**，否则 **A** |
+| `Usage.EnsureResponsesTokenDetailObjects` | `relayconvert.UsageFromChatUsage`（`relaykit/relayconvert/internal/oai_chat/to_oai_responses_resp.go:146`）是最近邻，但三处语义差（非零才设 `InputTokensDetails`、不设 `OutputTokensDetails`、新建而非就地填充） | **A（迁入）**，条件结论（见下） |
+| `Usage.GetOutputTokenDetails` | relaykit 无等价物（全仓零命中） | **A（迁入）** |
+| `OpenAIResponsesResponse.HasImageGenerationCall` | 原引上游**宿主** `relay/common/tool_usage.go` 的 `ImageGenerationCallCounter.Observe`——有状态计费去重计数器，与协议层无状态谓词不同能力，且本地无该文件 | **A（迁入）** |
 
-**动工前须做**：逐项比对语义（读两侧实现 + 跑各自调用点的输入），产出 A 或 C 的结论并写回 12.5 表，**不得带着「需实测」进入阶段 2 的迁移动作**。理由是阶段 2 判据要求「全部宿主独有方法给出出路」——3 行未定即判据不可判。
+**定案依据**：逐项读两侧实现比对语义（读 relaykit 源码 + 本地方法体 + 调用点），三项均无 relaykit 等价物，写回 12.5 表。阶段 2 判据「全部宿主独有方法给出出路」随之可判。
 
 **其中 1 个方法在 `HEAD` 上不存在（第 32 轮实测）**：`Usage.EnsureResponsesTokenDetailObjects` 在 `HEAD` 的 `dto/` 里**没有定义**（`git grep` 命中 0），只存在于工作区（`dto/openai_response.go:305`，工作区口径），其 4 个调用点（`service/responses_synthetic_compact.go:1102,1116`、`service/openaicompat/chat_to_responses_response.go:43`、`relay/channel/openai/responses_via_chat.go:63`——**均为工作区口径**，`HEAD` 上这 4 行是别的代码）在 `HEAD` 上同样为 0。这是其他会话的未提交改动。第 214 行已记过「HEAD 与工作区差 3 个方法」，但 **12.5 表没有引用那条提示**，其「生产引用 3」是从工作区数的。**故这 3 行里有 1 行的分类对象本身尚未进入版本控制**——迁移前须与该会话确认最终形态，否则阶段 2 会对着一个不存在的符号做分类。
 
@@ -746,7 +750,7 @@ KIT_REF=789c97019 scripts/relaykit-dto-compat.sh --strict   # relaykit 侧须钉
 **设计文档行号引用的完整性**（锚定漂移后重跑，见「阶段 1 的前置：relaykit 源码的取得与版本锚定」）：
 
 ```bash
-scripts/relaykit-citation-check.py --ref 789c97019   # 全部引用可解析时退出码 0（relaykit 51 + 宿主 107 + upstream 全路径 24；不带 --ref 时用会漂移的 upstream/main，见「阶段 1 的前置」的版本锚定段；docs/ 路径只有「两处都不存在」才跳过——上游存在时必须要求 upstream/main: 前缀，第 41 轮修掉 fail-open）
+scripts/relaykit-citation-check.py --ref 789c97019   # 全部引用可解析时退出码 0（relaykit 56 + 宿主 107 + upstream 全路径 27，第 42 轮；不带 --ref 时用会漂移的 upstream/main，见「阶段 1 的前置」的版本锚定段；docs/ 路径只有「两处都不存在」才跳过——上游存在时必须要求 upstream/main: 前缀，第 41 轮修掉 fail-open）
 python3 scripts/relaykit-citation-check.test.py  # 26 个单测
 ```
 
@@ -791,7 +795,7 @@ python3 scripts/relaykit-gate-selfcheck.test.py       # 38 个单测（第 40 �
 3. ~~**本地专有错误符号归属**（4.3）~~ → **12.2**：4 个 `ErrorCode` 常量与 2 个判定函数全部迁入 `relaykit/types`
 4. ~~**`*WithError` 系列形式**（4.5.4）~~ → **12.3**（**第 35 轮修正范围**）：直接删除（与上游一致，上游 `service/` 下已删、0 命中），9 个生产调用点改指包装层；**「4 个非 WithError 旧包装一并删除」已撤回**——上游把它们保为永久 facade（`upstream/main:service/convert.go` 27 行，见 12.20），去留随未决项 33 的形态选择（推荐照抄上游终态）
 5. ~~**响应方向暴露策略的具体形态**~~ → **12.4**：**relaykit 内门控**（`convmeta.Options` 钩子），必须在索引分配之前。后置过滤会破坏 SSE 索引，不可行
-6. ~~**本地 DTO 独有方法归属**（4.4）~~ → **12.5**：A 类 18 个迁入 relaykit/dto，B 类 2 个降为宿主自由函数，3 个需实测（与 `InputTokenDetails` / `ImageGenerationCallCounter` 对齐）
+6. ~~**本地 DTO 独有方法归属**（4.4）~~ → **12.5（第 42 轮定案）**：A 类 **21** 个迁入 relaykit/dto（含原 3 个「需实测」，均判 A），B 类 2 个降为宿主自由函数，待实测 0 个
 7. ~~**本地 hosted 工具与上游 `toolconv` 的收敛**~~ → **无差异**：上游 10 种 `Kind`（`function`/`web_search`/`file_search`/`web_fetch`/`code_execution`/`computer_use`/`url_context`/`mcp`/`image_generation`/`native`）是本地超集。本地非测试代码出现的 hosted 工具 type 只有 3 种（`web_search`、`file_search`、`image_generation`），差集为空。直接采用
 8. ~~**`types` 别名转发的适用范围**~~ → **12.2**：仅 `endpoint_type.go`、`finish_reason.go` 两类常量用别名；其余改 import
 9. ~~`relaykit/dto` 补丁 2 是否影响上游 golden 快照~~ → **12.16**：需实测，24 个 JSON 快照逐一核对
@@ -818,11 +822,11 @@ python3 scripts/relaykit-gate-selfcheck.test.py       # 38 个单测（第 40 �
 30. ~~**字段名相同但 tag / Go 类型不同的 10 个类型（第 14 轮新增）**~~ → **12.0.8 已关闭**（2026-10-04；**第 30 轮修正计数**）：**11 处**（tag 5 + 类型 6，原文写 15）**全部采用 relaykit、零处打补丁**。tag 5 处中 3 处因字段是 struct 值而 `omitempty` 无效（空操作）、2 处风险已逐点排除；类型 6 处中 `CreatedAt` 为纯增益（`MarshalJSON` 与 int 相同）、`IncludeThoughts`/`Text`/`Arguments` 须改读写点、`SupportedEndpointTypes` 改 import
 
 31. **`finish_reason` 严格语义的落点（第 29 轮新增，第 37 轮修正为三选）**：**未决，阶段 4 开工前须三选一**（12.11.3）——**A1** 给 `reasonmap` 加返回 error 的严格变体 + 改 `oai_chat` 3 个函数签名；**A2** 布尔钩子只选分支、报错由宿主前置校验；**B** 宿主 5 处调用点各自前置校验。原「选项 A」的布尔钩子**不产生 error**（`reasonmap.OpenAIFinishReasonToClaudeStopReason` 与 `oai_chat` 3 个调用函数都无 error 返回通道，第 37 轮实测）；原表述「留宿主调用点」无落点——两个原调用点都在阶段 6 删除的 `service/convert.go` 内（12.11.1）
-32. **12.5 的 3 个「需实测」方法的分类（第 32 轮新增）**：**未决，阶段 2 开工前定**（见「阶段 2 的前置」）——`Usage.EnsureResponsesTokenDetailObjects`、`Usage.GetOutputTokenDetails`、`OpenAIResponsesResponse.HasImageGenerationCall`。此前无任何阶段或处置项认领，而阶段 2 判据要求「全部宿主独有方法给出出路」；且 `EnsureResponsesTokenDetailObjects` 在 `HEAD` 上不存在（工作区独有）
+32. ~~**12.5 的 3 个「需实测」方法的分类（第 32 轮新增）**~~ **已关闭**（第 42 轮）：三方法均判 **A（迁入 `relaykit/dto`）**，见 12.5 与「阶段 2 的前置」。三者在 relaykit 全仓零命中、方法体零宿主依赖；`EnsureResponsesTokenDetailObjects` 的 A 为**条件结论**（该对象在 `HEAD`/基线上不存在，只存在于工作区——其他会话的未提交改动，迁入前须确认其最终形态）
 33. **阶段 4 的切换形态（第 33 轮新增；第 35 轮扩为三选一）**：**未决，阶段 4 开工前定**（处置清单第 14 项、§8.1、12.20）——**A 薄封装** / **B 直接改写调用点** / **C 照抄上游终态（推荐）**。§8.1 要求阶段 4「单点可逆」，C 的切换 = `service/convert.go` 单文件的函数体替换，回滚最集中
 34. **思考等级后缀填充器缺失（第 34 轮新增）**：**未决，阶段 4 开工前二选一**（12.19）——移植上游 `relay/helper/reasoning_suffix.go`（+ `model_modifier.go` 符号），或用本地 `setting/reasoning` 解析器写等价填充器。relaykit 不解释 `-thinking`/effort 尾缀，4 个消费点全靠 `ReasoningState()`；不装即静默丢失跨协议路径的思考等级，且 8 个 golden 快照零后缀用例、抓不到该回归
 
-**编号 31–34 的完整说明见 12.18**（该表同时保留第 12 轮新增的 21–30 条目及其关闭状态）；本节只列「仍未决」的四项。
+**编号 31–34 的完整说明见 12.18**（该表同时保留第 12 轮新增的 21–30 条目及其关闭状态）；本节只列「仍未决」的三项（31、33、34；32 已于第 42 轮关闭）。
 ## 11. 事实依据
 
 行号以第 1 节声明的本地基线 `dbfbc096f` 为准（该基线与 `9c4758b53` 之间只改了代理/环境文件，行号一致）。上游行号以**钉死的 `upstream/main` = `789c97019`** 为准（见「阶段 1 的前置」的版本锚定；不用会漂移的 `upstream/main` 默认值——**第 40 轮修正**：原文只写「以 `upstream/main` 为准」）。
@@ -1407,13 +1411,13 @@ if reasoning != "" && !retain { reasoning = "" }
 | `OpenAIResponsesRequest.UnmarshalJSON` | 5 | **A** | presence 保真，即 3.3 的补丁 2 |
 | `Reasoning.UnmarshalJSON` | 5 | **A** | 同上 |
 | `StreamOptions.UnmarshalJSON` | 5 | **A** | 同上 |
-| `Usage.EnsureResponsesTokenDetailObjects` | 3 | **需实测** | 与 relaykit `InputTokenDetails.*`（`usage_merge.go`）可能同域。先比对语义再定 A 或 C |
+| `Usage.EnsureResponsesTokenDetailObjects` | 3（工作区） | **A** | relaykit 无等价物（全仓零命中）。最近邻 `relayconvert.UsageFromChatUsage`（`relaykit/relayconvert/internal/oai_chat/to_oai_responses_resp.go:146`）有三处语义差：只在 4 项 detail 任一非零时才设 `InputTokensDetails`（本地无条件建对象）、**完全不设 `OutputTokensDetails`**（只设 `CompletionTokenDetails`）、且**新建** `*Usage` 而非就地填充。纯协议层拼写桥接（Responses 客户端读 `output_tokens_details`），零宿主依赖。**该对象在 `HEAD`/`dbfbc096f` 均 0 命中，只在工作区**——见下 |
 | `IncompleteDetails.EffectiveReason` | 2 | **A** | 推理语义，relaykit 有 `reasoning_state.go` 可承接 |
 | `OpenAIResponsesResponse.HasCompactionOutput` | 2 | **B** | 同 `HasCompactionTrigger` |
 | `OpenAIResponsesResponse.GetQuality` | 2 | **A** | 图像响应字段访问器 |
 | `OpenAIResponsesResponse.GetSize` | 2 | **A** | 同上 |
-| `OpenAIResponsesResponse.HasImageGenerationCall` | 2 | **需实测** | 上游 `relay/common/tool_usage.go` 的 `ImageGenerationCallCounter.Observe` 是同域的**更强**实现（四别名去重）。须先确认本地这 4 个调用点是否可改用计数器的语义；不可则 A |
-| `Usage.GetOutputTokenDetails` | 2 | **需实测** | 同 `EnsureResponsesTokenDetailObjects` |
+| `OpenAIResponsesResponse.HasImageGenerationCall` | 2 文件 / 4 调用点 | **A** | relaykit 无谓词（只有常量 `ResponsesOutputTypeImageGenerationCall`，`relaykit/dto/openai_response.go:13`）。与同接收者、同调用点、已判 A 的 `GetQuality`/`GetSize` 同构。零宿主依赖。**原文引的 `ImageGenerationCallCounter.Observe` 不构成「更强覆盖」**：它是**上游宿主**（`upstream/main:relay/common/tool_usage.go`，本地不存在该文件）的**有状态**计费去重计数器（返回 void、入参含 outputIndex），与协议层**无状态**谓词不同能力 |
+| `Usage.GetOutputTokenDetails` | 2 | **A** | relaykit 无等价物（全仓零命中；`OutputTokensDetails` 在 relaykit 内只有字段声明 `relaykit/dto/openai_response.go:242`，无任何带回退的读取路径）。纯协议层访问器（`OutputTokensDetails` 缺失时回退到 `CompletionTokenDetails`），零宿主依赖 |
 | `Reasoning.MarshalJSON` | 2 | **A** | presence 保真 |
 | `StreamOptions.MarshalJSON` | 2 | **A** | presence 保真 |
 | `Reasoning.Clone` | 1 | **A** | 值拷贝，无策略 |
@@ -1424,11 +1428,11 @@ if reasoning != "" && !retain { reasoning = "" }
 | `ChatCompletionsStreamResponse.GetError` | 1 | **A** | 协议响应字段访问器（工作区口径） |
 | `ClaudeRequest.SearchToolNameByToolCallId` | 1 | **A** | 工具名契约，属协议层 |
 
-**A 类 18 个、B 类 2 个、待实测 3 个。** 另有 2 个（`IsValidToolName`、`ToolNameMaxLength`）生产引用为 0，**C 类删除**或随 `tool_name.go` 整体迁入——倾向后者，因为 `NormalizeToolName` 与它们同文件且必须迁入。
+**A 类 21 个、B 类 2 个、待实测 0 个（第 42 轮定案，见下）。** 另有 2 个（`IsValidToolName`、`ToolNameMaxLength`）生产引用为 0，**C 类删除**或随 `tool_name.go` 整体迁入——倾向后者，因为 `NormalizeToolName` 与它们同文件且必须迁入。
 
-**3 个「需实测」方法已由第 32 轮指派 owner**（见「阶段 2 的前置：12.5 的 3 个『需实测』方法必须在本阶段开工前定分类」）：须在**阶段 2 开工前**逐项比对 relaykit 侧语义并定 A 或 C，**不得带着「需实测」进入迁移动作**——阶段 2 判据要求「全部宿主独有方法给出出路」，3 行未定即判据不可判。**其中 `Usage.EnsureResponsesTokenDetailObjects` 在 `HEAD` 上不存在**（只存在于工作区，是其他会话的未提交改动），分类对象本身尚未进入版本控制，须先与该会话确认最终形态。
+**3 个原「需实测」方法已定案为 A（第 42 轮）**：`Usage.EnsureResponsesTokenDetailObjects`、`Usage.GetOutputTokenDetails`、`OpenAIResponsesResponse.HasImageGenerationCall`。三者 relaykit 全仓零命中（`git grep -c <方法名> 789c97019 -- 'relaykit/**/*.go'` 均为 0），且方法体只引用 relaykit/dto 也有的类型字段——迁入不新增任何 `boundary_test.go` 违规。**其中 `Usage.EnsureResponsesTokenDetailObjects` 在 `HEAD`/基线均不存在**（只存在于工作区，是其他会话的未提交改动），其 A 分类是**条件结论**：执行迁入前须与该会话确认该方法的最终形态（若被删除或改名，本行分类随之作废）。原「阶段 2 的前置」中的 3 行判据据此关闭。
 
-**relaykit 独有 5 个方法**（**三文件口径**；全包 31 个，见 12.0.5，迁移会丢）：`GeneralOpenAIRequest.MarshalJSON`、`CachedTokenDetails.HasTokens`、`InputTokenDetails.Clone`、`InputTokenDetails.CacheCreationTokensTotal`、`ResponsesOutput.MarshalJSON`。前三者对应 relaykit 的 `usage_merge.go` / `reasoning_state.go`——本地 `Usage.*` 与 relaykit `InputTokenDetails.*` 是**同一能力域的两套实现**，对齐方式见 12.5 的「需实测」三项。
+**relaykit 独有 5 个方法**（**三文件口径**；全包 31 个，见 12.0.5，迁移会丢）：`GeneralOpenAIRequest.MarshalJSON`（`relaykit/dto/openai_request.go:136`）、`CachedTokenDetails.HasTokens`（`:284`）、`InputTokenDetails.Clone`（`:290`）、`InputTokenDetails.CacheCreationTokensTotal`（`:316`）、`ResponsesOutput.MarshalJSON`（`:397`）——**四个在 `relaykit/dto/openai_response.go`，一个在 `openai_request.go`**（**第 42 轮修正**：原文写「前三个对应 relaykit 的 `dto/usage_merge.go` 与 `dto/reasoning_state.go`」，实测这 5 个方法无一在 `usage_merge.go`/`reasoning_state.go`；前者是 `Usage` 合并，后者是 `ReasoningConversionState` 类型声明）。它们与本地的 `Usage.*` 方法**共享 `Usage` 的 token-detail 数据域、但能力互不重叠，迁移后两组必须并存**：relaykit 侧是缓存写计费（`CacheCreationTokensTotal`）与存在性感知深拷贝（`Clone`/`HasTokens`），本地侧是 Responses/Chat 两种拼写的桥接与回退读取。二者**不存在取舍**（**第 42 轮修正**：原文写「同一能力域的两套实现……须做语义对齐，不能简单二选一」，会误导读者以为要二选一）。本地方法在 relaykit 侧的最近邻是 `relayconvert.UsageFromChatUsage`（仅输入半边），不是 `InputTokenDetails.*`。
 
 ### 12.6 命名空间工具与 tool_search → 保留在宿主
 
@@ -1539,6 +1543,8 @@ git grep -lE "$PAT" HEAD -- '*.go' | grep -v '_test.go'
 | d | `function_call` | `"tool_use"` | `default` → `"function_call"` | 行为回归（合法值被透传成非法 stop_reason） |
 | e | `content_filter` | `"refusal"` | `types.FinishReasonContentFilter` = `"content_filter"` → `"refusal"` | **无差异**（前版本误以为有；两分支同值） |
 
+**本轮（第 42 轮）实测修正——b/c/d 三条回归都只在非流式路径。** 上表把 b/c/d 记作「行为回归」，但本地严格函数在**流式**路径只作校验、**丢弃返回值**：`StreamResponseOpenAI2ClaudeWithError`（`service/convert.go:730`）先用 `stopReasonOpenAI2ClaudeStrict` 校验（非法即 `return nil, err`），实际输出却走宽松的 `streamResponseOpenAI2Claude`——其 `StopReason` 取 `stopReasonOpenAI2Claude`（`:955`、`:1025`），即 relaykit 同款裸透传。故流式输出的 b/c/d 与 relaykit **逐字一致**（`""`/`" stop "`/`function_call` 都原样透传，其中 `""` 另有 `:231-233`、`:975-977` 的 `end_turn` 守卫，两侧同值）。**真正两方向都差的只有 a**（未知值报错——流式经校验也会 `return nil, err`，relaykit 则透传）。**实现含义**：恢复 b/c/d 只需改**非流式**路径；测试也应落在非流式（流式侧只有 a 需覆盖）。
+
 **b 的影响面（已实测）**：`dto.ClaudeResponse.StopReason` 是 `string` + `omitempty`（`dto/claude.go:560`、`relaykit/dto/claude.go:510`）。上游**非流式**路径（`oai_chat/to_claude_messages_resp.go:450-495`）在没有任何 choice 携带 `FinishReason`（Go 零值 `""`）时，`stopReason` 停在 `""`，序列化时**整个省略 `stop_reason` 字段**；本地经 `stopReasonOpenAI2ClaudeStrict` 的 `case ""` 返回 `"end_turn"`。**流式无差异**——上游流式另有显式 guard（`oai_chat/to_claude_messages_resp.go:220-222`、`:429-431`），同样落到 `end_turn`；本地两条路径都走同一个 `case ""`。**golden fixture 覆盖不到 b**：本地 golden 的输入 fixture 只有 `finish_reason: "tool_calls"`（快照里对应 `stop_reason: "tool_use"`），relaykit 24 个 golden 只有 `tool_calls`/`stop`/`null`——**两侧都无空串样例**。这正是「一个通过的快照基线不等于有效的基线」的又一实例（同 12.16.1 的 must-fix）。
 
 #### 12.11.3 决定
@@ -1550,6 +1556,10 @@ git grep -lE "$PAT" HEAD -- '*.go' | grep -v '_test.go'
 - **选项 B（不改套件，宿主 5 处前置校验）**：在**宿主 5 个 Claude 响应方向的 `*WithError` 调用点各自前置校验** `Choices[].FinishReason`，非法即 `return error`（在调 relaykit **之前**）。代价：5 份重复校验、逻辑分散、且要保证与 relaykit 的 b/c/d 语义逐字一致。**仅当团队明确接受宿主重复逻辑时可选。**
 
 **为什么 A1 与 A2 的取舍不能只看「改动小」**：A1 让严格语义成为 relaykit 的一部分（一次实现、上游可跟进），代价是签名分叉；A2 保持 relaykit 签名不变，代价是宿主多一次前置遍历 + 一个只为选分支存在的钩子（**钩子本身不产生错误，这一点必须写清楚，否则读者会以为接线钩子就完成了严格化**）。
+
+**本轮（第 42 轮）实测补充——两个影响选型的已核实事实**：(1) **A1 在改动面上是 A2 的超集**。A1 若要与 §12.11 已定的「保留上游宽松 default（套件本身不该拒绝未知值）」并存，relaykit 的 chat 转换器就不能对未知值无条件报错，于是仍须引入 A2 的「选分支」钩子——即 A1 = A2 + `response_compat.go:38`/`:42` 两个公开包装的签名变更，不是「更干净的单点」。(2) **§12.11.1 对 B 的两条反对都可规避**：「5 份重复校验」用 1 个共享助手即可消除；「顺序颠倒」只对**事后**实现成立——B 的正确形态是在调 relaykit **之前**把 `Choices[].FinishReason` 归一到 OpenAI 词汇表（`""`→`stop`、`function_call`→`tool_calls`、`TrimSpace`+`ToLower`），未知值即 `return error`，OpenAI→Claude 的映射仍全由 relaykit 完成，宿主没有复制套件逻辑。**B 的注意点**：流式末块判定依赖 `FinishReason != nil && *FinishReason != ""`，故流式侧只校验未知值、**不得**把空串改写成非空（否则未结束块被误判为结束块）——这与上条「b/c/d 只在非流式」一致，即流式侧只有 a 需要处理。
+
+**选型仍待定**：A1 与 B 的取舍取决于团队对「relaykit 公开签名分叉」的容忍度——A1 的分叉是**加性 API 变更**（理由见上，理论上可提上游），B 是**宿主侧的一处归一化助手**（上游提供等价能力后即可删）。文档不代团队在此二选一；不选 A2（它已退化为 B 的形态且多一个只为选分支存在的钩子）。
 
 **无论选哪个，都必须新建测试**：`TestResponseOpenAI2ClaudeRejectsUnknownFinishReason`（`service/convert_claude_request_test.go:900`）只覆盖 a；**b/c/d 三条无任何测试**，且两条 golden 基线都测不到（见 12.11.2）。阶段 4 须为 b/c/d 各补一条，否则「切换后行为未退化」在 finish_reason 这一维上**无证据**。
 
@@ -1853,7 +1863,7 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 | 3 | 本地专有错误符号 | 迁入 `relaykit/types` |
 | 4 | `*WithError` 系列 | 删除 |
 | 5 | 响应方向暴露策略形态 | **relaykit 内门控**（`convmeta.Options` 钩子），在索引分配之前（精确地说：进入 `reasoning/text` 二选一之前）。后置过滤不可行，见 12.4。落点为 `oai_chat/to_claude_messages_resp.go` 两条入口（已可达 `Meta`，零透传成本）。**钩子 nil 语义为「保留上游默认」、单参钩子由调用点对三个模型名各调一次取或、落地时机在阶段 4 而非阶段 5**——三处修正见 12.4.4 |
-| 6 | DTO 方法归属 | 4.4 的 23 个：A 18 / B 2 / 待实测 3。**全包 394 vs 273 函数（含测试；非测试 306 / 215）**，完整差集见 12.0.5 |
+| 6 | DTO 方法归属 | 4.4 的 23 个：A 21 / B 2 / 待实测 0（第 42 轮定案，3 个原「需实测」均判 A）。**全包 394 vs 273 函数（含测试；非测试 306 / 215）**，完整差集见 12.0.5 |
 | 7 | hosted 工具收敛 | 采用上游 `toolconv`（10 种 `Kind`），本地非测试只有 3 种且是其子集，差集为空 |
 | 8 | `types` 别名转发范围 | 仅 `endpoint_type.go`、`finish_reason.go` 两类常量；其余改 import |
 | 9 | 补丁 2 对 golden 快照 | 需实测，逐条核对 |
@@ -1890,9 +1900,9 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 | 29 | ~~`dto` 未导出缓存字段的承载方式（第 12 轮新增）~~ | **已关闭**（2026-10-04）：见 12.0.7——`EffectiveTools()` 连缓存字段迁入 `relaykit/dto`，未导出字段在自己包内声明合法（上游已有 `Reasoning.effortRaw` 同例），无需旁路。13 个调用点改 import |
 | 30 | ~~字段名相同但 tag / Go 类型不同（第 14 轮新增）~~ | **已关闭**（2026-10-04；**第 30 轮修正计数**）：见 12.0.8——**11 处**（tag 5 + 类型 6，原文写 15）全部采用 relaykit。tag 3 处空操作（struct 值）、2 处风险排除；类型 `CreatedAt` 纯增益、`IncludeThoughts`(8 处)+`Text`/`Arguments` 改读写点、`SupportedEndpointTypes` 改 import |
 | 31 | **finish_reason 严格语义的落点（第 29 轮新增，第 37 轮修正为三选）** | **未决，阶段 4 开工前须三选一**（12.11.3）：**A1** 给 `reasonmap` 加返回 error 的严格变体 + 改 `oai_chat` 3 个函数签名（本地改动清单第 12 行 + 新增签名变更行）；**A2** 布尔钩子只选分支、报错由宿主前置校验（复用 B 的落点）；**B** 宿主 5 处调用点各自前置校验。**原「选项 A」的布尔钩子不产生 error——`reasonmap.OpenAIFinishReasonToClaudeStopReason` 与 `oai_chat` 3 个调用它的函数都无 error 返回通道（第 37 轮实测）**。原表述「留宿主调用点」无落点——两个原调用点都在阶段 6 删除的 `service/convert.go` 内（12.11.1）。另须为 b/c/d 三条差异各补测试（12.11.2） |
-| 32 | **12.5 的 3 个「需实测」方法的分类（第 32 轮新增）** | **未决，须在阶段 2 开工前定**（见「阶段 2 的前置」）：`Usage.EnsureResponsesTokenDetailObjects`、`Usage.GetOutputTokenDetails`、`OpenAIResponsesResponse.HasImageGenerationCall`。此前**无任何阶段或处置项认领**，而阶段 2 判据要求「全部宿主独有方法给出出路」——3 行未定即判据不可判。**且 `EnsureResponsesTokenDetailObjects` 在 `HEAD` 上不存在**（工作区独有，其他会话未提交改动），分类对象本身尚未进入版本控制 |
+| 32 | ~~**12.5 的 3 个「需实测」方法的分类（第 32 轮新增）**~~ | **已关闭**（第 42 轮）：见 12.5 与「阶段 2 的前置」——`Usage.EnsureResponsesTokenDetailObjects`、`Usage.GetOutputTokenDetails`、`OpenAIResponsesResponse.HasImageGenerationCall` 三者在 relaykit 全仓零命中、方法体零宿主依赖，均判 **A（迁入 `relaykit/dto`）**。**`EnsureResponsesTokenDetailObjects` 的 A 为条件结论**（该对象在 `HEAD`/基线上不存在，只存在于工作区——其他会话的未提交改动，迁入前须确认最终形态）。原引的 `ImageGenerationCallCounter.Observe` 判为不同能力（上游**宿主**的有状态计费计数器，且本地无该文件） |
 | 33 | **阶段 4 的切换形态（第 33 轮新增；第 35 轮扩为三选一）** | **未决，须在阶段 4 开工前定**（处置清单第 14 项、§8.1、12.20）：**A 薄封装**（6 个同名转发函数——注意这 6 个含 `*WithError` 名字，与上游实际保留的 5+2 个不同）或 **B 直接改写调用点**或 **C 照抄上游终态（第 35 轮新增，推荐）**——上游 `main` 保留 5 个 facade + 2 个 shim + 包装层，调用点改动面最小（测试侧 `service/` 4 文件必改 17 处、通道级 4 文件另必改 22 处，而非全删形态下 `service/` 4 文件的 82 处；**第 40 轮修正**：原文写「只需动 19 处」，把 2 处零改动调用算进必改、未标 `service/` 口径、未计通道级）。§8.1 要求阶段 4「单点可逆」，C 的切换 = `service/convert.go` 单文件的函数体替换，回滚最集中（完整回滚清单见 12.20.1 末段） |
-| 34 | **思考等级后缀填充器缺失（第 34 轮新增）** | **未决，阶段 4 开工前二选一**（12.19）：relaykit 的 4 处 `ReasoningStateOf(info)` 消费点 + `ApplyClaudeThinkingModel` 全部依赖 `info.ReasoningConversion`，而 relaykit README 明示转换器**不再解释** `-thinking`/effort 尾缀——后缀意图必须由宿主入口填充。上游入口是 `relay/helper/reasoning_suffix.go` 的 `ApplyReasoningModelSuffix`（非测试调用 6 处、5 个文件），**本地不存在该文件**；本地现有后缀处理全是内联的——`relay-claude.go:430-478` 随阶段 4 收敛删除，`claude_handler.go:55-104` 的换装（§3.1「采用上游」）**在阶段表中零落点**（12.19 第二项）。不装填充器即静默丢失跨协议路径的思考等级，且 8 个 golden 快照零后缀用例、抓不到该回归 |
+| 34 | **思考等级后缀填充器缺失（第 34 轮新增）** | **未决，阶段 4 开工前二选一**（12.19）：relaykit 的 4 处 `ReasoningStateOf(info)` 消费点 + `ApplyClaudeThinkingModel` 全部依赖 `info.ReasoningConversion`，而 relaykit README 明示转换器**不再解释** `-thinking`/effort 尾缀——后缀意图必须由宿主入口填充。上游入口是 `relay/helper/reasoning_suffix.go` 的 `ApplyReasoningModelSuffix`（非测试调用 6 处、5 个文件），**本地不存在该文件**；本地现有后缀处理全是内联的——`relay-claude.go:366-414`（基线口径；HEAD 为 `:430-478`，第 36 轮重锚，见 12.19）随阶段 4 收敛删除，`claude_handler.go:55-104` 的换装（§3.1「采用上游」）**在阶段表中零落点**（12.19 第二项）。不装填充器即静默丢失跨协议路径的思考等级，且 8 个 golden 快照零后缀用例、抓不到该回归 |
 
 ### 12.19 思考等级后缀的宿主填充器（第 34 轮新增，未决项 34）
 
@@ -1916,7 +1926,9 @@ stream 矩阵**包含** `openai_to_claude`，但实测该快照里 `thinking` �
 - **A（推荐，与上游同构）**：移植上游 `relay/helper/reasoning_suffix.go` 与其依赖的 `relay/helper/model_modifier.go` 符号（`modelModifierDiagnostic`、`extractTemperature`、`extractTopP` 等，两文件共 510 行）为宿主文件，在 5 个入口接线。收益：与上游行为逐字节对齐，`-thinking`/`-nothinking`/effort 尾缀的统一语义、mapped-model 覆盖、pass-through 短路全部现成；代价：两个上游文件连同其测试一起移植，且它们依赖 `relaykit/relayconvert/reasoning` 的 `Parse*`（relaykit 公开包，宿主可 import）。
 - **B（本地等价物）**：用本地 `setting/reasoning/suffix.go` 的解析器写一个薄填充器，只覆盖本地实际使用的后缀词表（`TrimEffortSuffix`、`ParseOpenAIReasoningEffortFromModelSuffix`、`ParseDeepSeekV4ThinkingSuffix`），在入口调用并写 `info.ReasoningConversion` + 裁 `UpstreamModelName`。收益：改动小、词表与本地现状严格一致；代价：与上游语义存在长期漂移风险，后续跟进上游时须人工对表。
 
-无论选哪个，判据都相同：**带后缀的跨协议请求（oai→claude 至少一条）在阶段 4 快照或单测中渲染出正确的 thinking 与裁剪后的上游模型名**；且**不带后缀的请求行为与现状逐字节一致**（pass-through 短路不得误伤）。
+**本轮（第 42 轮）实测修正——A 的移植面不止 510 行。** 上游 `relay/helper/reasoning_suffix.go` 还依赖上游**宿主**的另两个符号：`setting/reasoning.ParseLegacyModelSuffix`（`upstream/main:setting/reasoning/suffix.go:35`；该文件上游 233 行，本地仅 63 行且**无此法**——`git show dbfbc096f:setting/reasoning/suffix.go | grep -c ParseLegacyModelSuffix` = 0）与 `model_setting.ShouldPreserveEffortTail`（`upstream/main:setting/model_setting/global.go:167`，本地无；上游在 `upstream/main:relay/common/relay_info.go:944` 把它接进 `convmeta.Options.PreserveEffortTail`）。故 A 的实际范围是：`relay/helper/` 两文件 + `setting/reasoning` 的 `ParseLegacyModelSuffix` + `model_setting.ShouldPreserveEffortTail` + `PreserveEffortTail` 接线。**注意：不得用上游版本整体替换本地 `setting/reasoning/suffix.go`**——本地该文件被 9 个文件 import（含 `relay/channel/deepseek/adaptor.go`、`relay/channel/gemini/adaptor.go`），其中的 `TrimEffortSuffix` 等在阶段 4/6 之后仍有存活调用点，只能做加性补齐。
+
+**无论选哪个，判据都相同**：**带后缀的跨协议请求（oai→claude 至少一条）在阶段 4 快照或单测中渲染出正确的 thinking 与裁剪后的上游模型名**；且**不带后缀的请求行为与现状逐字节一致**（pass-through 短路不得误伤）。
 
 ### 12.20 上游宿主侧终态实测：facade / shim / wrapper 层（第 35 轮新增）
 
