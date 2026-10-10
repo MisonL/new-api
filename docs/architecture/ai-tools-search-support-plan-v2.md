@@ -246,10 +246,14 @@ POST /v1/code/sessions/{id}/worker/web-fetch
 **拦截位置的三个前置事实（本轮复核新增，不处理会产生错账或副作用）**：
 
 1. **预扣费已发生**：`controller/relay.go:290-296` 在 `ClaudeHelper`（`:306`）之前已执行 `service.PreConsumeBilling`；退款 defer 仅在 `newAPIError != nil`（`:228-238`）触发；循环结束无补结算。旁路若按 §3.5 直扣后 `return nil`，**既不 settle 也不 refund，每次边车搜索泄漏一整笔模型预扣额度**（同型事故：仓库已有 realtime WS "预扣+直扣+终态结算 = 约 2 倍"的记录）。
-2. **边车仍走 `Distribute`（本轮定案：接受此前提）**：`/v1/messages` 组挂 `Distribute`（`router/relay-router.go:94-98`），无匹配渠道在 `getChannel` 就 404——**该 model 必须可路由**，文档不再宣称"零配置主线"；这也使前置事实 3 的探针抑制成为必需。
-3. **副作用污染渠道探针**：`controller/relay.go:178-180` 的 `finalizeRelayChannelHealthProbe(c, relayInfo, newAPIError==nil)` 与 `:301` 的 `addUsedChannel` 无条件执行；旁路成功会把**从未被请求的渠道**记为健康探针成功与已用渠道。
+2. **边车仍走 `Distribute`（本轮定案：接受此前提）**：`/v1/messages` 组挂 `Distribute`（`router/relay-router.go:94-98`），无匹配渠道在 `getChannel` 就 404——**该 model 必须可路由**，文档不再宣称"零配置主线"。
+3. **副作用：渠道用量与半开探针**。`controller/relay.go:301` 的 `addUsedChannel(c, channel.Id)` 是**显式调用**（不是无条件）——仓库既有约定是"本地决定/未发上游的候选不得进入 `use_channel`"（`controller/relay.go:934`、`:1058`、`:3700-3702` 三处注释）。边车旁路在 `:301` **之前**返回即可自然满足该约定，无需新机制。健康探针只在**半开探针路径**布防（`service/channel_health.go:1082-1093` 设 `state.Probe`），常规请求 `state.Probe == nil`、`MarkChannelHealthProbeSuccess` 直接早退（`service/channel_health_probe_lifecycle.go:63`）；**仅当所选渠道正处于半开探针时**，旁路须显式 `service.ReleaseChannelHealthProbe(c, relayInfo)`（与失败分支同一调用），否则会把一次未发上游的本地应答记成探针成功。
 
-**处置决定（本轮定案）**：采用"复用既有结算链"方案——边车旁路通过 `service.SettleBilling(ctx, relayInfo, searchQuota)` 把已预扣的模型额度**差额结算**到搜索实收额（`relayInfo.Billing`），不新增独立直扣；同时以上下文标记（如 `ContextKeySkipChannelHealthProbe`）抑制 `finalizeRelayChannelHealthProbe` 与 `addUsedChannel`。不采用"上移到 `PreConsumeBilling` 之前"方案（那会改动 `controller/relay.go` 主流程，改动面更大）。**阶段 3 验收断言：边车请求结束后余额无残留、无针对未被请求渠道的探针成功/用量记录。**
+**处置决定（本轮定案）**：
+- **计费**：边车旁路通过 `service.SettleBilling(ctx, relayInfo, searchQuota)` 结算——已核实其为**差额结算**（`service/billing.go:34-70`：`delta := actualQuota - preConsumed`，补扣/返还分别记日志后 `Billing.Settle(actualQuota)`；无 BillingSession 时回退路径同样按 `quotaDelta` 处理，`:73-75`）。不新增独立直扣，也不采用"上移到 `PreConsumeBilling` 之前"（那会改 `controller/relay.go` 主流程，面更大）。
+- **渠道用量**：旁路早返回（在 `addUsedChannel` 之前），遵循既有约定，不引入新上下文键。
+- **半开探针**：旁路命中时若 `state.Probe != nil`，调用 `service.ReleaseChannelHealthProbe(c, relayInfo)` 释放，不标记成功。
+- **阶段 3 验收断言**：边车请求结束后余额无残留（预扣已按搜索实收结算）、`use_channel` 不含该渠道、半开探针未被记为成功。
 
 **流式响应**（`text/event-stream`，逐事件 `Flush()`）：
 

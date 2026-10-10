@@ -34,7 +34,7 @@
 
 ### 计费与集成（P0）
 - **边车旁路与预扣费/BillingSession 冲突**：`controller/relay.go:290-296` 在 `ClaudeHelper`（`:306`）之前已 `PreConsumeBilling`，退款 defer 仅在 `newAPIError != nil`（`:228-238`），循环结束无补结算。文档 §3.5 的三步直扣链会泄漏模型预扣额度或造成重复扣费。
-- **边车仍受 `Distribute` 约束并污染渠道健康探针**：`/v1/messages` 挂 `Distribute`（`router/relay-router.go:94-98`）；`controller/relay.go:178-180` 的 `finalizeRelayChannelHealthProbe(c, relayInfo, newAPIError == nil)` 与 `:301` 的 `addUsedChannel` 无条件执行；`relayRequestProducedNormalEnd`（`:105-113`）对流式返回 `StreamStatus.IsSuccessfulEnd()`，旁路成功会把从未被请求的渠道记为探针成功。
+- **边车仍受 `Distribute` 约束并可能污染渠道用量与半开探针**：`/v1/messages` 挂 `Distribute`（`router/relay-router.go:94-98`）。**（第 2 轮修正）** 第 1 轮说 `addUsedChannel` 与探针收尾「无条件执行」是**错的**：`controller/relay.go:301` 的 `addUsedChannel` 是显式调用，仓库既有约定明写「本地决定／未发上游的候选不得进入 `use_channel`」（`:934`、`:1058`、`:3700-3702`）；`finalizeRelayChannelHealthProbe`（`:178-180`）虽每请求执行，但 `MarkChannelHealthProbeSuccess` 对 `state.Probe == nil` 直接早退（`service/channel_health_probe_lifecycle.go:63`），探针只在半开路径布防（`service/channel_health.go:1082-1093`）。**实际风险面收窄**：旁路在 `:301` 之前返回即天然满足用量约定；仅当所选渠道正处于半开探针时需显式 `ReleaseChannelHealthProbe`。
 - **CCR 端点 Anthropic 风格 key 会 401，且 §4 漏列 `middleware/auth.go`**：`middleware/auth.go:368-374` 只在 path 含 `/v1/messages` 或 `/v1/models` 时映射 `x-api-key`。
 - **直扣链绕过 token 额度/订阅资金源、余额校验非原子**：`model.DecreaseUserQuota` 不碰 `model.DecreaseTokenQuota`（`service/quota.go:409,444`）与订阅源（`:419-425`）。
 - **额度不足应为 403 + `ErrorCodeInsufficientUserQuota`**（`service/pre_consume_quota.go:39`、`service/billing_session.go:201,219,244`），全仓无 `StatusPaymentRequired`（0 命中）。
@@ -82,7 +82,7 @@
 第 1 轮提出、由本轮定案并写入规划文档：
 
 1. **边车预扣费处置（P0）定案**：采用"复用既有结算链"——旁路通过 `service.SettleBilling(ctx, relayInfo, searchQuota)` 差额结算到搜索实收额，不新增独立直扣；不采用"上移到 `PreConsumeBilling` 之前"（改动面更大）。
-2. **边车走 `Distribute` 定案**：接受前提（该 model 必须可路由），"零配置主线"表述撤回，健康探针与 `addUsedChannel` 抑制成为必需。
+2. **边车走 `Distribute` 定案**：接受前提（该 model 必须可路由），「零配置主线」表述撤回；**（第 2 轮修正）** 健康探针／`addUsedChannel` 的「抑制」降为：早返回避开 `addUsedChannel`（既有约定已覆盖）+ 仅半开探针时显式 Release——第 1 轮「无条件执行」的判断不成立。
 3. **`unmatched_tool_policy` 作用域定案**：1、2 命中而 3 不中时，按已选渠道的 `ConvertClaudeRequest` 是否原样透传分两类——Claude 族（claude/aws/vertex）透传保持现状，其余按策略处理（默认 400）。
 4. **`endpoint` 信任模型定案**：接受"Root 级 egress、不打 SSRF 校验"（与既有渠道 base_url 同级），补偿控制（scheme 限 http/https、拒绝 userinfo、错误不回显上游响应体、`MaskSensitiveInfo`）落为必做项。
 5. **`search_billing.go` 收敛定案**：只作编排层，价格解析/配额换算/结算调用既有共享函数；`ComputeToolCallQuota` 死代码不动，去留归 relaykit 迁移阶段决定。
