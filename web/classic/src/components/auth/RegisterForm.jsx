@@ -69,6 +69,7 @@ import OIDCIcon from '../common/logo/OIDCIcon';
 import LinuxDoIcon from '../common/logo/LinuxDoIcon';
 import WeChatIcon from '../common/logo/WeChatIcon';
 import TelegramLoginButton from '../common/lazy/LazyTelegramLoginButton';
+import TwoFAVerification from './TwoFAVerification';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useTranslation } from 'react-i18next';
@@ -110,6 +111,7 @@ const RegisterForm = () => {
   const [otherRegisterOptionsLoading, setOtherRegisterOptionsLoading] =
     useState(false);
   const [wechatCodeSubmitLoading, setWechatCodeSubmitLoading] = useState(false);
+  const [showTwoFA, setShowTwoFA] = useState(false);
   const [customOAuthLoading, setCustomOAuthLoading] = useState({});
   const [disableButton, setDisableButton] = useState(false);
   const [countdown, setCountdown] = useState(30);
@@ -212,6 +214,11 @@ const RegisterForm = () => {
       );
       const { success, message, data } = res.data;
       if (success) {
+        if (data && data.require_2fa) {
+          setShowTwoFA(true);
+          setShowWeChatLoginModal(false);
+          return;
+        }
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
@@ -297,9 +304,27 @@ const RegisterForm = () => {
     }
   };
 
+  // The server answers a two-factor account with {require_2fa:true} and no
+  // session. Opening the challenge modal keeps the pending session cookie;
+  // once the code verifies, the server issues the session and this handler
+  // dispatches it exactly like a normal login.
+  const handle2FASuccess = (data) => {
+    const postLoginTarget = getPostLoginTarget('/console/token');
+    userDispatch({ type: 'login', payload: data });
+    localStorage.setItem('user', JSON.stringify(data));
+    setUserData(data);
+    updateAPI();
+    showSuccess('登录成功！');
+    navigate(postLoginTarget);
+  };
+
   const handleBrowserOAuthResult = (result) => {
     if (!result?.user) {
       return false;
+    }
+    if (result.user.require_2fa) {
+      setShowTwoFA(true);
+      return true;
     }
 
     const postLoginTarget = getPostLoginTarget('/console/token');
@@ -449,6 +474,10 @@ const RegisterForm = () => {
       const res = await API.get(`/api/oauth/telegram/login`, { params });
       const { success, message, data } = res.data;
       if (success) {
+        if (data && data.require_2fa) {
+          setShowTwoFA(true);
+          return;
+        }
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         showSuccess('登录成功！');
@@ -866,6 +895,20 @@ const RegisterForm = () => {
           ? renderEmailRegisterForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}
+        <Modal
+          title={t('两步验证')}
+          visible={showTwoFA}
+          onCancel={() => setShowTwoFA(false)}
+          footer={null}
+          width={450}
+          centered
+        >
+          <TwoFAVerification
+            onSuccess={handle2FASuccess}
+            onBack={() => setShowTwoFA(false)}
+            isModal={true}
+          />
+        </Modal>
 
         {turnstileEnabled && (
           <div className='flex justify-center mt-6'>
