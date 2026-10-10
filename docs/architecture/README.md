@@ -10,6 +10,8 @@
 | [enterprise-auth-three-phase-plan.md](enterprise-auth-three-phase-plan.md) | 企业统一认证三阶段开发规划 |
 | [channel-routing-priority-weight-concurrency-plan.md](channel-routing-priority-weight-concurrency-plan.md) | 渠道路由优先级、百分比权重与并发容量设计 |
 | [responses-compat-plan.md](responses-compat-plan.md) | Responses 兼容折中方案：reasoning 文本保留与 opaque 状态拒绝边界 |
+| [ai-tools-search-support-plan-v2.md](ai-tools-search-support-plan-v2.md) | AI 工具内置搜索支持：核实结论与实施方案（执行依据，388 行）；含对交接单与初稿的 10 条修正 |
+| [ai-tools-search-support-plan.md](ai-tools-search-support-plan.md) | 上述方案的初稿（1038 行，调研记录，保留备查） |
 | [codex-bridge-interactive-cli-plan.md](codex-bridge-interactive-cli-plan.md) | Codex Bridge 交互式 CLI：模型目录注入与提供方配置 |
 | [protocol-conversion-webui-design.md](protocol-conversion-webui-design.md) | 协议转换 WebUI 完整化设计方案 |
 | [tauri2-desktop-migration-plan.md](tauri2-desktop-migration-plan.md) | Tauri 2 桌面端替换 Electron 迁移规划 |
