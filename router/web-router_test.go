@@ -125,6 +125,39 @@ func TestShouldReturnRelayNotFound(t *testing.T) {
 			requestPath: "//api/status",
 			want:        true,
 		},
+		{
+			// Regression from 0d66b45e7: the raw RequestURI carries the
+			// query string, so a SPA route with a query ending in a static
+			// extension must not be classified as a missing static file.
+			name:        "spa page with image query",
+			requestURI:  "/sign-in?next=a.png",
+			requestPath: "/sign-in",
+			want:        false,
+		},
+		{
+			name:        "spa page with text query",
+			requestURI:  "/login?x=a.txt",
+			requestPath: "/login",
+			want:        false,
+		},
+		{
+			name:        "spa page with encoded redirect query",
+			requestURI:  "/sign-in?redirect=https%3A%2F%2Ffoo.example%2Fa.png",
+			requestPath: "/sign-in",
+			want:        false,
+		},
+		{
+			name:        "root static file keeps cache-busting query",
+			requestURI:  "/logo.png?v=2",
+			requestPath: "/logo.png",
+			want:        true,
+		},
+		{
+			name:        "api path with image query",
+			requestURI:  "/api/status?x=.png",
+			requestPath: "/api/status",
+			want:        true,
+		},
 	}
 
 	for _, tt := range tests {

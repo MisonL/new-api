@@ -86,9 +86,25 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 // contract and misleading status-code-only clients. The union keeps paths
 // such as "/assets/../console" on the branch they already take. Matching
 // stays case-sensitive because routes are.
+//
+// The static-file check runs on the path without the query string: RequestURI
+// carries the query, so classifying the raw URI would read a SPA route such as
+// "/sign-in?next=a.png" as a missing ".png" file and answer 404 JSON. Prefix
+// checks are safe on either form (a query cannot precede the path), but the
+// extension check is not, so both the raw URI and the normalized path are
+// stripped of their query before the static-file test.
 func shouldReturnRelayNotFound(requestURI string, requestPath string) bool {
 	normalizedPath := path.Clean(requestPath)
-	return isRelayNotFoundPath(requestURI) || isRelayNotFoundPath(normalizedPath)
+	return isRelayNotFoundPath(stripQuery(requestURI)) || isRelayNotFoundPath(normalizedPath)
+}
+
+// stripQuery removes the query and fragment from a request URI or path so the
+// static-file extension check sees only the path component.
+func stripQuery(rawPath string) string {
+	if idx := strings.IndexAny(rawPath, "?#"); idx >= 0 {
+		return rawPath[:idx]
+	}
+	return rawPath
 }
 
 // isRelayNotFoundPath reports whether a path or request URI belongs to a
