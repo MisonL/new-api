@@ -94,8 +94,16 @@
 
 第 1 轮的行号偏差与内容错误已在第 1 轮提交中修入，本轮不再重复列出。仍保留为**未验证边界**（§4 下文）：Codex `SearchResponse` 第三字段名与 `results[]` 条目字段名、Kimi 响应 `content`/`icon`/`mime`（客户端不消费、无本地证据）、CCR 与各端点的端到端实测（方案未落地）、omp 边车形态。
 
-## 6. 交付状态
+## 6. 第 3 轮：探针断言更正、结算语义核实、新增限流发现（2026-10-10）
 
-- 两轮均为**只读审查 + 文档修正**，未改动任何生产代码。
-- 第 1 轮提交 `44776b270`：修入确认错误，登记本记录。
-- 第 2 轮：开放项定案 + 残留清理（初稿横幅、ASCII 图、任务对照、非流式错误信封、`enabled` 语义、Codex 第三字段措辞），v2 与本记录一并更新。
+- **更正第 1 轮断言**：`addUsedChannel` 与探针收尾"无条件执行"**不成立**——`controller/relay.go:301` 的 `addUsedChannel` 是显式调用，仓库三处注释明写"未发上游不得进 `use_channel`"（`:934`、`:1058`、`:3700-3702`）；`MarkChannelHealthProbeSuccess` 对 `state.Probe == nil` 直接早退（`service/channel_health_probe_lifecycle.go:63`），探针只在半开路径布防（`service/channel_health.go:1082-1093`）。第 2 轮据此自造的 `ContextKeySkipChannelHealthProbe` 已撤回，改为遵循既有约定（旁路早返回 + 仅半开时 Release）。
+- **核实第 2 轮决策前提**：`SettleBilling` 确为差额结算（`service/billing.go:34-75`，含无 session 时的 `quotaDelta` 回退）；`claude`/`aws`/`vertex` 的 `ConvertClaudeRequest` 确为透传（claude/aws `return request, nil`，vertex `copyRequest`+版本字段），"按渠道是否透传分两类"的判定依据成立。
+- **新增发现（本轮）**：边车会额外消耗**用户级模型请求限流**。`/v1/messages` 所在组在 `Distribute` 之前挂 `middleware.ModelRequestRateLimit()`（`router/relay-router.go:69-73`）；该中间件按用户计数、key 不含 model（`middleware/model-rate-limit.go:85,100,139-140`）；默认关闭（`setting/rate_limit.go:11`），启用后默认 1000 次/分钟（`setting/rate_limit.go:14`），管理员可配（`model/option.go:352`）。已写入 v2 §3.4 前置事实 3。
+- **路由冲突核查（静态，无冲突）**：现有 `/v1` 通配符仅 `POST /models/*path`（`router/relay-router.go:157`）与 `/engines/:model/embeddings`（`:154`），与拟新增的 `POST /v1/alpha/search`、`POST /v1/code/sessions/:id/worker/*` 静态前缀不冲突；但**本仓无法静态验证 gin 是否 panic**（路由在 `main.go` 由多个 Set*Router 拼装），须在阶段 2 首次注册时以真实启动确认。
+
+## 7. 交付状态
+
+- 三轮均为**只读审查 + 文档修正**，未改动任何生产代码。
+- 第 1 轮 `44776b270`：修入确认错误，登记本记录。
+- 第 2 轮 `370f96f86`：开放项定案 + 残留清理（初稿横幅、ASCII 图、任务对照、非流式错误信封、`enabled` 语义）。
+- 第 3 轮 `24218af87` 及本次：更正探针断言、核实结算与透传前提、新增模型限流发现、路由冲突静态核查。
