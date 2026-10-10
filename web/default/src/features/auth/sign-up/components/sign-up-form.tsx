@@ -58,7 +58,7 @@ export function SignUpForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
-  const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
+  const { redirectToLogin, handleLoginSuccess, redirectTo2FA } = useAuthRedirect()
   const {
     isSending: isSendingCode,
     secondsLeft,
@@ -185,6 +185,11 @@ export function SignUpForm({
     try {
       const res = await wechatLoginByCode(wechatCode)
       if (res?.success) {
+        if ((res.data as { require_2fa?: boolean } | null)?.require_2fa) {
+          redirectTo2FA()
+          handleWeChatDialogChange(false)
+          return
+        }
         await handleLoginSuccess(res.data as { id?: number } | null)
         toast.success(t('Signed in via WeChat'))
         handleWeChatDialogChange(false)
