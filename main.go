@@ -221,6 +221,9 @@ func main() {
 		SameSite: http.SameSiteStrictMode,
 	})
 	server.Use(sessions.Sessions("session", store))
+	// Mark the session cookie Secure on TLS requests (direct or via a proxy's
+	// X-Forwarded-Proto) without breaking plain-HTTP deployments.
+	server.Use(middleware.SecureSessionCookie())
 
 	InjectUmamiAnalytics()
 	InjectGoogleAnalytics()
