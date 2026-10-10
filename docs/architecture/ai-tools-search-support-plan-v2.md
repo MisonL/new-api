@@ -4,7 +4,7 @@
 >
 > **核实方式**：4 路并行只读调研（上游 `/v1/alpha/search` 实现、路由/SSRF/配置落点、Claude Code 二进制契约、Responses hosted 搜索与 Anthropic 官方约束），每条结论由本人用 `git show`/`git grep`/二进制偏移/容器实测独立复现后才采信。标注分三档：**已验证**（本轮实跑）、**引用**（前序实测，本轮未复现）、**未覆盖**。
 >
-> **复核轮（2026-10-10，第 1 轮全场景全维度审查）**：6 路并行只读审计（代码事实、协议契约、集成点、计费、安全、一致性），主代理逐条独立复现后采信，发现的错误已就地修入本文件（C2 的"14 条"、C3 的 UTF-16 与偏移、C4 的"8 个"、Codex `commands` 形状、Kimi 请求体、预扣费/探针副作用、402→403、`billing_tool_name` 校验等）。审计过程与被推翻的子代理结论沉淀在 `docs/reviews/CR-AI-TOOLS-SEARCH-PLAN-REVIEW-2026-10-10.md`。**子代理结论一律先复现再采信**：本轮 3 条被推翻或下调。
+> **复核轮（2026-10-10，全场景全维度审查，两轮）**：第 1 轮 6 路并行只读审计（代码事实、协议契约、集成点、计费、安全、一致性）+ 主代理逐条独立复现，发现的错误已就地修入本文件（C2 的"14 条"、C3 的 UTF-16 与偏移、C4 的"8 个"、Codex `commands` 形状、Kimi 请求体、预扣费/探针副作用、402→403、`billing_tool_name` 校验等）。第 2 轮把审查提出的开放项**定案**：边车预扣费处置、边车走 Distribute、`unmatched_tool_policy` 作用域、`endpoint` 信任模型、`search_billing.go` 收敛、`enabled` 组合语义、非流式错误信封；并给初稿补"已被取代"横幅、把 v2 的架构图改为纯 ASCII、补任务编号对照。审计过程与被推翻的子代理结论沉淀在 `docs/reviews/CR-AI-TOOLS-SEARCH-PLAN-REVIEW-2026-10-10.md`。**子代理结论一律先复现再采信**：本轮 3 条被推翻或下调。
 
 **目标**：让 Claude Code、Codex、Kimi、Grok、omp、dsh 等 AI 工具的内置联网搜索经本网关（new-api）正常工作，并纳入既有工具按次计费体系。
 
@@ -86,27 +86,27 @@
 
 ```
 AI 工具客户端
-  Claude Code ──┬─ 默认: /v1/messages 边车(web_search_20250305)   → 通道 B 本地仿真
-                └─ CCR : /v1/code/sessions/{id}/worker/web-search|fetch → 通道 A 显式端点
-  Codex       ──── /v1/alpha/search (standalone)                → 通道 A 显式端点
-  Kimi        ──── /coding/v1/search | /coding/v1/fetch         → 通道 A 显式端点
-  Grok/Codex  ──── /v1/responses hosted web_search              → 通道 C 透传(本次不改)
-  omp         ──── TAVILY 直连(不经网关) 或 边车                 → 不涉及 / 通道 B
-  dsh         ──── 待断链修复                                     → 未覆盖
+  Claude Code   默认: /v1/messages 边车(web_search_20250305)   -> 通道 B 本地仿真
+                CCR : /v1/code/sessions/{id}/worker/web-search|fetch -> 通道 A 显式端点
+  Codex         /v1/alpha/search (standalone)                 -> 通道 A 显式端点
+  Kimi          /coding/v1/search | /coding/v1/fetch          -> 通道 A 显式端点
+  Grok/Codex    /v1/responses hosted web_search               -> 通道 C 透传(本次不改)
+  omp           TAVILY 直连(不经网关) 或 边车                   -> 不涉及 / 通道 B
+  dsh           待断链修复                                     -> 未覆盖
 
-        ┌───────────────────────┬────────────────────────┐
-        │ 通道 A 显式 JSON 端点  │ 通道 B 边车仿真          │
-        │ controller/search_*    │ relay/claude_search_*   │
-        │ · TokenAuth + 限流     │ · 识别 Claude 边车请求   │
-        │ · 按次计费             │ · 本地执行搜索，不调上游模型│
-        │ · SSRF 复用(仅 fetch)  │ · 回吐 Anthropic SSE     │
-        └───────────┬───────────┴───────────┬────────────┘
-                    │                       │
-             service/search（新增）          │
-             · Provider 接口(Search/Fetch)  │
-             · SearxngProvider(首个实现)     │
-                    │                       │
-              SearXNG（自建，无 key）────────┘
+  +-----------------------------+-------------------------------+
+  | 通道 A 显式 JSON 端点        | 通道 B 边车仿真                |
+  | controller/search_*          | relay/claude_search_*          |
+  | - TokenAuth + 限流           | - 识别 Claude 边车请求         |
+  | - 按次计费                   | - 本地执行搜索，不调上游模型    |
+  | - SSRF 复用(仅 fetch)        | - 回吐 Anthropic SSE           |
+  +--------------+--------------+---------------+---------------+
+                 |                              |
+          service/search（新增）                 |
+          - Provider 接口(Search/Fetch)          |
+          - SearxngProvider(首个实现)            |
+                 |                              |
+          SearXNG（自建，无 key）----------------+
 
   通道 C：真 Claude 渠道 / OpenAI Responses hosted —— 保持现状透传，本方案不改
 ```
@@ -167,12 +167,12 @@ type Provider interface {
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `enabled` | bool | false | 总开关 |
+| `enabled` | bool | false | 总开关；**本轮定案：`enabled=false` 时全部 `enable_*` 分开关失效（总开关优先，非求与）** |
 | `provider` | string | `"searxng"` | 后端标识；未知值 = 配置错误，请求时显式失败 |
 | `endpoint` | string | `""` | SearXNG 基地址，如 `http://127.0.0.1:8888` |
 | `credential_env` | string | `""` | 需 key 的后端（Tavily 等）的**环境变量名**。**不存 key 本身** |
 | `timeout_ms` | int | 8000 | 单次超时，校验 500-60000 |
-| `max_results` | int | 8 | 结果上限，校验 1-20（Kimi 协议上限 20） |
+| `max_results` | int | 8 | 结果上限，校验 1-20；**上限 20 为配置侧约束，非客户端契约**（本机 Kimi 客户端不发 `limit`，见 §1.2） |
 | `language` | string | `""` | 传给后端的语言偏好 |
 | `allow_fetch` | bool | false | 是否开放 fetch 端点（抓任意 URL 风险更高，默认关） |
 | `enable_coding_endpoints` | bool | false | `/coding/v1/*` 开关 |
@@ -239,17 +239,17 @@ POST /v1/code/sessions/{id}/worker/web-fetch
 2. `tool_choice` 反序列化后 `Type == "tool"` 且 `Name` 等于该工具 `name`；
 3. `len(Messages) == 1`、`Role == "user"`、正文以 `Perform a web search for the query:` 开头（用于提取 query）。
 
-三条全中 → 本地应答。**1、2 命中而 3 不中**（客户端换措辞）：**不回退到上游**（禁止静默降级），按 `unmatched_tool_policy` 处理（默认 400，文案注明"内置搜索工具只支持边车形态"）。**不依赖 system 提示词**（C3：该串随版本漂移）。
+三条全中 → 本地应答。**1、2 命中而 3 不中**（客户端换措辞）：按目标渠道分两类——**目标渠道支持 `web_search_20250305`（Claude 原生 / AWS Bedrock / Vertex）时原样透传**（上游本就能执行该工具，属基线行为、非静默降级）；**其余渠道**按 `unmatched_tool_policy` 处理（默认 400，文案注明"内置搜索工具只支持边车形态"）。**不依赖 system 提示词**（C3：该串随版本漂移）。
 
 **拦截位置**：`relay/claude_handler.go` 的 `ClaudeHelper` 开头，早于 `:131` 的 Responses 分支与 `:158` 的 `adaptor.ConvertClaudeRequest`。仅当 `enable_anthropic_sidecar` 开启且识别命中时旁路；否则完全走原路径。
 
 **拦截位置的三个前置事实（本轮复核新增，不处理会产生错账或副作用）**：
 
 1. **预扣费已发生**：`controller/relay.go:290-296` 在 `ClaudeHelper`（`:306`）之前已执行 `service.PreConsumeBilling`；退款 defer 仅在 `newAPIError != nil`（`:228-238`）触发；循环结束无补结算。旁路若按 §3.5 直扣后 `return nil`，**既不 settle 也不 refund，每次边车搜索泄漏一整笔模型预扣额度**（同型事故：仓库已有 realtime WS "预扣+直扣+终态结算 = 约 2 倍"的记录）。
-2. **边车仍走 `Distribute`**：`/v1/messages` 组挂 `Distribute`（`router/relay-router.go:94-98`），无匹配渠道在 `getChannel` 就 404——**"零配置主线"不成立，该 model 必须可路由**。
+2. **边车仍走 `Distribute`（本轮定案：接受此前提）**：`/v1/messages` 组挂 `Distribute`（`router/relay-router.go:94-98`），无匹配渠道在 `getChannel` 就 404——**该 model 必须可路由**，文档不再宣称"零配置主线"；这也使前置事实 3 的探针抑制成为必需。
 3. **副作用污染渠道探针**：`controller/relay.go:178-180` 的 `finalizeRelayChannelHealthProbe(c, relayInfo, newAPIError==nil)` 与 `:301` 的 `addUsedChannel` 无条件执行；旁路成功会把**从未被请求的渠道**记为健康探针成功与已用渠道。
 
-**处置要求**：旁路必须通过 `service.SettleBilling(ctx, relayInfo, searchQuota)` 把预扣费结算到搜索实收额（或先 Refund 再按搜索扣，二者只能其一），并以上下文标记抑制健康探针与 `addUsedChannel`；或者把边车识别上移到 `PreConsumeBilling` 之前作为独立入口，彻底避开模型预扣与 Distribute 链路。**实现前必须二选一并在阶段 3 验收断言"无残留预扣、无多余渠道探针记录"。**
+**处置决定（本轮定案）**：采用"复用既有结算链"方案——边车旁路通过 `service.SettleBilling(ctx, relayInfo, searchQuota)` 把已预扣的模型额度**差额结算**到搜索实收额（`relayInfo.Billing`），不新增独立直扣；同时以上下文标记（如 `ContextKeySkipChannelHealthProbe`）抑制 `finalizeRelayChannelHealthProbe` 与 `addUsedChannel`。不采用"上移到 `PreConsumeBilling` 之前"方案（那会改动 `controller/relay.go` 主流程，改动面更大）。**阶段 3 验收断言：边车请求结束后余额无残留、无针对未被请求渠道的探针成功/用量记录。**
 
 **流式响应**（`text/event-stream`，逐事件 `Flush()`）：
 
@@ -281,7 +281,7 @@ data: {"type":"message_stop"}
 
 关键约束：`server_tool_use.id` 与 `web_search_tool_result.tool_use_id` 必须一致（客户端用 tool_use_id 反查 query）；index 从 0 递增；每事件形如 `event: <type>\ndata: <单行JSON>\n\n`；**`input_json_delta.partial_json` 必须含字面键 `"query"`**（客户端用正则 `"query"\s*:\s*"..."` 抠查询，不可写成 `q`）；`web_search_result` 建议带上可选 `snippet`（客户端在 `CLAUDE_CODE_WEBSEARCH_CITATIONS` 开启时读取）；`message_delta` 的 usage 语义为累积值；**不产出 `encrypted_content`**（本单轮消费路径不需要；官方要求它只为多轮回传上游）。
 
-**非流式**：`stream != true` 时返回等价单条 JSON message（同内容的 `content` 数组）。
+**非流式**：`stream != true` 时返回等价单条 JSON message（同内容的 `content` 数组）。**失败时返回 Anthropic 标准错误信封** `{"type":"error","error":{"type":"api_error","message":"..."}}`（HTTP 502），与非流式成功形态同为一层，不得返回空 `content` 冒充成功。**边界**：本机客户端确实支持 `type=="assistant"` 非流式响应，但网关侧该分支未经真实客户端验证（见 §6.9）。
 
 **失败语义**：搜索后端失败时，流式返回一个 `event: error` 帧后停止，绝不返回空结果的"成功"。**错误帧必须含非空 message**（仓库既有教训：空错误帧会中止健康流）。
 
@@ -309,7 +309,7 @@ groupRatio   = 复用 relay/helper/price.go HandleGroupRatio 的结果（relayIn
 
 - **fetch 端点必须复用既有 SSRF 框架**：用户传入的 URL 走 `common.ValidateURLWithFetchSetting`（`common/ssrf_protection.go:522`）+ `common.WithSSRFValidation`，范式照 `service/download.go:63-72`。**必须用 `service.GetHttpClient()`**（唯一带 `ssrfGuardedTransport` + `pinValidatedIPs` 的客户端；`withSSRFProtectionTransport`、`checkRedirect*` 均为 `service` 包私有，新建 `service/search` 子包若自建 client 会静默失去全部防护），且**父 context 取 `c.Request.Context()` 再 `WithTimeout(timeout_ms)`**——`RELAY_TIMEOUT` 默认 0（`common/init.go:120`）时 `GetHttpClient()` 无客户端超时，照抄 `download.go` 的 `context.Background()` 会让 fetch 永不超时。
 - **重定向上限沿用框架的 10 次**（`service/http_client.go:346,366`，非 5）。逐跳校验由 transport（`:115-155`）与 `CheckRedirect`（`:344-370`）双层承担，但**未标记 `WithSSRFValidation` 时 `CheckRedirect` 不校验目标**（`:345-350`）——自定义 `CheckRedirect` 只应做计数，不得替换 SSRF 校验。`fetch_setting.EnableSSRFProtection == false` 时 fetch 端点应直接拒绝（fail-closed）。
-- **搜索后端 base_url 属可信配置**（管理员填），**不打** `WithSSRFValidation`——否则内网部署会被默认端口白名单/私网拦截打死（`service/http_client.go:107-109`、`common/ssrf_protection.go:27-29` 同款理由）。但须限定 scheme 为 http/https（拒绝 userinfo），且**上游响应体绝不进入客户端可见错误信息**（`endpoint` 由 Root 配置、任意 token 触发，等同 Root 级 egress 权限）。
+- **搜索后端 base_url 属可信配置**（管理员填），**不打** `WithSSRFValidation`——否则内网部署会被默认端口白名单/私网拦截打死（`service/http_client.go:107-109`、`common/ssrf_protection.go:27-29` 同款理由）。**本轮定案：接受该信任模型（与既有渠道 base_url 同级），落实补偿控制**——scheme 限 http/https 且拒绝 userinfo；**上游响应体绝不进入客户端可见错误信息**（`endpoint` 由 Root 配置、任意 token 触发，等同 Root 级 egress 权限）；错误与日志经 `common.MaskSensitiveInfo`。
 - 抓取响应长度上限 1MB、超时复用 `timeout_ms`、仅接受 `text/html` 与 `text/plain`（其余 415，检查须在读 body 之前）；**长度上限用 `common.ReadAllWithLimit`（超限报错）而非 `io.LimitReader`（静默截断）**。搜索后端响应体也须加同一上限（文档原只给 fetch 设限）。
 - 密钥：`credential_env` 只存环境变量名、密钥值不落库（变量名本身会随配置落库，非敏感）；日志与错误信息不得回显 key，`RecordConsumeLog` 的 `Other` 记 provider 名而非完整 endpoint。
 - 限流：`SearchRateLimit()`（默认 10 次/60 秒/用户；**仅会话管理员在 `GLOBAL_RATE_LIMIT_ADMIN_EXEMPT=true` 时豁免，token 型管理员不豁免**，`middleware/rate-limit.go:81-101`）。
@@ -324,13 +324,15 @@ groupRatio   = 复用 relay/helper/price.go HandleGroupRatio 的结果（relayIn
 ### 3.8 与上游 #7690、relaykit 迁移的关系
 
 - 本方案是"网关自建搜索"，#7690 是"厂商搜索参数编码与计费"，互补不冲突。**不吸收 #7690 的 relaykit 侧实现**（本 fork 无 relaykit）。
-- 计费调用集中在 `service/search_billing.go` 一个文件，迁移时只改该文件。**但它必须复用既有价格解析/舍入/结算函数，不得成为第四套并存公式**（本仓工具计费已分散在 `service/text_quota.go:106-174` 与 `service/tool_billing.go:39-82`——后者全仓无调用点，属死代码）。
+- 计费调用集中在 `service/search_billing.go` 一个文件，迁移时只改该文件。**本轮定案：它只是编排层——价格解析、配额换算与结算必须调用既有共享函数，不得自建第四套公式**（本仓工具计费已分散在 `service/text_quota.go:106-174` 与 `service/tool_billing.go:39-82`）。`ComputeToolCallQuota`（`service/tool_billing.go:39`）全仓无调用点、属死代码，**本方案不改动它**（去留在 relaykit 迁移阶段另行决定）。
 - **不改 `service/convert.go` 主体**（本方案对该文件零改动）。任务 8 的错误文案包装落在 `relay/claude_handler.go` 的错误返回点（与初稿任务 8 一致）。若冲突，退路是"策略分支移到 `claude_handler.go` 的调用点"。
 - **relaykit 迁移热区声明**：除 `service/convert.go` 主体与 `relay/common/` 协议转换件外，`relay/claude_handler.go`（`:55-104` 思考等级渲染被上游替换）与 `relay/channel/claude/relay-claude.go`（阶段 6 删除/降为 facade 的 9 个通道级转换器）**也在迁移改动面内**。本方案只碰两处函数——边车识别在 `ClaudeHelper` 开头（`relay/claude_handler.go:24`）、流式计数在 `HandleClaudeResponseData`（`relay-claude.go:1379` 所在函数），与迁移目标函数不重叠；改动须保持为可机械重放的调用点级补丁。
 
 ---
 
 ## 4. 文件结构与改动面
+
+> **任务编号对照**：下文与 §3.8、§5 出现的"任务 N"沿用初稿 `ai-tools-search-support-plan.md` 的任务分解编号。对照：任务 8 = 流式搜索计数补齐（`relay/channel/claude/server_tool_usage.go` + `relay/claude_handler.go` 错误文案包装）；任务 9 = 前端设置页与 i18n（`search-settings.tsx` + `section-registry.tsx` + `types.ts` + locale）；任务 10 = SearXNG 编排与配置（`deploy/compose` 下的 search 编排 + `settings.yml` 挂载）。
 
 新增：
 
@@ -398,7 +400,7 @@ web/default/src/lib/types.ts + i18n locale   新配置项类型与文案（见�
 ## 6. 未覆盖与待实测（不得当作已解决）
 
 1. **CCR 端点契约未端到端验证**：schema 来自二进制 zod 定义（C9），未用真实 Claude Code + CCR 开关实测。阶段 2 验收须抓包校正。
-2. **Codex `/v1/alpha/search` 请求/响应字段**：`commands` 为按命令名索引的对象、`search_query` 字段为 `q`、单次上限 4——已由本机 codex 二进制确证；但**响应 `results[]` 的条目字段名（`snippet`）未确证**，且上游 dto 不定义该结构。阶段 2 验收须用真实 codex 抓包校正。
+2. **Codex `/v1/alpha/search` 请求/响应字段**：`commands` 为按命令名索引的对象、`search_query` 字段为 `q`、单次上限 4——已由本机 codex 二进制确证；`SearchResponse` 确为 **3 字段**（`output`、`results` 已确证，第三字段名未解析），但**响应 `results[]` 的条目字段名（`snippet`）未确证**（二进制中无该响应结构的独立字段名，不能由邻接字符串臆断），上游 dto 也不定义该结构。阶段 2 验收须用真实 codex 抓包校正。
 3. **Kimi 协议**：请求体（`{text_query}` / `{url}`）与"状态码须恰好 200"已由本机 kimi 二进制确证；但未端到端实测（api_key 已换，会 401）。
 4. **`use_responses_lite` 跳过 hosted 工具**：属客户端行为，本仓源码查无实现（C10），**网关侧不做判定**。
 5. **Kimi fetch 对 200 不校验 Content-Type**：**已由二进制证实**（客户端直接 `response.text()`，不读 Content-Type）。

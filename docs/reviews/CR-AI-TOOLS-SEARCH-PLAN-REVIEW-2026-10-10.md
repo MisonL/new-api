@@ -77,7 +77,25 @@
 - 生产容器构建号与 C6 的 326 个断链未复跑。
 - 各端点未起服务端到端跑通（方案尚未落地）。
 
-## 5. 交付状态
+## 5. 第 2 轮：开放项定案与残留清理（2026-10-10）
 
-- 本轮为**只读审查 + 文档修正**，未改动任何生产代码。
-- 规划文档 `docs/architecture/ai-tools-search-support-plan-v2.md` 已就地修入确认的错误（C2/C3/C4/C6、Codex 与 Kimi 契约、预扣费/探针、403、`billing_tool_name`、热区声明等），并在头部登记本轮复核。
+第 1 轮提出、由本轮定案并写入规划文档：
+
+1. **边车预扣费处置（P0）定案**：采用"复用既有结算链"——旁路通过 `service.SettleBilling(ctx, relayInfo, searchQuota)` 差额结算到搜索实收额，不新增独立直扣；不采用"上移到 `PreConsumeBilling` 之前"（改动面更大）。
+2. **边车走 `Distribute` 定案**：接受前提（该 model 必须可路由），"零配置主线"表述撤回，健康探针与 `addUsedChannel` 抑制成为必需。
+3. **`unmatched_tool_policy` 作用域定案**：1、2 命中而 3 不中时，按已选渠道的 `ConvertClaudeRequest` 是否原样透传分两类——Claude 族（claude/aws/vertex）透传保持现状，其余按策略处理（默认 400）。
+4. **`endpoint` 信任模型定案**：接受"Root 级 egress、不打 SSRF 校验"（与既有渠道 base_url 同级），补偿控制（scheme 限 http/https、拒绝 userinfo、错误不回显上游响应体、`MaskSensitiveInfo`）落为必做项。
+5. **`search_billing.go` 收敛定案**：只作编排层，价格解析/配额换算/结算调用既有共享函数；`ComputeToolCallQuota` 死代码不动，去留归 relaykit 迁移阶段决定。
+6. **`enabled` 组合语义定案**：总开关优先，`enabled=false` 使全部 `enable_*` 分开关失效。
+7. **非流式边车错误信封定案**：失败返回 Anthropic 标准错误信封 `{"type":"error","error":{...}}`（HTTP 502），并把"未经真实客户端验证"写进 §6.9。
+8. **初稿已加"已被取代"横幅**：`ai-tools-search-support-plan.md` 头部明确"不得据其实现，执行以 v2 为准"，消除与 v2 定位声明的矛盾。
+9. **v2 架构图改纯 ASCII**：原 `─┬│└` 箱线字符（AGENTS §3 装饰性 Unicode 严格读法）改为 `+-|` 框线；`→` 箭头保留——实测 `docs/` 下 186 个已提交文件中 22 个含 `→`，属仓库通行写法，非"装饰性符号"。
+10. **任务编号对照表**：v2 §4 头部补初稿任务 8/9/10 与本文件的映射，"执行依据"自此自足。
+
+第 1 轮的行号偏差与内容错误已在第 1 轮提交中修入，本轮不再重复列出。仍保留为**未验证边界**（§4 下文）：Codex `SearchResponse` 第三字段名与 `results[]` 条目字段名、Kimi 响应 `content`/`icon`/`mime`（客户端不消费、无本地证据）、CCR 与各端点的端到端实测（方案未落地）、omp 边车形态。
+
+## 6. 交付状态
+
+- 两轮均为**只读审查 + 文档修正**，未改动任何生产代码。
+- 第 1 轮提交 `44776b270`：修入确认错误，登记本记录。
+- 第 2 轮：开放项定案 + 残留清理（初稿横幅、ASCII 图、任务对照、非流式错误信封、`enabled` 语义、Codex 第三字段措辞），v2 与本记录一并更新。

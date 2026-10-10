@@ -1,5 +1,7 @@
 # AI 工具内置搜索支持：架构设计与实施方案
 
+> **已被取代（2026-10-10）**：本文件已被 `ai-tools-search-support-plan-v2.md` 取代，后者是核实修正版并修正了本文件的多处错误结论（含 Codex `commands` 形状、`parseClaudeToolsForOpenAI` 行号、边车 system 提示词、渠道拒绝数量等）。**本文件仅作为调研记录保留，不得据其实现**；执行时以 v2 为准，本文件的"任务分解"编号被 v2 引用。
+
 > **面向执行者**：本文件是可执行计划。按「任务分解」逐条推进，每个任务独立提交、独立验收、可独立回滚。第 1-3 节内联了全部已核实的现状事实与外部协议结论，实现时直接引用，无需回查外部资料。
 >
 > **执行方式**：本文件落盘在 `docs/architecture/`（仓库架构方案目录，与 `enterprise-auth-three-phase-plan.md`、`codex-bridge-interactive-cli-plan.md` 同级）。
