@@ -58,6 +58,7 @@
 | [CR-CODEX-PARALLEL-REAL-CHANNELS-2026-09-08.md](CR-CODEX-PARALLEL-REAL-CHANNELS-2026-09-08.md) | 真实渠道并行验证 |
 | [CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md](CR-RELAYKIT-MIGRATION-DESIGN-2026-09-30.md) | 协议转换层收敛到上游 relaykit 的设计与十一轮对抗审查；确认上游已完成同一迁移（172 宿主文件 import `relaykit/types`、类型别名做到零调用点变更、`toolconv/` 覆盖 10 种 hosted 工具）；撤回"按客户端意图门控 reasoning 暴露"；记录 15 条主代理自身被推翻的错误断言（含存活四稿的"`dac55f0f` 非共同祖先"）；设计文档在 `docs/superpowers/specs/2026-09-30-relaykit-migration-design.md`，未改生产代码 |
 | [CR-AI-TOOLS-SEARCH-PLAN-2026-10-10.md](CR-AI-TOOLS-SEARCH-PLAN-2026-10-10.md) | Claude Code / Codex / Kimi / Grok / omp / dsh 内置联网搜索支持的调研与核实；4 路并行只读调研 + 主代理逐条独立复现，对交接单与前序初稿给出 10 条修正（C1-C10），含"上游 `/v1/alpha/search` 是纯渠道透传而非自带搜索后端"与"dsh 326 个断链成立"；交付 `docs/architecture/ai-tools-search-support-plan-v2.md`，未改生产代码 |
+| [CR-AI-TOOLS-SEARCH-PLAN-REVIEW-2026-10-10.md](CR-AI-TOOLS-SEARCH-PLAN-REVIEW-2026-10-10.md) | 对内置搜索规划 v2 的 6 路并行只读审计（代码事实/协议契约/集成/计费/安全/一致性）+ 主代理逐条独立复现；确认 Codex `/v1/alpha/search` 的 `commands` 为按命令名索引的对象（非 `[{type,query}]`）、Kimi 请求体仅 `{text_query}`、边车旁路与 relay 预扣费/BillingSession 冲突、额度不足应 403 非 402 等；推翻 3 条子代理结论（含最高严重度那条）；发现的错误已就地修入规划文档，未改生产代码 |
 
 ### 渠道与路由
 
