@@ -133,7 +133,7 @@ export function UserAuthForm({
 
       if (res.success) {
         if (res.data?.require_2fa) {
-          redirectTo2FA()
+          redirectTo2FA(redirectTo)
           return
         }
 
@@ -175,7 +175,7 @@ export function UserAuthForm({
       const res = await wechatLoginByCode(wechatCode)
       if (res?.success) {
         if ((res.data as { require_2fa?: boolean } | null)?.require_2fa) {
-          redirectTo2FA()
+          redirectTo2FA(redirectTo)
           handleWeChatDialogChange(false)
           return
         }
@@ -242,7 +242,7 @@ export function UserAuthForm({
         throw new Error(t('Missing user data from Passkey login response'))
       }
       if ((finish.data as { require_2fa?: boolean }).require_2fa) {
-        redirectTo2FA()
+        redirectTo2FA(redirectTo)
         return
       }
 

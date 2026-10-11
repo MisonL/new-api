@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { getRouteApi } from '@tanstack/react-router'
 import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -42,13 +43,16 @@ import type { User } from '@/features/users/types'
 
 type OtpFormProps = React.HTMLAttributes<HTMLFormElement>
 
+const otpRoute = getRouteApi('/(auth)/otp')
+
 export function OtpForm({ className, ...props }: OtpFormProps) {
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
   const [useBackupCode, setUseBackupCode] = useState(false)
 
   const { auth } = useAuthStore()
-  const { redirectToLogin } = useAuthRedirect()
+  const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
+  const { redirect: redirectTarget } = otpRoute.useSearch()
 
   const form = useForm<z.infer<typeof otpFormSchema>>({
     resolver: zodResolver(otpFormSchema),
@@ -97,7 +101,11 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
       }
 
       toast.success(t('Signed in'))
-      redirectToLogin() // This will redirect to dashboard via the redirect logic
+      // The session is issued, so go straight to the destination. Bouncing
+      // through /sign-in only worked because that route redirects an
+      // authenticated user onward; doing it directly also keeps the original
+      // target when the 2FA step was reached from a deep link.
+      handleLoginSuccess(userData as User, redirectTarget)
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('2FA verification error:', error)
