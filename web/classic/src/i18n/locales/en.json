@@ -4634,7 +4634,7 @@
     "路由恢复失败": "Route Recovery Failed",
     "路由权重已保存": "Routing scope weights saved",
     "路由权重总和必须为 100%": "Route weights must sum to 100%",
-    "路由结果": "",
+    "路由结果": "Routing result",
     "路由范围：{{group}} / {{model}}": "Routing scope: {{group}} / {{model}}",
     "路由选择": "Route Selection",
     "跳转": "Jump",
