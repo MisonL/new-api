@@ -80,6 +80,10 @@ export default defineConfig({
       'width',
       'aria-hidden',
     ],
+    // i18next-cli 默认只识别 t(...) 与 *.t(...)。CodexUsageModal.jsx 用 tt 作为 t 的
+    // 防御性别名（const tt = typeof t === 'function' ? t : (v) => v），未列入默认集合，
+    // 导致该弹窗的 22 个键从未被提取、七个语言全部缺翻译。
+    functions: ['t', '*.t', 'tt'],
     sort: true,
     disablePlurals: false,
     removeUnusedKeys: false,
