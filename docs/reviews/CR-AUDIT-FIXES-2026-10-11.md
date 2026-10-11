@@ -41,6 +41,19 @@
 转发 `X-Forwarded-Proto: https` 时，把该请求写出的会话 Cookie 标记 Secure；纯 HTTP 部署保持
 原状。新增 `middleware/secure_session_cookie.go` 与 5 条子用例。
 
+后续提交 `4a828a284` 把会话 Cookie 选项抽成 `middleware.SessionCookieOptions(secure)`，
+`main.go` 的 store 默认值与按请求覆盖共用同一来源，避免两处选项漂移。
+
+### 5. 2FA 验证后绕经登录页、深链目标丢失（P3）
+
+提交 `6d3343956`。`OtpForm` 验证码通过后调用 `redirectToLogin()`（跳 `/sign-in`），注释却写
+「redirect to dashboard」；只因 `/sign-in` 的 `beforeLoad` 对已登录用户再跳一次才显得可用。
+且 `/otp` 不携带 `redirect` 参数，深链登录走到 2FA 后原目标丢失。
+
+修复：`redirectTo2FA` 接受可选目标并写入 `/otp` 的 `search.redirect`，`/otp` 路由补
+`validateSearch`；`OtpForm` 成功后直接 `handleLoginSuccess(user, redirectTarget)`；
+sign-in 表单三处 2FA 出口传入已有的 `redirectTo`。
+
 ## 已修复但保留在工作区未提交
 
 以下两处修复已完成并通过验证，但目标文件与其他会话的在途改动交错在同一文件，无法在不带走他人
