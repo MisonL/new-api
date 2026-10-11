@@ -4517,7 +4517,7 @@
     "路由恢复失败": "Échec de récupération du routage",
     "路由权重已保存": "Poids du scope de routage enregistrés",
     "路由权重总和必须为 100%": "La somme des poids doit être de 100 %",
-    "路由结果": "",
+    "路由结果": "Résultat du routage",
     "路由范围：{{group}} / {{model}}": "Portée de routage : {{group}} / {{model}}",
     "路由选择": "Sélection de route",
     "跳转": "Sauter",

@@ -4889,7 +4889,7 @@
     "路由恢复失败": "Khôi phục định tuyến thất bại",
     "路由权重已保存": "Đã lưu trọng số scope định tuyến",
     "路由权重总和必须为 100%": "Tổng trọng số định tuyến phải bằng 100%",
-    "路由结果": "",
+    "路由结果": "Kết quả định tuyến",
     "路由范围：{{group}} / {{model}}": "Phạm vi định tuyến: {{group}} / {{model}}",
     "路由选择": "Chọn tuyến",
     "跳转": "Nhảy",
