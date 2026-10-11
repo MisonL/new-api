@@ -47,6 +47,13 @@ i18n
     },
     fallbackLng: 'zh-CN',
     nsSeparator: false,
+    // An empty translation means "not translated yet", not "render nothing".
+    // By default i18next only falls back to fallbackLng when the key is
+    // absent, so a key present with value "" resolves to an empty string and
+    // the UI renders a blank label, button or aria-label. i18next-cli extract
+    // writes exactly such empty entries for every missing key, so without this
+    // the blank values spread on each extraction.
+    returnEmptyString: false,
     interpolation: {
       escapeValue: false,
     },
