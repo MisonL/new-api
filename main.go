@@ -213,13 +213,7 @@ func main() {
 	middleware.SetUpLogger(server)
 	// Initialize session store
 	store := cookie.NewStore([]byte(common.SessionSecret))
-	store.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   2592000, // 30 days
-		HttpOnly: true,
-		Secure:   false,
-		SameSite: http.SameSiteStrictMode,
-	})
+	store.Options(middleware.SessionCookieOptions(false))
 	server.Use(sessions.Sessions("session", store))
 	// Mark the session cookie Secure on TLS requests (direct or via a proxy's
 	// X-Forwarded-Proto) without breaking plain-HTTP deployments.

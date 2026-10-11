@@ -8,6 +8,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// SessionCookieOptions is the one definition of the session cookie's options.
+// The store in main.go and the per-request override below both derive from it,
+// so the two cannot drift: a change to Path, MaxAge, HttpOnly, or SameSite made
+// in one place would otherwise silently stop applying on TLS requests.
+func SessionCookieOptions(secure bool) sessions.Options {
+	return sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000, // 30 days
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+	}
+}
+
 // SecureSessionCookie marks the session cookie Secure on requests that arrived
 // over TLS, so a browser never returns the login session over a plaintext
 // connection. It runs per request because the flag depends on the request's own
@@ -22,16 +36,7 @@ func SecureSessionCookie() gin.HandlerFunc {
 		if requestIsHTTPS(c) {
 			session := sessions.Default(c)
 			if session != nil {
-				// The interface exposes only a setter, so the whole option set
-				// is restated. Keep it in step with the store defaults in
-				// main.go: Path/MaxAge/HttpOnly/SameSite, plus Secure here.
-				session.Options(sessions.Options{
-					Path:     "/",
-					MaxAge:   2592000, // 30 days
-					HttpOnly: true,
-					Secure:   true,
-					SameSite: http.SameSiteStrictMode,
-				})
+				session.Options(SessionCookieOptions(true))
 			}
 		}
 		c.Next()
