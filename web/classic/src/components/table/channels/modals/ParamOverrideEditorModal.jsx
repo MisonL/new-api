@@ -237,8 +237,8 @@ const getModeToLabel = (mode) => {
   return '目标字段';
 };
 
-const getModeToPlaceholder = (mode) => {
-  if (mode === 'replace') return '（可留空）';
+const getModeToPlaceholder = (mode, t) => {
+  if (mode === 'replace') return t('（可留空）');
   if (mode === 'regex_replace') return 'openai/gpt-';
   if (mode === 'copy_header' || mode === 'move_header')
     return 'X-Upstream-Auth';
@@ -4156,7 +4156,10 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                       </Text>
                                       <Input
                                         value={selectedOperation.to}
-                                        placeholder={getModeToPlaceholder(mode)}
+                                        placeholder={getModeToPlaceholder(
+                                          mode,
+                                          t,
+                                        )}
                                         onChange={(nextValue) =>
                                           updateOperation(
                                             selectedOperation.id,

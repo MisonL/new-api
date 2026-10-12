@@ -559,19 +559,19 @@ export const getRelativeTime = (publishDate) => {
 
   // 根据时间差返回相应的描述
   if (diffSeconds < 60) {
-    return '刚刚';
+    return i18next.t('刚刚');
   } else if (diffMinutes < 60) {
-    return `${diffMinutes} 分钟前`;
+    return i18next.t('{{count}} 分钟前', { count: diffMinutes });
   } else if (diffHours < 24) {
-    return `${diffHours} 小时前`;
+    return i18next.t('{{count}} 小时前', { count: diffHours });
   } else if (diffDays < 7) {
-    return `${diffDays} 天前`;
+    return i18next.t('{{count}} 天前', { count: diffDays });
   } else if (diffWeeks < 4) {
-    return `${diffWeeks} 周前`;
+    return i18next.t('{{count}} 周前', { count: diffWeeks });
   } else if (diffMonths < 12) {
-    return `${diffMonths} 个月前`;
+    return i18next.t('{{count}} 个月前', { count: diffMonths });
   } else if (diffYears < 2) {
-    return '1 年前';
+    return i18next.t('1 年前');
   } else {
     // 超过2年显示具体日期
     return formatDateString(pubDate);

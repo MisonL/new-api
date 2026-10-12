@@ -251,4 +251,21 @@ For commercial licensing, please contact support@quantumnous.com
 // t('默认使用 Droid CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。')
 // t('固定请求头静态快照来自 Antigravity CLI 原始请求身份；此模板仅固定客户端身份。若后续确认需要动态头，应基于真实客户端抓包在高级参数覆盖中手动配置 pass_headers。')
 
+// 高级参数覆盖的字段标签与占位（ParamOverrideEditorModal 的 get*Label/getModeValueLabel
+// 返回值，经 t(get*Label(mode)) 和 t(label) 消费；（可留空）经 getModeToPlaceholder(mode, t) 消费）
+// t('请求头名称')
+// t('目标字段路径')
+// t('匹配文本')
+// t('正则表达式')
+// t('来源请求头')
+// t('来源字段')
+// t('目标请求头')
+// t('目标字段')
+// t('请求头值（支持字符串或 JSON 映射）')
+// t('透传请求头（来自客户端原始请求，支持逗号分隔或 JSON 数组）')
+// t('前后缀文本')
+// t('清理规则（字符串或 JSON 对象）')
+// t('值（支持 JSON 或普通文本）')
+// t('（可留空）')
+
 export {};
