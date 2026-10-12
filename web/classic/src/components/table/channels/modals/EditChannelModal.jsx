@@ -4661,9 +4661,10 @@ const EditChannelModal = (props) => {
                                       )
                                     : t('密钥')
                                 }
-                                placeholder={t(
-                                  '请输入 JSON 格式的 OAuth 凭据，例如：\n{\n  "access_token": "...",\n  "account_id": "..." \n}',
-                                )}
+                                placeholder={
+                                  t('请输入 JSON 格式的 OAuth 凭据，例如：') +
+                                  '\n{\n  "access_token": "...",\n  "account_id": "..." \n}'
+                                }
                                 rules={
                                   isEdit
                                     ? []
@@ -4827,9 +4828,10 @@ const EditChannelModal = (props) => {
                                         )
                                       : t('密钥')
                                   }
-                                  placeholder={t(
-                                    '请输入 JSON 格式的密钥内容，例如：\n{\n  "type": "service_account",\n  "project_id": "your-project-id",\n  "private_key_id": "...",\n  "private_key": "...",\n  "client_email": "...",\n  "client_id": "...",\n  "auth_uri": "...",\n  "token_uri": "...",\n  "auth_provider_x509_cert_url": "...",\n  "client_x509_cert_url": "..."\n}',
-                                  )}
+                                  placeholder={
+                                    t('请输入 JSON 格式的密钥内容，例如：') +
+                                    '\n{\n  "type": "service_account",\n  "project_id": "your-project-id",\n  "private_key_id": "...",\n  "private_key": "...",\n  "client_email": "...",\n  "client_id": "...",\n  "auth_uri": "...",\n  "token_uri": "...",\n  "auth_provider_x509_cert_url": "...",\n  "client_x509_cert_url": "..."\n}'
+                                  }
                                   rules={
                                     isEdit
                                       ? []
@@ -5034,9 +5036,12 @@ const EditChannelModal = (props) => {
                           key={`region-${isEdit ? channelId : 'new'}`}
                           field='other'
                           label={t('部署地区')}
-                          placeholder={t(
-                            '请输入部署地区，例如：us-central1\n支持使用模型映射格式\n{\n    "default": "us-central1",\n    "claude-3-5-sonnet-20240620": "europe-west1"\n}',
-                          )}
+                          placeholder={
+                            t(
+                              '请输入部署地区，例如：us-central1\n支持使用模型映射格式',
+                            ) +
+                            '\n{\n    "default": "us-central1",\n    "claude-3-5-sonnet-20240620": "europe-west1"\n}'
+                          }
                           value={inputs.other || ''}
                           onChange={(value) =>
                             handleInputChange('other', value)
