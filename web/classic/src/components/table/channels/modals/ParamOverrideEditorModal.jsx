@@ -3277,7 +3277,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                 size='small'
                                 className='mt-1 block'
                               >
-                                {MODE_DESCRIPTIONS[mode] || ''}
+                                {t(MODE_DESCRIPTIONS[mode] || '')}
                               </Text>
                               <div className='mt-2'>
                                 <Text type='tertiary' size='small'>
@@ -4473,7 +4473,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                 {t('直接编辑 JSON 文本，保存时会校验格式。')}
               </Text>
               {jsonError ? (
-                <Text className='text-red-500 text-xs mt-2'>{jsonError}</Text>
+                <Text className='text-red-500 text-xs mt-2'>
+                  {t(jsonError)}
+                </Text>
               ) : null}
             </div>
           )}

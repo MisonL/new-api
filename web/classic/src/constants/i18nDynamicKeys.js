@@ -214,4 +214,34 @@ For commercial licensing, please contact support@quantumnous.com
 // t('您正在使用默认密码！')
 // t('请立刻修改默认密码！')
 
+// 高级参数覆盖的操作模式描述（MODE_DESCRIPTIONS，经 ParamOverrideEditorModal 的
+// t(MODE_DESCRIPTIONS[mode]) 消费）
+// t('把值写入目标字段')
+// t('删除目标字段')
+// t('把值追加到数组 / 字符串 / 对象末尾')
+// t('把值追加到数组 / 字符串 / 对象开头')
+// t('把来源字段复制到目标字段')
+// t('把来源字段移动到目标字段')
+// t('在目标字段里做字符串替换')
+// t('在目标字段里做正则替换')
+// t('去掉字符串前缀')
+// t('去掉字符串后缀')
+// t('确保字符串有指定前缀')
+// t('确保字符串有指定后缀')
+// t('去掉字符串头尾空白')
+// t('把字符串转成小写')
+// t('把字符串转成大写')
+// t('立即返回自定义错误')
+// t('按条件清理对象中的子项')
+// t('把客户端原始请求里的指定请求头透传到上游；适合 Codex CLI / Claude Code 等要求真实客户端动态头的渠道')
+// t('在一个字段有值、另一个缺失时自动补齐')
+// t('设置运行期请求头：可直接覆盖整条值，也可对逗号分隔的 token 做删除、替换、追加或白名单保留')
+// t('删除运行期请求头')
+// 高级参数覆盖编辑器 JSON 校验提示（ParamOverrideEditorModal 的 t(jsonError) 消费）
+// t('JSON 格式不正确')
+// 渠道列表标签分组行前缀（ChannelsColumnDefs 的 t('标签：') 消费）
+// t('标签：')
+// 上游模型冲突字段名（UpstreamConflictModal 的 FIELD_LABELS，经 t(rawLabel) 消费）
+// t('命名规则')
+
 export {};

@@ -382,7 +382,9 @@ export const getChannelsColumns = ({
           upstreamUpdateMeta.enabled &&
           (pendingAddCount > 0 || pendingRemoveCount > 0);
         const nameNode =
-          record.remark && record.remark.trim() !== '' ? (
+          record.children !== undefined && record.tag !== undefined ? (
+            <span>{`${t('标签：')}${record.tag}`}</span>
+          ) : record.remark && record.remark.trim() !== '' ? (
             <Tooltip
               content={
                 <div className='flex flex-col gap-2 max-w-xs'>
