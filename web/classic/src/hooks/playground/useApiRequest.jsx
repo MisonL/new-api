@@ -475,7 +475,8 @@ export const useApiRequest = (
 
         setDebugData((prev) => ({
           ...prev,
-          response: 'Stream启动失败:\n' + JSON.stringify(errorInfo, null, 2),
+          response:
+            t('Stream启动失败:') + '\n' + JSON.stringify(errorInfo, null, 2),
         }));
         setActiveDebugTab(DEBUG_TABS.RESPONSE);
 

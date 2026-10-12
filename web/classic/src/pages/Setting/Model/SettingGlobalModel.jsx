@@ -312,7 +312,7 @@ export default function SettingGlobalModel(props) {
                 >
                   {t('协议转换兼容配置')}
                   <Tag color='orange' size='small'>
-                    测试版
+                    {t('测试版')}
                   </Tag>
                 </span>
               }

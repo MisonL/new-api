@@ -836,7 +836,9 @@ const SystemSetting = () => {
                       <Form.Input
                         field='WorkerUrl'
                         label={t('Worker地址')}
-                        placeholder={t('例如：https://workername.yourdomain.workers.dev')}
+                        placeholder={t(
+                          '例如：https://workername.yourdomain.workers.dev',
+                        )}
                       />
                     </Col>
                     <Col xs={24} sm={24} md={12} lg={12} xl={12}>
@@ -1469,7 +1471,7 @@ const SystemSetting = () => {
                           )
                         }
                       >
-                        启用邮箱域名白名单
+                        {t('启用邮箱域名白名单')}
                       </Form.Checkbox>
                     </Col>
                     <Col xs={24} sm={24} md={12} lg={12} xl={12}>
@@ -1483,7 +1485,7 @@ const SystemSetting = () => {
                           )
                         }
                       >
-                        启用邮箱别名限制
+                        {t('启用邮箱别名限制')}
                       </Form.Checkbox>
                     </Col>
                   </Row>
