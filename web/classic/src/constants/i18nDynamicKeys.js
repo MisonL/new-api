@@ -25,6 +25,11 @@ For commercial licensing, please contact support@quantumnous.com
 // 这里以注释中的 t(...) 形式登记，i18next-cli 的注释解析器会将其提取，
 // 从而保证词典不遗漏；新增此类动态键时请在此追加。
 
+// t('名称已存在')
+// t('Headers JSON 不能为空')
+// t('Headers JSON 必须是合法 JSON')
+// t('Headers JSON 必须是非空对象')
+// t('Headers JSON 的值必须全部是字符串')
 // t('Anthropic Beta/Version 透传')
 // t('Claude Code 真实请求头透传')
 // t('Codex CLI 动态请求头透传')
