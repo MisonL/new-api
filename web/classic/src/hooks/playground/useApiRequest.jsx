@@ -205,7 +205,7 @@ export const useApiRequest = (
             }
           } catch (e) {
             if (!errorBody) {
-              errorBody = '无法读取错误响应体';
+              errorBody = t('无法读取错误响应体');
             }
           }
 

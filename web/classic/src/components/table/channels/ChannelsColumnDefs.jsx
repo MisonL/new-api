@@ -52,6 +52,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { FaInfinity, FaRandom } from 'react-icons/fa';
 import ChannelHealthRuntimeChannelState from './ChannelHealthRuntimeChannelState';
+import { isPinnedChannel } from '../../../helpers/channelPinOrder';
 
 const CHANNEL_OPERATE_COLUMN_WIDTH = 250;
 
@@ -62,7 +63,7 @@ const renderType = (type, record = {}, t) => {
   for (let i = 0; i < CHANNEL_OPTIONS.length; i++) {
     type2label[CHANNEL_OPTIONS[i].value] = CHANNEL_OPTIONS[i];
   }
-  type2label[0] = { value: 0, label: t('未知类型'), color: 'grey' };
+  type2label[0] = { value: 0, label: '未知类型', color: 'grey' };
 
   let icon = getChannelIcon(type);
 
@@ -83,7 +84,7 @@ const renderType = (type, record = {}, t) => {
 
   const typeTag = (
     <Tag color={type2label[type]?.color} shape='circle' prefixIcon={icon}>
-      {type2label[type]?.label}
+      {t(type2label[type]?.label)}
     </Tag>
   );
 
@@ -353,6 +354,10 @@ export const getChannelsColumns = ({
   detectChannelUpstreamUpdates,
   channelHealthRuntime,
   channelRoutingConfig,
+  topChannels = [],
+  pinChannel,
+  unpinChannel,
+  movePinnedChannel,
 }) => {
   const legacyRouteFieldsReadOnly =
     channelRoutingConfig?.strict_writes === true;
@@ -765,7 +770,40 @@ export const getChannelsColumns = ({
             setShowEdit(true);
           };
           const upstreamUpdateMeta = getUpstreamUpdateMeta(record);
+          const pinnedRecord = topChannels.find(
+            (channel) => channel.id === record.id,
+          );
+          const pinned = isPinnedChannel(pinnedRecord);
           const moreMenuItems = [
+            pinned
+              ? {
+                  node: 'item',
+                  name: t('取消置顶'),
+                  type: 'tertiary',
+                  onClick: () => unpinChannel(record),
+                }
+              : {
+                  node: 'item',
+                  name: t('置顶'),
+                  type: 'tertiary',
+                  onClick: () => pinChannel(record),
+                },
+            ...(pinned
+              ? [
+                  {
+                    node: 'item',
+                    name: t('在置顶列表中上移'),
+                    type: 'tertiary',
+                    onClick: () => movePinnedChannel(record, 'up'),
+                  },
+                  {
+                    node: 'item',
+                    name: t('在置顶列表中下移'),
+                    type: 'tertiary',
+                    onClick: () => movePinnedChannel(record, 'down'),
+                  },
+                ]
+              : []),
             {
               node: 'item',
               name: t('删除'),

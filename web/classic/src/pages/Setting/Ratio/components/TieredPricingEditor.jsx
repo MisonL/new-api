@@ -1298,7 +1298,7 @@ function RuleConditionRow({ cond, onChange, onRemove, t }) {
         >
           {COMMON_TIMEZONES.map((tz) => (
             <Select.Option key={tz.value} value={tz.value}>
-              {tz.label}
+              {t(tz.label)}
             </Select.Option>
           ))}
         </Select>

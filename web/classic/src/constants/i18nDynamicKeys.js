@@ -25,6 +25,36 @@ For commercial licensing, please contact support@quantumnous.com
 // 这里以注释中的 t(...) 形式登记，i18next-cli 的注释解析器会将其提取，
 // 从而保证词典不遗漏；新增此类动态键时请在此追加。
 
+// 渠道类型标签（CHANNEL_OPTIONS，经 ChannelsTabs/ChannelsColumnDefs 的 t(变量.label) 消费）
+// t('360 智脑')
+// t('自定义渠道')
+// t('知识库：FastGPT')
+// t('知识库：AI Proxy')
+// t('嵌入模型：MokaAI M3E')
+// t('字节火山方舟、豆包通用')
+// t('可灵')
+// t('即梦')
+// t('豆包视频')
+// t('百度文心千帆')
+// t('百度文心千帆V2')
+// t('阿里通义千问')
+// t('讯飞星火认知')
+// t('智谱 ChatGLM（已经弃用，请使用智谱 GLM-4V）')
+// t('智谱 GLM-4V')
+// 时区标签（COMMON_TIMEZONES，经 TieredPricingEditor 的 t(tz.label) 消费）
+// t('UTC+8 北京 (Asia/Shanghai)')
+// t('UTC-5 纽约 (America/New_York)')
+// t('UTC-8 洛杉矶 (America/Los_Angeles)')
+// t('UTC-6 芝加哥 (America/Chicago)')
+// t('UTC+0 伦敦 (Europe/London)')
+// t('UTC+1 柏林 (Europe/Berlin)')
+// t('UTC+9 东京 (Asia/Tokyo)')
+// t('UTC+8 新加坡 (Asia/Singapore)')
+// t('UTC+9 首尔 (Asia/Seoul)')
+// t('UTC+10 悉尼 (Australia/Sydney)')
+// 用户级上下文预设（CONTEXT_KEY_PRESETS，经 SettingsChannelAffinity 的 t(x.label) 消费）
+// t('id（用户 ID）')
+
 // t('名称已存在')
 // t('Headers JSON 不能为空')
 // t('Headers JSON 必须是合法 JSON')
