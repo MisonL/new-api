@@ -773,7 +773,7 @@ const CreateDeploymentModal = ({ visible, onCancel, onSuccess, t }) => {
       key: 'locations',
       label: t('部署位置'),
       value: selectedLocationNames.length
-        ? selectedLocationNames.join('、')
+        ? selectedLocationNames.join(t('、'))
         : '--',
     },
     {

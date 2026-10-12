@@ -1192,7 +1192,7 @@ function appendPricePart(parts, condition, key, vars) {
 }
 
 function joinBillingSummary(parts) {
-  return parts.filter(Boolean).join('，');
+  return parts.filter(Boolean).join(i18next.t('，'));
 }
 
 function getGroupRatioText(groupRatio, user_group_ratio) {
@@ -2059,7 +2059,7 @@ export function renderModelPrice(opts) {
       }),
     ]
       .filter(Boolean)
-      .join('，'),
+      .join(i18next.t('，')),
     textInputTokens > 0
       ? buildBillingText(
           '普通输入：{{tokens}} / 1M * 模型倍率 {{modelRatio}} * {{ratioType}} {{ratio}} = {{amount}}',
@@ -3535,7 +3535,7 @@ export function renderClaudeLogContent(opts) {
       }),
     ];
 
-    return parts.join('，');
+    return parts.join(i18next.t('，'));
   }
 }
 
