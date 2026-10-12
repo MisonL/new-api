@@ -58,7 +58,7 @@ const PageLayout = () => {
     defaultSidebarWidth,
   ] = useSidebarWidth();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const location = useLocation();
 
   const cardProPages = [
@@ -139,10 +139,10 @@ const PageLayout = () => {
         statusDispatch({ type: 'set', payload: data });
         setStatusData(data);
       } else {
-        showError('Unable to connect to server');
+        showError(t('无法连接到服务器'));
       }
     } catch (error) {
-      showError('Failed to load status');
+      showError(t('加载状态失败'));
     }
   };
 

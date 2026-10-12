@@ -20,9 +20,11 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useState } from 'react';
 import { Card, Spin } from '@douyinfe/semi-ui';
 import SettingsDrawing from '../../pages/Setting/Drawing/SettingsDrawing';
+import { useTranslation } from 'react-i18next';
 import { API, showError, toBoolean } from '../../helpers';
 
 const DrawingSetting = () => {
+  const { t } = useTranslation();
   let [inputs, setInputs] = useState({
     /* 绘图设置 */
     DrawingEnabled: false,
@@ -59,7 +61,7 @@ const DrawingSetting = () => {
       setLoading(true);
       await getOptions();
     } catch (error) {
-      showError('刷新失败');
+      showError(t('刷新失败'));
     } finally {
       setLoading(false);
     }
