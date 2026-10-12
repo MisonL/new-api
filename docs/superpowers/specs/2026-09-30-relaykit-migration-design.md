@@ -840,6 +840,13 @@ scripts/relaykit-citation-check.py --ref 789c97019   # 全部引用可解析时�
 python3 scripts/relaykit-citation-check.test.py  # 35 个单测（第 43 轮 +9）
 ```
 
+**C1–C8 动作行的符号/文件机械核对**（第 50 轮新增，专门核「照抄上游终态」那条主线的可编译性——C1–C8 八行引用的每个 `pkg.Symbol` 与带锚点文件引用逐条在锚点上验证）：
+
+```bash
+python3 scripts/relaykit-c-symbols-check.py            # C 行符号核对: 符号 10 个 + 带锚点文件引用 17 个
+python3 scripts/relaykit-c-symbols-check.test.py       # 12 个单测（含反向验证：改坏符号/行号/删 C 行须变红）
+```
+
 **文档结构完整性**（第 38 轮新增，与上一条正交：上一条查「引用能否解析」，本条查「文档自身结构是否自洽」）：
 
 ```bash

@@ -60,6 +60,8 @@ EXPECTED_CLAIM_KINDS = (
     "结构问题数",
     "dto 七维（命令行注释）",
     "dto 七维（正文）",
+    "C 行符号核对",
+    "C 行符号单测数",
 )
 
 
@@ -184,6 +186,23 @@ def collect_actual(quiet):
     parsed_or_fail("structure_tests", parse_ran(out), "structure_tests",
                    "relaykit-doc-structure-check.test.py 输出无法解析（该组声明未核对）")
 
+    # 第 50 轮：C1–C8 行的符号/带锚点文件引用机械核对（钉死锚点）。
+    code, out = run([sys.executable, "scripts/relaykit-c-symbols-check.py"])
+    if code != 0:
+        failures.append(f"relaykit-c-symbols-check.py 退出码 {code}")
+    m = re.search(r"符号引用: ok=(\d+) failed=(\d+)", out)
+    m2 = re.search(r"带锚点文件引用: ok=(\d+) failed=(\d+)", out)
+    if m is None or m2 is None:
+        failures.append("relaykit-c-symbols-check.py 输出无法解析（该组声明未核对）")
+    else:
+        actual["c_symbols"] = (int(m.group(1)), int(m2.group(1)))
+
+    code, out = run([sys.executable, "scripts/relaykit-c-symbols-check.test.py"])
+    if code != 0:
+        failures.append(f"relaykit-c-symbols-check.test.py 退出码 {code}")
+    parsed_or_fail("c_symbols_tests", parse_ran(out), "c_symbols_tests",
+                   "relaykit-c-symbols-check.test.py 输出无法解析（该组声明未核对）")
+
     # 自检脚本自己的单测数。这一条是自指的：selfcheck.test.py 的端到端用例
     # 会反过来调用 collect_actual，故它在调用前设置 RELAYKIT_SELFCHECK_SKIP_RECURSE
     # 断开递归；置位时跳过本段，selfcheck_tests 为 None，compare() 随之跳过该声明。
@@ -228,6 +247,10 @@ def collect_actual(quiet):
         print(f"  结构问题        {actual.get('structure_problems', '无法解析')}")
         print(f"  结构单测        {actual.get('structure_tests', '无法解析')}")
         print(f"  自检单测        {actual.get('selfcheck_tests', '无法解析')}")
+        cs = actual.get("c_symbols")
+        print(f"  C 行符号核对    "
+              f"{('符号 ok=%d 文件 ok=%d' % cs) if cs else '无法解析'}")
+        print(f"  C 行符号单测    {actual.get('c_symbols_tests', '无法解析')}")
         print(f"  dto 七维        {actual.get('dto', '无法解析')}")
         print(f"  dto 分节数      {actual.get('dto_sections', '无法解析')}")
         print()
@@ -268,6 +291,9 @@ def extract_claims(doc):
         # 「relaykit-gate-selfcheck.test.py   # 14 个单测」
         for m in re.finditer(r"relaykit-gate-selfcheck\.test\.py[^\n]*?(\d+) 个单测", line):
             add(i, "自检单测数", int(m.group(1)))
+        # 「relaykit-c-symbols-check.test.py  # 12 个单测」
+        for m in re.finditer(r"relaykit-c-symbols-check\.test\.py[^\n]*?(\d+) 个单测", line):
+            add(i, "C 行符号单测数", int(m.group(1)))
         # 「本文档 relaykit 行引用现为 **51 处唯一**」（§11 口径，与 §9.3 的
         # 「relaykit 51 + 宿主 107 + ...」是同一批门禁计数，但句式不同——
         # 第 38 轮补入：此前抽取器只认 §9.3 句式，§11 这三处整类漏检）
@@ -283,6 +309,9 @@ def extract_claims(doc):
             add(i, "§11 裸引用 ok 数", int(m.group(1)))
         for m in re.finditer(r"未解析 \*\*(\d+)\*\* 处", line):
             add(i, "§11 裸引用未解析数", int(m.group(1)))
+        # 「C 行符号核对: 符号 10 个 + 带锚点文件引用 17 个」
+        for m in re.finditer(r"C 行符号核对[^\n]*?符号 (\d+) 个[^\n]*?带锚点文件引用 (\d+) 个", line):
+            add(i, "C 行符号核对", (int(m.group(1)), int(m.group(2))))
         # §9.3 门禁命令注释里的裸组计数：裸引用 ok=N/未解析=M
         for m in re.finditer(r"裸引用 ok=(\d+)/未解析=(\d+)", line):
             add(i, "citation 裸引用（§9.3）",
@@ -345,6 +374,15 @@ def compare(claims, actual):
                 mismatches.append((line_no, desc, claimed, real))
         elif desc == "自检单测数":
             real = actual.get("selfcheck_tests")
+            if real is not None and claimed != real:
+                mismatches.append((line_no, desc, claimed, real))
+        elif desc == "C 行符号单测数":
+            real = actual.get("c_symbols_tests")
+            if real is not None and claimed != real:
+                mismatches.append((line_no, desc, claimed, real))
+        elif desc == "C 行符号核对":
+            real = actual.get("c_symbols")
+            # 声明形态：「符号 10 个 + 带锚点文件引用 17 个」
             if real is not None and claimed != real:
                 mismatches.append((line_no, desc, claimed, real))
         elif desc == "dto 分节数":
