@@ -80,11 +80,21 @@ export default defineConfig({
       'width',
       'aria-hidden',
     ],
-    // i18next-cli 默认只识别 t(...) 与 *.t(...)。仓内两处给 t 起了防御性别名
-    // （CodexUsageModal.jsx 的 tt、headerProfile.helpers.js 与 dashboardDrilldown.js
-    // 的 translate，形如 typeof t === 'function' ? t : (v) => v），不在默认集合里时
-    // 提取器会静默漏掉这些调用点的键。
-    functions: ['t', '*.t', 'tt', 'translate'],
+    // i18next-cli 默认只识别 t(...) 与 *.t(...)。仓内的翻译包装函数不在默认集合里时
+    // 提取器会静默漏掉这些调用点的键：
+    // - tt / translate：给 t 起的防御性别名（CodexUsageModal.jsx 的 tt，
+    //   headerProfile.helpers.js 与 dashboardDrilldown.js 的 translate，
+    //   形如 typeof t === 'function' ? t : (v) => v）。
+    // - buildBillingText / buildBillingPriceText：render.jsx 的计费文案包装，
+    //   内部调用 i18next.t(key, vars)。
+    functions: [
+      't',
+      '*.t',
+      'tt',
+      'translate',
+      'buildBillingText',
+      'buildBillingPriceText',
+    ],
     sort: true,
     disablePlurals: false,
     removeUnusedKeys: false,
