@@ -241,9 +241,7 @@ export default function SettingGeminiModel(props) {
               <Col span={16}>
                 <Text>
                   {t(
-                    '和Claude不同，默认情况下Gemini的思考模型会自动决定要不要思考，就算不开启适配模型也可以正常使用，' +
-                      '如果您需要计费，推荐设置无后缀模型价格按思考价格设置。' +
-                      '支持使用 gemini-2.5-pro-preview-06-05-thinking-128 格式来精确传递思考预算。',
+                    '和Claude不同，默认情况下Gemini的思考模型会自动决定要不要思考，就算不开启适配模型也可以正常使用，如果您需要计费，推荐设置无后缀模型价格按思考价格设置。支持使用 gemini-2.5-pro-preview-06-05-thinking-128 格式来精确传递思考预算。',
                   )}
                 </Text>
               </Col>

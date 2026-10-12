@@ -163,7 +163,7 @@ const DocumentRenderer = ({
     return (
       <div className='flex justify-center items-center min-h-screen bg-gray-50'>
         <Empty
-          title={t('管理员未设置' + title + '内容')}
+          title={t('管理员未设置{{title}}内容', { title })}
           image={
             <IllustrationConstruction style={{ width: 150, height: 150 }} />
           }
@@ -193,10 +193,10 @@ const DocumentRenderer = ({
               target='_blank'
               rel='noopener noreferrer'
               title={content.trim()}
-              aria-label={`${t('访问' + title)}: ${content.trim()}`}
+              aria-label={`${t('访问{{title}}', { title })}: ${content.trim()}`}
               className='inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors'
             >
-              {t('访问' + title)}
+              {t('访问{{title}}', { title })}
             </a>
           </div>
         </Card>
