@@ -1460,9 +1460,10 @@ const reorderOperations = (
   return nextOperations;
 };
 
-const getOperationSummary = (operation = {}, index = 0) => {
+const getOperationSummary = (operation = {}, index = 0, t) => {
   const mode = operation.mode || 'set';
-  const modeLabel = OPERATION_MODE_LABEL_MAP[mode] || mode;
+  const rawLabel = OPERATION_MODE_LABEL_MAP[mode] || mode;
+  const modeLabel = t ? t(rawLabel) : rawLabel;
   if (mode === 'sync_fields') {
     const from = String(operation.from || '').trim();
     const to = String(operation.to || '').trim();
@@ -1721,6 +1722,13 @@ const validateOperations = (operations, t) => {
 const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+
+  // 常量里的 label 在模块作用域定义、无法用 hook 的 t()，故在渲染期按当前语言映射
+  const tOptions = useMemo(
+    () => (options) =>
+      options.map((item) => ({ ...item, label: t(item.label) })),
+    [t],
+  );
 
   const [editMode, setEditMode] = useState('visual');
   const [visualMode, setVisualMode] = useState('operations');
@@ -2797,7 +2805,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                   </Text>
                   <Select
                     value={templateGroupKey}
-                    optionList={TEMPLATE_GROUP_OPTIONS}
+                    optionList={tOptions(TEMPLATE_GROUP_OPTIONS)}
                     onChange={(nextValue) =>
                       setTemplateGroupKey(nextValue || 'recommended')
                     }
@@ -2982,7 +2990,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                 size='small'
                                 color={getOperationModeTagColor(mode)}
                               >
-                                {`${OPERATION_MODE_LABEL_MAP[mode] || mode} - ${count}`}
+                                {`${t(OPERATION_MODE_LABEL_MAP[mode] || mode)} - ${count}`}
                               </Tag>
                             ))}
                           </Space>
@@ -3109,6 +3117,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                             {getOperationSummary(
                                               operation,
                                               index,
+                                              t,
                                             )}
                                           </Text>
                                           {String(
@@ -3143,11 +3152,13 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                           operation.mode || 'set',
                                         )}
                                       >
-                                        {OPERATION_MODE_LABEL_MAP[
-                                          operation.mode || 'set'
-                                        ] ||
-                                          operation.mode ||
-                                          'set'}
+                                        {t(
+                                          OPERATION_MODE_LABEL_MAP[
+                                            operation.mode || 'set'
+                                          ] ||
+                                            operation.mode ||
+                                            'set',
+                                        )}
                                       </Tag>
                                       <Text type='tertiary' size='small'>
                                         {t('条件数')}
@@ -3195,6 +3206,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                     {getOperationSummary(
                                       selectedOperation,
                                       selectedOperationIndex,
+                                      t,
                                     )}
                                   </Text>
                                 </Space>
@@ -3228,7 +3240,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                   </Text>
                                   <Select
                                     value={mode}
-                                    optionList={OPERATION_MODE_OPTIONS}
+                                    optionList={tOptions(
+                                      OPERATION_MODE_OPTIONS,
+                                    )}
                                     onChange={(nextMode) =>
                                       updateOperation(selectedOperation.id, {
                                         mode: nextMode,
@@ -4001,7 +4015,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                       <div className='flex gap-2'>
                                         <Select
                                           value={syncFromTarget?.type || 'json'}
-                                          optionList={SYNC_TARGET_TYPE_OPTIONS}
+                                          optionList={tOptions(
+                                            SYNC_TARGET_TYPE_OPTIONS,
+                                          )}
                                           style={{ width: 120 }}
                                           onChange={(nextType) =>
                                             updateOperation(
@@ -4041,7 +4057,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                       <div className='flex gap-2'>
                                         <Select
                                           value={syncToTarget?.type || 'json'}
-                                          optionList={SYNC_TARGET_TYPE_OPTIONS}
+                                          optionList={tOptions(
+                                            SYNC_TARGET_TYPE_OPTIONS,
+                                          )}
                                           style={{ width: 120 }}
                                           onChange={(nextType) =>
                                             updateOperation(
@@ -4535,7 +4553,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
               />
               <Select
                 value={fieldGuideTarget}
-                optionList={FIELD_GUIDE_TARGET_OPTIONS}
+                optionList={tOptions(FIELD_GUIDE_TARGET_OPTIONS)}
                 onChange={(nextValue) =>
                   setFieldGuideTarget(nextValue || 'path')
                 }
@@ -4567,7 +4585,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                 >
                   <div className='flex items-center justify-between mb-1'>
                     <Text strong style={{ fontSize: 18 }}>
-                      {section.title}
+                      {t(section.title)}
                     </Text>
                     <Tag color='grey'>{`${section.fields.length} ${t('项')}`}</Tag>
                   </div>
@@ -4592,7 +4610,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                         }}
                       >
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <Text strong>{field.label}</Text>
+                          <Text strong>{t(field.label)}</Text>
                           <Text
                             type='secondary'
                             size='small'
@@ -4613,7 +4631,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                             className='block mt-1'
                             style={{ lineHeight: '18px' }}
                           >
-                            {field.tip}
+                            {t(field.tip)}
                           </Text>
                         </div>
                         <Space spacing={6} align='center'>
@@ -4963,7 +4981,7 @@ const HeaderValueEditor = ({
         <Space spacing={6}>
           <Select
             value={draft.mode}
-            optionList={HEADER_VALUE_MODE_OPTIONS}
+            optionList={tOptions(HEADER_VALUE_MODE_OPTIONS)}
             onChange={(nextValue) =>
               updateDraft({ mode: nextValue || 'direct' })
             }
@@ -5096,7 +5114,7 @@ const HeaderValueEditor = ({
                         </Text>
                         <Select
                           value={row.action}
-                          optionList={HEADER_TOKEN_ACTION_OPTIONS}
+                          optionList={tOptions(HEADER_TOKEN_ACTION_OPTIONS)}
                           onChange={(nextValue) =>
                             updateRow(row.id, {
                               action: nextValue || 'replace',
@@ -5238,7 +5256,7 @@ const StructuredValueNodeEditor = ({
     <div className='flex flex-col gap-2'>
       <Select
         value={currentNode.kind}
-        optionList={STRUCTURED_VALUE_TYPE_OPTIONS}
+        optionList={tOptions(STRUCTURED_VALUE_TYPE_OPTIONS)}
         onChange={(nextKind) => {
           const nextNode = createStructuredValueNode(nextKind || 'string');
           emitNode({ ...nextNode, id: currentNode.id });

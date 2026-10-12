@@ -180,14 +180,14 @@ const makeUniqueName = (existingNames, baseName) => {
 
 const tryParseRulesJsonArray = (jsonString) => {
   const raw = jsonString || '[]';
-  if (!verifyJSON(raw)) return { ok: false, message: 'Rules JSON is invalid' };
+  if (!verifyJSON(raw)) return { ok: false, message: '规则 JSON 不合法' };
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed))
-      return { ok: false, message: 'Rules JSON must be an array' };
+      return { ok: false, message: '规则 JSON 必须是数组' };
     return { ok: true, value: parsed };
   } catch (e) {
-    return { ok: false, message: 'Rules JSON is invalid' };
+    return { ok: false, message: '规则 JSON 不合法' };
   }
 };
 
@@ -195,16 +195,28 @@ const parseOptionalObjectJson = (jsonString, label) => {
   const raw = (jsonString || '').trim();
   if (!raw) return { ok: true, value: null };
   if (!verifyJSON(raw)) {
-    return { ok: false, message: `${label} JSON 格式不正确` };
+    return {
+      ok: false,
+      message: '{{label}} JSON 格式不正确',
+      params: { label },
+    };
   }
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { ok: false, message: `${label} 必须是 JSON 对象` };
+      return {
+        ok: false,
+        message: '{{label}} 必须是 JSON 对象',
+        params: { label },
+      };
     }
     return { ok: true, value: parsed };
   } catch (error) {
-    return { ok: false, message: `${label} JSON 格式不正确` };
+    return {
+      ok: false,
+      message: '{{label}} JSON 格式不正确',
+      params: { label },
+    };
   }
 };
 
@@ -510,7 +522,7 @@ export default function SettingsChannelAffinity(props) {
   const switchToVisualMode = () => {
     const validation = tryParseRulesJsonArray(inputs[KEY_RULES] || '[]');
     if (!validation.ok) {
-      showError(t(validation.message));
+      showError(t(validation.message, validation.params));
       return;
     }
     setEditMode('visual');
@@ -793,7 +805,9 @@ export default function SettingsChannelAffinity(props) {
         '参数覆盖模板',
       );
       if (!paramTemplateValidation.ok) {
-        return showError(t(paramTemplateValidation.message));
+        return showError(
+          t(paramTemplateValidation.message, paramTemplateValidation.params),
+        );
       }
 
       const rulePayload = buildChannelAffinityRulePayload({

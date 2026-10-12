@@ -278,7 +278,9 @@ const EditTagModal = (props) => {
       },
     );
     if (!normalizedHeaderOverride.ok) {
-      showInfo(t(normalizedHeaderOverride.message));
+      showInfo(
+        t(normalizedHeaderOverride.message, normalizedHeaderOverride.params),
+      );
       setLoading(false);
       return;
     }

@@ -2490,7 +2490,9 @@ const EditChannelModal = (props) => {
       },
     );
     if (!normalizedHeaderOverride.ok) {
-      showInfo(t(normalizedHeaderOverride.message));
+      showInfo(
+        t(normalizedHeaderOverride.message, normalizedHeaderOverride.params),
+      );
       return;
     }
     localInputs.header_override = normalizedHeaderOverride.value;

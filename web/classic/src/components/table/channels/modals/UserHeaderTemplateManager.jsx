@@ -132,7 +132,7 @@ export default function UserHeaderTemplateManager({
   const getNormalizedContent = () => {
     const normalized = normalizedTemplateDraft;
     if (!normalized.ok) {
-      showInfo(t(normalized.message));
+      showInfo(t(normalized.message, normalized.params));
       return null;
     }
     return normalized.value;
@@ -263,7 +263,10 @@ export default function UserHeaderTemplateManager({
           className='mb-3'
           type='warning'
           closeIcon={null}
-          description={t(normalizedTemplateDraft.message)}
+          description={t(
+            normalizedTemplateDraft.message,
+            normalizedTemplateDraft.params,
+          )}
         />
       )}
 

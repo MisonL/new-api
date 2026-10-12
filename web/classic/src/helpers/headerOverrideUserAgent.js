@@ -65,7 +65,8 @@ export function normalizeHeaderTemplateContent(rawValue, options = {}) {
     ) {
       return {
         ok: false,
-        message: `请求头值类型不受支持: ${key}`,
+        message: '请求头值类型不受支持: {{key}}',
+        params: { key },
       };
     }
   }

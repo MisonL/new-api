@@ -306,8 +306,8 @@ const LoginForm = () => {
           showSuccess(t('登录成功！'));
           if (username === 'root' && password === '123456') {
             Modal.error({
-              title: '您正在使用默认密码！',
-              content: '请立刻修改默认密码！',
+              title: t('您正在使用默认密码！'),
+              content: t('请立刻修改默认密码！'),
               centered: true,
             });
           }
@@ -1013,7 +1013,11 @@ const LoginForm = () => {
         }}
       >
         <div className='flex flex-col items-center'>
-          <img src={status.wechat_qrcode} alt={t('微信二维码')} className='mb-4' />
+          <img
+            src={status.wechat_qrcode}
+            alt={t('微信二维码')}
+            className='mb-4'
+          />
         </div>
 
         <div className='text-center mb-4'>
