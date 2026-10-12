@@ -244,4 +244,11 @@ For commercial licensing, please contact support@quantumnous.com
 // 上游模型冲突字段名（UpstreamConflictModal 的 FIELD_LABELS，经 t(rawLabel) 消费）
 // t('命名规则')
 
+// headerProfile 预置档案的完整描述（HEADER_PROFILE_PRESETS/preset.description，
+// 经 HeaderProfileLibrary 与 ParamOverrideEditorModal 的 t(description) 消费）
+// t('默认使用 Codex CLI npm latest 版本套用交互式 TUI 请求头生成逻辑；清单暂不可用时保留内置快照。模板只固定客户端身份，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。')
+// t('固定请求头静态快照来自本机 Codex Desktop 原始请求抓包；UA 前缀 0.142.4 是内置 Codex core/app-server 客户端版本，括号尾部 26.623.70822 是 Codex Desktop App 版本。此模板仅固定 Codex App 客户端身份，不能与 codex-tui 混用，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。')
+// t('默认使用 Droid CLI npm latest 版本套用既有客户端 UA 格式；清单暂不可用时保留内置快照。此模板仅固定客户端身份。X-Stainless-* 动态头需在高级参数覆盖中显式选择 Droid CLI 请求头透传模板。')
+// t('固定请求头静态快照来自 Antigravity CLI 原始请求身份；此模板仅固定客户端身份。若后续确认需要动态头，应基于真实客户端抓包在高级参数覆盖中手动配置 pass_headers。')
+
 export {};
