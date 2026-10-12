@@ -751,7 +751,7 @@ export const useChannelsData = () => {
     switch (type) {
       case 'priority':
         if (data.priority === undefined || data.priority === '') {
-          showInfo('优先级必须是整数！');
+          showInfo(t('优先级必须是整数！'));
           return;
         }
         data.priority = parseInt(data.priority);
@@ -762,7 +762,7 @@ export const useChannelsData = () => {
           data.weight < 0 ||
           data.weight === ''
         ) {
-          showInfo('权重必须是非负整数！');
+          showInfo(t('权重必须是非负整数！'));
           return;
         }
         data.weight = parseInt(data.weight);
@@ -772,7 +772,7 @@ export const useChannelsData = () => {
     try {
       const res = await API.put('/api/channel/tag', data);
       if (res?.data?.success) {
-        showSuccess('更新成功！');
+        showSuccess(t('更新成功！'));
         await refresh();
       }
     } catch (error) {
