@@ -273,9 +273,9 @@ export const useMessageActions = (
       });
 
       Toast.success({
-        content: t(
-          `已切换为${newRole === 'system' ? 'System' : 'Assistant'}角色`,
-        ),
+        content: t('已切换为{{role}}角色', {
+          role: newRole === 'system' ? 'System' : 'Assistant',
+        }),
         duration: 2,
       });
     },
