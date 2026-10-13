@@ -24,6 +24,7 @@ CITATION_OUT = (
     "baseline=dbfbc096f  host-citations ok=107  failed=0  skipped=0\n"
     "upstream-full ok=24  failed=0\n"
     "bare ok=41  unresolved=2  failed=0\n"
+    "sha ok=9  failed=0\n"
 )
 
 DTO_OUT = (
@@ -34,11 +35,11 @@ DTO_OUT = (
 
 class TestParsers(unittest.TestCase):
     def test_citation_parsed(self):
-        self.assertEqual(selfcheck.parse_citation(CITATION_OUT), (51, 107, 24, 41, 2))
+        self.assertEqual(selfcheck.parse_citation(CITATION_OUT), (51, 107, 24, 41, 2, 9))
 
     def test_citation_changed_count_is_visible(self):
         out = CITATION_OUT.replace("citations=51", "citations=52")
-        self.assertEqual(selfcheck.parse_citation(out), (52, 107, 24, 41, 2))
+        self.assertEqual(selfcheck.parse_citation(out), (52, 107, 24, 41, 2, 9))
 
     def test_citation_garbage_returns_none(self):
         self.assertIsNone(selfcheck.parse_citation("nothing here"))
@@ -62,7 +63,7 @@ class TestParsers(unittest.TestCase):
 
     def test_bare_unresolved_is_parsed(self):
         out = CITATION_OUT.replace("unresolved=2", "unresolved=7")
-        self.assertEqual(selfcheck.parse_citation(out), (51, 107, 24, 41, 7))
+        self.assertEqual(selfcheck.parse_citation(out), (51, 107, 24, 41, 7, 9))
 
     def test_ran_parsed(self):
         self.assertEqual(selfcheck.parse_ran("Ran 25 tests in 0.001s"), 25)
@@ -92,7 +93,7 @@ python3 scripts/relaykit-doc-structure-check.test.py   # 13 个单测
 """
 
 ACTUAL = {
-    "citation": (51, 107, 24, 41, 2),
+    "citation": (51, 107, 24, 41, 2, 9),
     "citation_tests": 25,
     "structure_problems": 0,
     "structure_tests": 13,

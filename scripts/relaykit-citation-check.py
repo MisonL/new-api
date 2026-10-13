@@ -55,17 +55,24 @@ import subprocess
 import sys
 
 def _expand_lines(spec):
-    """展开 `33/81/102` 这类斜杠行号列表为 int 迭代。
+    """展开行号 spec 为 int 迭代。
 
-    文档大量把同一文件的多个行号压成 `path.go:33/81/102/...`（第 52 轮发现：
-    9.2.4 一整行的 10 个测试行号只有第一个进闸门，其余静默失检）。五个提取
-    正则的行号组改为 `\\d+(?:/\\d+)*`，各提取器经本函数展开为逐行 (path, line)。
+    两类形态（第 52/53 轮各补一类）：`33/81/102` 斜杠列表逐项展开；`204-206`
+    短横线范围只展开两个端点——区间中间的空行是函数体常态，逐行查空行会误报，
+    而两端点都在界内且非空即足以证明整段锚点未漂移。
     """
     for part in spec.split("/"):
-        yield int(part)
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            yield int(lo)
+            yield int(hi)
+        else:
+            yield int(part)
 
 
-CITATION = re.compile(r"relaykit/([A-Za-z0-9_./-]+\.go):(\d+(?:/\d+)*)")
+LINE_SPEC = r"\d+(?:[-/]\d+)*"
+
+CITATION = re.compile(r"relaykit/([A-Za-z0-9_./-]+\.go):(" + LINE_SPEC + r")")
 
 # The doc also cites relaykit files by shorthand that omits the
 # `relaykit/relayconvert/` prefix -- e.g. `internal/oai_chat/foo.go:12`,
@@ -93,7 +100,7 @@ SHORT_PACKAGES = {
 
 SHORT_CITATION = re.compile(
     r"(?<![A-Za-z0-9_./-])"
-    r"((?:" + "|".join(SHORT_PACKAGES) + r")/[A-Za-z0-9_./-]+\.go):(\d+(?:/\d+)*)"
+    r"((?:" + "|".join(SHORT_PACKAGES) + r")/[A-Za-z0-9_./-]+\.go):(" + LINE_SPEC + r")"
 )
 
 DEFAULT_REF = "upstream/main"
@@ -124,19 +131,44 @@ HOST_DIRS = (
 HOST_SUFFIX = r"\.(?:go|sh|py|yml|yaml|md|json)"
 
 # Not preceded by a path char or ':' -- so "upstream/main:service/x.go:15"
-# and "dbfbc096f:relay/y.go:670" are excluded (those are covered by
-# extract_upstream_full / their sha form respectively).
+# and "<sha>:relay/y.go:670" are excluded (covered by extract_upstream_full
+# and extract_sha_citations respectively).
 HOST_CITATION = re.compile(
     r"(?<![A-Za-z0-9_./:-])((?:" + "|".join(HOST_DIRS) + r")/[A-Za-z0-9_./-]+"
-    + HOST_SUFFIX + r"):(\d+(?:/\d+)*)"
+    + HOST_SUFFIX + r"):(" + LINE_SPEC + r")"
 )
 
 # Full-format upstream citations for non-relaykit host paths. relaykit/ paths
 # under this prefix are already captured by CITATION (it has no lookbehind);
 # duplicates are dropped by (path, line) in main().
 UPSTREAM_FULL = re.compile(
-    r"upstream/main:([A-Za-z0-9_./-]+" + HOST_SUFFIX + r"):(\d+(?:/\d+)*)"
+    r"upstream/main:([A-Za-z0-9_./-]+" + HOST_SUFFIX + r"):(" + LINE_SPEC + r")"
 )
+
+# Explicit-sha citations (round 53): `<sha>:<path>:<line>` -- e.g.
+# `789c97019:relay/common/relay_info.go:204-206` (the upstream pin) and
+# `dbfbc096f:relay/channel/claude/relay-claude.go:1134` (the baseline).
+# Before this group existed every extractor's lookbehind excluded the form
+# (a ':' precedes the path), and the comment above HOST_CITATION wrongly
+# claimed the sha form was covered by another extractor -- none existed, so
+# 10 textual citations (9 unique pairs) sat outside the gate. A mutation
+# moving a sha-cited line to 99999 passed green. Each citation resolves at
+# the sha it names, so the gate pins exactly what the author wrote.
+SHA_CITATION = re.compile(
+    r"(?<![A-Za-z0-9_./:-])"
+    r"([0-9a-f]{7,40}):([A-Za-z0-9_./-]+" + HOST_SUFFIX + r"):(" + LINE_SPEC + r")"
+)
+
+
+def extract_sha_citations(text):
+    """Explicit-sha `<sha>:<path>:<line>` citations as (sha, path, line)."""
+    seen = {}
+    for sha, path, spec in SHA_CITATION.findall(text):
+        if path.startswith("relaykit/"):
+            continue  # CITATION already claims relaykit/ paths (no lookbehind)
+        for line in _expand_lines(spec):
+            seen.setdefault((sha, path, line), None)
+    return sorted(seen)
 
 
 def extract_host_citations(text):
@@ -193,7 +225,28 @@ def list_go_files(ref, prefix=None):
 # lookbehind keeps the match from starting mid-path or just after a `:` --
 # the latter also excludes `upstream/main:<path>` and `dbfbc096f:<path>` forms,
 # which the upstream-full extractor handles.
-BARE_CITATION = re.compile(r"(?<![A-Za-z0-9_./:-])([A-Za-z0-9_./-]+\.go):(\d+(?:/\d+)*)")
+BARE_CITATION = re.compile(r"(?<![A-Za-z0-9_./:-])([A-Za-z0-9_./-]+\.go):(" + LINE_SPEC + r")")
+
+
+def check_sha(doc_text, reader=read_at):
+    """Resolve explicit-sha citations at the sha each one names."""
+    failures = []
+    ok = 0
+    for sha, path, line in extract_sha_citations(doc_text):
+        lines = reader(sha, path)
+        if lines is None:
+            failures.append((sha, path, line, "file not found at sha"))
+            continue
+        if not 1 <= line <= len(lines):
+            failures.append(
+                (sha, path, line, f"out of range (file has {len(lines)} lines)")
+            )
+            continue
+        if not lines[line - 1].strip():
+            failures.append((sha, path, line, "cited line is blank"))
+            continue
+        ok += 1
+    return ok, failures
 
 
 def _raw_claimed(text):
@@ -414,12 +467,16 @@ def main(argv=None):
     # upstream/main:<path>:NN refs resolve at the upstream ref.
     h_ok, h_failures, h_skipped = check_host(doc_text, args.baseline, args.ref)
     u_ok, u_failures = check_upstream_full(doc_text, args.ref)
+    s_ok, s_failures = check_sha(doc_text)
     print(f"baseline={args.baseline}  host-citations ok={h_ok}  failed={len(h_failures)}  skipped={h_skipped}")
     print(f"upstream-full ok={u_ok}  failed={len(u_failures)}")
+    print(f"sha ok={s_ok}  failed={len(s_failures)}")
     for path, line, why in h_failures:
         print(f"  FAIL host {path}:{line}  {why}", file=sys.stderr)
     for path, line, why in u_failures:
         print(f"  FAIL upstream {path}:{line}  {why}", file=sys.stderr)
+    for sha, path, line, why in s_failures:
+        print(f"  FAIL sha {sha}:{path}:{line}  {why}", file=sys.stderr)
 
     # Bare refs (round 43) resolve by unique suffix match against the two trees.
     kit_files = list_go_files(args.ref, "relaykit/")
@@ -433,7 +490,7 @@ def main(argv=None):
     for path, line, why in b_failures:
         print(f"  FAIL bare {path}:{line}  {why}", file=sys.stderr)
 
-    return 1 if (failures or h_failures or u_failures or b_failures) else 0
+    return 1 if (failures or h_failures or u_failures or b_failures or s_failures) else 0
 
 
 if __name__ == "__main__":

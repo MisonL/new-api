@@ -56,6 +56,8 @@ EXPECTED_CLAIM_KINDS = (
     "§11 裸引用 ok 数",
     "§11 裸引用未解析数",
     "citation 裸引用（§9.3）",
+    "citation sha 组",
+    "§11 sha 引用数",
     "dto 分节数",
     "结构问题数",
     "dto 七维（命令行注释）",
@@ -82,22 +84,26 @@ def run(cmd):
 
 
 def parse_citation(out):
-    """relaykit-citation-check.py 的输出 → (relaykit, host, upstream_full, bare_ok)。
+    """relaykit-citation-check.py 的输出 → (relaykit, host, upstream_full, bare_ok,
+    unresolved, sha)。
 
-    四行的 failed 必须存在且为 0。退出码与输出通常一致，但一旦失配
+    五行的 failed 必须存在且为 0。退出码与输出通常一致，但一旦失配
     （例如子进程被包装层改写退出码、或输出被部分截断），只读 ok= 会把
     「有失败」当成功放行——解析层自己也要 fail-closed，不能只押退出码。
     裸引用组（第 43 轮）的 failed 为 0 是硬条件；unresolved 单独解析：
     它不是失败（占位符与工作区文件落在那里是设计如此），而是文档第 11 节
-    必须声明的数字——声明与实测不符由 compare 抓。
+    必须声明的数字——声明与实测不符由 compare 抓。sha 组（第 53 轮）同理：
+    `<sha>:path:NN` 显式钉点形态在引用自己写明的 sha 上核对。
     """
     rk = re.search(r"citations=(\d+)\s+ok=(\d+)\s+failed=(\d+)", out)
     host = re.search(r"host-citations ok=(\d+)\s+failed=(\d+)", out)
     full = re.search(r"upstream-full ok=(\d+)\s+failed=(\d+)", out)
     bare = re.search(r"bare ok=(\d+)\s+unresolved=(\d+)\s+failed=(\d+)", out)
-    if not (rk and host and full and bare):
+    sha = re.search(r"sha ok=(\d+)\s+failed=(\d+)", out)
+    if not (rk and host and full and bare and sha):
         return None
-    if int(rk.group(3)) or int(host.group(2)) or int(full.group(2)) or int(bare.group(3)):
+    if (int(rk.group(3)) or int(host.group(2)) or int(full.group(2))
+            or int(bare.group(3)) or int(sha.group(2))):
         return None
     return (
         int(rk.group(1)),
@@ -105,6 +111,7 @@ def parse_citation(out):
         int(full.group(1)),
         int(bare.group(1)),
         int(bare.group(2)),
+        int(sha.group(1)),
     )
 
 
@@ -242,7 +249,7 @@ def collect_actual(quiet):
         print("门禁实际输出：")
         cite = actual.get("citation")
         print(f"  citation        "
-              f"{('relaykit=%d host=%d full=%d bare_ok=%d unresolved=%d' % cite) if cite else '无法解析'}")
+              f"{('relaykit=%d host=%d full=%d bare_ok=%d unresolved=%d sha=%d' % cite) if cite else '无法解析'}")
         print(f"  citation 单测   {actual.get('citation_tests', '无法解析')}")
         print(f"  结构问题        {actual.get('structure_problems', '无法解析')}")
         print(f"  结构单测        {actual.get('structure_tests', '无法解析')}")
@@ -316,6 +323,12 @@ def extract_claims(doc):
         for m in re.finditer(r"裸引用 ok=(\d+)/未解析=(\d+)", line):
             add(i, "citation 裸引用（§9.3）",
                 (int(m.group(1)), int(m.group(2))))
+        # 第 53 轮：`<sha>:path:NN` 显式钉点组进门禁，§11 须声明其计数，
+        # §9.3 命令注释须带 sha ok=N/failed=M。
+        for m in re.finditer(r"sha 引用 \*\*(\d+) 处\*\*", line):
+            add(i, "§11 sha 引用数", int(m.group(1)))
+        for m in re.finditer(r"sha ok=(\d+)/failed=(\d+)", line):
+            add(i, "citation sha 组", (int(m.group(1)), int(m.group(2))))
 
         # 「至此，dto 的兼容性核查覆盖 **7 组**」——工具分节数的当前口径声明
         for m in re.finditer(r"dto 的兼容性核查覆盖 \*\*(\d+) 组\*\*", line):
@@ -421,6 +434,14 @@ def compare(claims, actual):
             real = actual.get("citation")
             if real is not None and claimed != (real[3], real[4]):
                 mismatches.append((line_no, desc, claimed, (real[3], real[4])))
+        elif desc == "§11 sha 引用数":
+            real = actual.get("citation")
+            if real is not None and claimed != real[5]:
+                mismatches.append((line_no, desc, claimed, real[5]))
+        elif desc == "citation sha 组":
+            real = actual.get("citation")
+            if real is not None and claimed != (real[5], 0):
+                mismatches.append((line_no, desc, claimed, (real[5], 0)))
         elif desc in ("dto 七维（命令行注释）", "dto 七维（正文）"):
             real = actual.get("dto")
             if real is not None and claimed != real:

@@ -107,12 +107,19 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("BOGUS", r.stdout)
 
     def test_out_of_range_line_fails(self):
-        text = DOC.read_text(encoding="utf-8").replace(
-            "`dbfbc096f:relay/channel/claude/relay-claude.go:1134`",
-            "`dbfbc096f:relay/channel/claude/relay-claude.go:99999`",
+        # 第 53 轮起 §11 的 sha 组声明也含同一引用字符串，replace(1) 会突变到
+        # 非 C 行——检查器只抽 C1–C8 行，突变就落空了。按行前缀突变 C5 行内
+        # 的那一份，才能保证反向验证打在检查器实际核对的文本上。
+        lines = DOC.read_text(encoding="utf-8").split("\n")
+        c5 = next(i for i, l in enumerate(lines)
+                  if l.startswith("| C5 |")
+                  and "relay/channel/claude/relay-claude.go:1134" in l)
+        lines[c5] = lines[c5].replace(
+            "relay/channel/claude/relay-claude.go:1134",
+            "relay/channel/claude/relay-claude.go:99999",
             1,
         )
-        r = self._run_on(text)
+        r = self._run_on("\n".join(lines))
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("行号越界", r.stdout)
 

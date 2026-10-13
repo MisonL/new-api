@@ -408,5 +408,103 @@ class SlashLineListTests(unittest.TestCase):
         self.assertIn("out of range", failures[0][2])
 
 
+class DashRangeTests(unittest.TestCase):
+    """第 53 轮：`path.go:18-54` 形态此前只核起点行，终点行静默失检
+    （全文 25 处范围、24/38 个端点从未进闸门，突变 `54->99999` 仍退出码 0）。
+    行号组扩展 `\\d+(?:[-/]\\d+)*` 后，范围展开为两端点。"""
+
+    def test_expand_lines_range_yields_endpoints(self):
+        # 范围只展开端点：区间中间的空行是函数体常态，逐行查空行会误报。
+        self.assertEqual(list(MODULE._expand_lines("18-54")), [18, 54])
+        self.assertEqual(list(MODULE._expand_lines("33/81-102")), [33, 81, 102])
+
+    def test_extract_citations_range(self):
+        self.assertEqual(
+            MODULE.extract_citations("relaykit/dto/values.go:1-3"),
+            [("relaykit/dto/values.go", 1), ("relaykit/dto/values.go", 3)],
+        )
+
+    def test_host_citation_range(self):
+        self.assertEqual(
+            MODULE.extract_host_citations("service/convert.go:526-527"),
+            [("service/convert.go", 526), ("service/convert.go", 527)],
+        )
+
+    def test_upstream_full_range(self):
+        self.assertEqual(
+            MODULE.extract_upstream_full("upstream/main:relay/x.go:41-42"),
+            [("relay/x.go", 41), ("relay/x.go", 42)],
+        )
+
+    def test_check_range_endpoint_out_of_range_fails(self):
+        # 终点行越界必须失败——第 53 轮盲区的反向验证。
+        doc = "relaykit/dto/values.go:1-99"
+        lines = ["package dto"]
+
+        ok, failures = MODULE.check(doc, "ref", reader=lambda r, p: lines)
+
+        self.assertEqual(ok, 1)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("out of range", failures[0][2])
+
+
+class ShaCitationTests(unittest.TestCase):
+    """第 53 轮：`<sha>:<path>:<line>` 显式钉点形态（789c97019 与 dbfbc096f）
+    此前四组提取器全部漏过（每个负向后顾都把前导 ':' 挡住），且 HOST_CITATION
+    上方的注释声称 sha 形态「covered by their sha form」——并不存在那个提取器。
+    突变 `:14 -> :99999` 仍退出码 0。第五组在引用自己写明的 sha 上核对。"""
+
+    def test_extracts_sha_prefixed(self):
+        text = "789c97019:relay/common/relay_info.go:204/206 dbfbc096f:relay/cl.go:1134"
+        self.assertEqual(
+            MODULE.extract_sha_citations(text),
+            [("789c97019", "relay/common/relay_info.go", 204),
+             ("789c97019", "relay/common/relay_info.go", 206),
+             ("dbfbc096f", "relay/cl.go", 1134)],
+        )
+
+    def test_upstream_main_is_not_sha(self):
+        # upstream/main 不是 hex，不得被 sha 组吞掉（归 UPSTREAM_FULL）。
+        text = "upstream/main:relay/x.go:15"
+        self.assertEqual(MODULE.extract_sha_citations(text), [])
+        self.assertEqual(MODULE.extract_upstream_full(text), [("relay/x.go", 15)])
+
+    def test_sha_excludes_relaykit_paths(self):
+        # relaykit/ 路径由 CITATION 认领（无负向后顾），sha 组不重复计。
+        text = "789c97019:relaykit/dto/values.go:2"
+        self.assertEqual(MODULE.extract_sha_citations(text), [])
+
+    def test_check_sha_resolves_at_written_sha(self):
+        seen = []
+
+        def reader(ref, path):
+            seen.append(ref)
+            return ["package x", "type T int"]
+
+        ok, failures = MODULE.check_sha(
+            "789c97019:relay/common/relay_info.go:1-2", reader=reader
+        )
+        self.assertEqual((ok, failures), (2, []))
+        self.assertEqual(seen, ["789c97019", "789c97019"])
+
+    def test_check_sha_out_of_range_fails(self):
+        doc = "dbfbc096f:relay/x.go:99"
+
+        ok, failures = MODULE.check_sha(doc, reader=lambda r, p: ["a"])
+
+        self.assertEqual(ok, 0)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("out of range", failures[0][3])
+        self.assertEqual(failures[0][0], "dbfbc096f")
+
+    def test_check_sha_missing_file_fails(self):
+        doc = "789c97019:relay/gone.go:1"
+
+        ok, failures = MODULE.check_sha(doc, reader=lambda r, p: None)
+
+        self.assertEqual(ok, 0)
+        self.assertIn("file not found at sha", failures[0][3])
+
+
 if __name__ == "__main__":
     unittest.main()
