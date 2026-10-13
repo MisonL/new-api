@@ -131,7 +131,7 @@ export default function SettingsLog(props) {
             {daysDiff > 0 && (
               <Text type='tertiary'>
                 {' '}
-                ({t('约')} {daysDiff} {t('天前')})
+                ({t('约 {{count}} 天前', { count: daysDiff })})
               </Text>
             )}
           </p>
@@ -155,7 +155,7 @@ export default function SettingsLog(props) {
             {daysDiff > 0 && (
               <Text style={{ color: '#8c8c8c' }}>
                 {' '}
-                ({t('约')} {daysDiff} {t('天前')})
+                ({t('约 {{count}} 天前', { count: daysDiff })})
               </Text>
             )}
             <Text style={{ color: '#333' }}> {t('之前的所有日志')}</Text>
