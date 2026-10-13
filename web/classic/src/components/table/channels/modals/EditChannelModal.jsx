@@ -205,29 +205,35 @@ const MODEL_FETCHABLE_TYPES = new Set([
   1, 4, 14, 34, 17, 26, 27, 24, 47, 25, 20, 23, 31, 40, 42, 48, 43,
 ]);
 
-function type2secretPrompt(type) {
+function type2secretPrompt(t, type) {
   // inputs.type === 15 ? '按照如下格式输入：APIKey|SecretKey' : (inputs.type === 18 ? '按照如下格式输入：APPID|APISecret|APIKey' : '请输入渠道对应的鉴权密钥')
   switch (type) {
     case 15:
-      return '按照如下格式输入：APIKey|SecretKey';
+      return t('按照如下格式输入：APIKey|SecretKey');
     case 18:
-      return '按照如下格式输入：APPID|APISecret|APIKey';
+      return t('按照如下格式输入：APPID|APISecret|APIKey');
     case 22:
-      return '按照如下格式输入：APIKey-AppId，例如：fastgpt-0sp2gtvfdgyi4k30jwlgwf1i-64f335d84283f05518e9e041';
+      return t(
+        '按照如下格式输入：APIKey-AppId，例如：fastgpt-0sp2gtvfdgyi4k30jwlgwf1i-64f335d84283f05518e9e041',
+      );
     case 23:
-      return '按照如下格式输入：AppId|SecretId|SecretKey';
+      return t('按照如下格式输入：AppId|SecretId|SecretKey');
     case 33:
-      return '按照如下格式输入：Ak|Sk|Region';
+      return t('按照如下格式输入：Ak|Sk|Region');
     case 45:
-      return '请输入渠道对应的鉴权密钥, 豆包语音输入：AppId|AccessToken';
+      return t('请输入渠道对应的鉴权密钥, 豆包语音输入：AppId|AccessToken');
     case 50:
-      return '按照如下格式输入: AccessKey|SecretKey, 如果上游是New API，则直接输ApiKey';
+      return t(
+        '按照如下格式输入: AccessKey|SecretKey, 如果上游是New API，则直接输ApiKey',
+      );
     case 51:
-      return '按照如下格式输入: AccessKey|SecretAccessKey';
+      return t('按照如下格式输入: AccessKey|SecretAccessKey');
     case 57:
-      return '请输入 JSON 格式的 OAuth 凭据（必须包含 access_token 和 account_id）';
+      return t(
+        '请输入 JSON 格式的 OAuth 凭据（必须包含 access_token 和 account_id）',
+      );
     default:
-      return '请输入渠道对应的鉴权密钥';
+      return t('请输入渠道对应的鉴权密钥');
   }
 }
 
@@ -729,8 +735,9 @@ const EditChannelModal = (props) => {
     hasLegacyHeaderOverride &&
     (!headerProfileStrategy.enabled ||
       headerProfileStrategy.selectedProfileIds.length === 0);
-  const doubaoCodingPlanDeprecationMessage =
-    'Doubao Coding Plan 不再允许新增。根据火山方舟文档，Coding 套餐额度仅适用于 AI Coding 产品内调用，不适用于单独 API 调用；在非 AI Coding 产品中使用对应的 Base URL 和 API Key 可能被视为违规，并可能导致订阅停用或账号封禁。';
+  const doubaoCodingPlanDeprecationMessage = t(
+    'Doubao Coding Plan 不再允许新增。根据火山方舟文档，Coding 套餐额度仅适用于 AI Coding 产品内调用，不适用于单独 API 调用；在非 AI Coding 产品中使用对应的 Base URL 和 API Key 可能被视为违规，并可能导致订阅停用或账号封禁。',
+  );
   const canKeepDeprecatedDoubaoCodingPlan =
     initialBaseUrlRef.current === DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL;
   const doubaoCodingPlanOptionLabel = (
@@ -1284,9 +1291,10 @@ const EditChannelModal = (props) => {
 
     if (name === 'base_url' && value.endsWith('/v1')) {
       Modal.confirm({
-        title: '警告',
-        content:
+        title: t('警告'),
+        content: t(
           '不需要在末尾加/v1，New API会自动处理，添加后可能导致请求失败，是否继续？',
+        ),
         onOk: () => {
           if (formApiRef.current) {
             formApiRef.current.setValue(name, value);
@@ -2955,10 +2963,9 @@ const EditChannelModal = (props) => {
     () =>
       CHANNEL_OPTIONS.map((opt) => ({
         ...opt,
-        // 保持 label 为纯文本以支持搜索
-        label: opt.label,
+        label: t(opt.label),
       })),
-    [],
+    [t],
   );
 
   const renderChannelOption = (renderProps) => {
@@ -4921,7 +4928,7 @@ const EditChannelModal = (props) => {
                                     : t(
                                         '按照如下格式输入：AccessKey|SecretAccessKey|Region',
                                       )
-                                  : t(type2secretPrompt(inputs.type))
+                                  : type2secretPrompt(t, inputs.type)
                               }
                               rules={
                                 isEdit
@@ -5021,9 +5028,9 @@ const EditChannelModal = (props) => {
                         <Form.Input
                           field='other'
                           label={t('模型版本')}
-                          placeholder={
-                            '请输入星火大模型版本，注意是接口地址中的版本号，例如：v2.1'
-                          }
+                          placeholder={t(
+                            '请输入星火大模型版本，注意是接口地址中的版本号，例如：v2.1',
+                          )}
                           onChange={(value) =>
                             handleInputChange('other', value)
                           }

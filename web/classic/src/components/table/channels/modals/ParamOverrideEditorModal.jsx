@@ -274,13 +274,13 @@ const HEADER_VALUE_JSONC_EXAMPLE = `{
   "$append": ["context-1m-2025-08-07"]
 }`;
 
-const getModeValuePlaceholder = (mode) => {
+const getModeValuePlaceholder = (t, mode) => {
   if (mode === 'set_header') {
     return [
-      '纯字符串（整条覆盖）：',
+      t('纯字符串（整条覆盖）：'),
       'Bearer sk-xxx',
       '',
-      '或使用 JSON 规则：',
+      t('或使用 JSON 规则：'),
       '{',
       '  "files-api-2025-04-14": null,',
       '  "advanced-tool-use-2025-11-20": "tool-search-tool-2025-10-19",',
@@ -3969,6 +3969,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                       label={getModeValueLabel(mode)}
                                       valueText={selectedOperation.value_text}
                                       placeholder={getModeValuePlaceholder(
+                                        t,
                                         mode,
                                       )}
                                       updateOperation={updateOperation}
