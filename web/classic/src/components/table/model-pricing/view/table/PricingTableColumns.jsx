@@ -32,6 +32,7 @@ import {
   renderDescription,
 } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
+import ModelPerformanceBadge from '../../performance/ModelPerformanceBadge';
 
 function activateRatioHelp(openRatioHelp, e) {
   if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -120,6 +121,7 @@ export const getPricingTableColumns = ({
   tokenUnit,
   displayPrice,
   showRatio,
+  performanceSummary = {},
 }) => {
   const isMobile = useIsMobile();
   const priceDataCache = new WeakMap();
@@ -163,6 +165,17 @@ export const getPricingTableColumns = ({
       record.model_name.toLowerCase().includes(value.toLowerCase()),
   };
 
+  const performanceColumn = {
+    title: t('性能（24 小时）'),
+    dataIndex: 'performance_summary',
+    render: (_, record) => (
+      <ModelPerformanceBadge
+        performance={performanceSummary[record.model_name]}
+        t={t}
+      />
+    ),
+  };
+
   const quotaColumn = {
     title: t('计费类型'),
     dataIndex: 'quota_type',
@@ -192,6 +205,7 @@ export const getPricingTableColumns = ({
 
   const baseColumns = [
     modelNameColumn,
+    performanceColumn,
     vendorColumn,
     descriptionColumn,
     tagsColumn,
@@ -231,14 +245,19 @@ export const getPricingTableColumns = ({
       return (
         <div className='space-y-1'>
           <div className='text-gray-700'>
-            {t('模型倍率')}：{record.quota_type === 0 ? text : t('无')}
+            {t('模型倍率：{{value}}', {
+              value: record.quota_type === 0 ? text : t('无'),
+            })}
           </div>
           <div className='text-gray-700'>
-            {t('补全倍率')}：
-            {record.quota_type === 0 ? completionRatio : t('无')}
+            {t('补全倍率：{{value}}', {
+              value: record.quota_type === 0 ? completionRatio : t('无'),
+            })}
           </div>
           <div className='text-gray-700'>
-            {t('分组倍率')}：{priceData?.usedGroupRatio ?? '-'}
+            {t('分组倍率：{{value}}', {
+              value: priceData?.usedGroupRatio ?? '-',
+            })}
           </div>
         </div>
       );

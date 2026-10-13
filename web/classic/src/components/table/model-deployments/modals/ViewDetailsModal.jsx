@@ -48,6 +48,7 @@ import {
   showError,
   showSuccess,
   timestamp2string,
+  normalizeDeploymentPublicUrl,
 } from '../../../../helpers';
 
 const { Text, Title } = Typography;
@@ -422,15 +423,15 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
                         <Tag color='blue' size='small'>
                           {t('GPU/容器')}: {ctr.gpus_per_container ?? '--'}
                         </Tag>
-                        {ctr.public_url && (
-                          <Tooltip content={ctr.public_url}>
+                        {normalizeDeploymentPublicUrl(ctr) && (
+                          <Tooltip content={normalizeDeploymentPublicUrl(ctr)}>
                             <Button
                               icon={<FaLink />}
                               size='small'
                               theme='light'
                               onClick={() =>
                                 window.open(
-                                  ctr.public_url,
+                                  normalizeDeploymentPublicUrl(ctr),
                                   '_blank',
                                   'noopener,noreferrer',
                                 )

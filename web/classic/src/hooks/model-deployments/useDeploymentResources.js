@@ -269,18 +269,21 @@ export const useDeploymentResources = () => {
     }
   }, []);
 
-  const createDeployment = useCallback(async (deploymentData) => {
-    try {
-      const response = await API.post('/api/deployments', deploymentData);
-      if (response.data.success) {
-        return response.data.data;
-      } else {
-        throw new Error(response.data.message || '创建部署失败');
+  const createDeployment = useCallback(
+    async (deploymentData) => {
+      try {
+        const response = await API.post('/api/deployments', deploymentData);
+        if (response.data.success) {
+          return response.data.data;
+        } else {
+          throw new Error(response.data.message || t('创建部署失败'));
+        }
+      } catch (error) {
+        throw error;
       }
-    } catch (error) {
-      throw error;
-    }
-  }, []);
+    },
+    [t],
+  );
 
   return {
     // Data

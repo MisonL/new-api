@@ -23,6 +23,7 @@ import PricingSidebar from './PricingSidebar';
 import PricingContent from './content/PricingContent';
 import { useModelPricingData } from '../../../../hooks/model-pricing/useModelPricingData';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
+import { useModelPerformanceSummary } from '../../../../hooks/model-pricing/useModelPerformance';
 
 const ModelDetailSideSheet = lazy(
   () => import('../modal/ModelDetailSideSheet'),
@@ -32,6 +33,7 @@ const PricingPage = () => {
   const pricingData = useModelPricingData();
   const { Sider, Content } = Layout;
   const isMobile = useIsMobile();
+  const { summary: performanceSummary } = useModelPerformanceSummary();
   const [showRatio, setShowRatio] = React.useState(false);
   const [viewMode, setViewMode] = React.useState('card');
   const allProps = {
@@ -40,6 +42,7 @@ const PricingPage = () => {
     setShowRatio,
     viewMode,
     setViewMode,
+    performanceSummary,
   };
 
   return (
@@ -82,6 +85,7 @@ const PricingPage = () => {
             vendorsMap={pricingData.vendorsMap}
             endpointMap={pricingData.endpointMap}
             autoGroups={pricingData.autoGroups}
+            performanceSummary={performanceSummary}
             t={pricingData.t}
           />
         </Suspense>

@@ -50,6 +50,7 @@ import {
   showSuccess,
   copy,
   timestamp2string,
+  normalizeDeploymentPublicUrl,
 } from '../../../../helpers';
 
 const { Text } = Typography;
@@ -579,14 +580,20 @@ const ViewLogsModal = ({ visible, onCancel, deployment, t }) => {
                   </Space>
 
                   <Space>
-                    {containerDetails?.public_url && (
-                      <Tooltip content={containerDetails.public_url}>
+                    {normalizeDeploymentPublicUrl(containerDetails) && (
+                      <Tooltip
+                        content={normalizeDeploymentPublicUrl(containerDetails)}
+                      >
                         <Button
                           icon={<FaLink />}
                           size='small'
                           theme='borderless'
                           onClick={() =>
-                            window.open(containerDetails.public_url, '_blank')
+                            window.open(
+                              normalizeDeploymentPublicUrl(containerDetails),
+                              '_blank',
+                              'noopener,noreferrer',
+                            )
                           }
                         />
                       </Tooltip>

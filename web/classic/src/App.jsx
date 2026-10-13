@@ -18,11 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { lazy, Suspense, useContext, useMemo } from 'react';
-import { Route, Routes, useLocation, useParams } from 'react-router-dom';
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers/auth';
 import { StatusContext } from './context/Status';
 import SetupCheck from './components/layout/SetupCheck';
+import { getHeaderNavModuleAccess } from './helpers/headerNavModules';
 
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -50,6 +57,7 @@ const Chat = lazy(() => import('./pages/Chat'));
 const Chat2Link = lazy(() => import('./pages/Chat2Link'));
 const Midjourney = lazy(() => import('./pages/Midjourney'));
 const Pricing = lazy(() => import('./pages/Pricing'));
+const Rankings = lazy(() => import('./pages/Rankings'));
 const Task = lazy(() => import('./pages/Task'));
 const ModelPage = lazy(() => import('./pages/Model'));
 const ModelDeploymentPage = lazy(() => import('./pages/ModelDeployment'));
@@ -66,31 +74,25 @@ function DynamicOAuth2Callback() {
   return <OAuth2Callback type={provider} />;
 }
 
+function HeaderModuleRoute({ enabled, requireAuth, children }) {
+  if (!enabled) return <Navigate to='/' replace />;
+  if (requireAuth) return <PrivateRoute>{children}</PrivateRoute>;
+  return children;
+}
+
 function App() {
   const location = useLocation();
   const [statusState] = useContext(StatusContext);
 
-  // 获取模型广场权限配置
-  const pricingRequireAuth = useMemo(() => {
-    const headerNavModulesConfig = statusState?.status?.HeaderNavModules;
-    if (headerNavModulesConfig) {
-      try {
-        const modules = JSON.parse(headerNavModulesConfig);
-
-        // 处理向后兼容性：如果pricing是boolean，默认不需要登录
-        if (typeof modules.pricing === 'boolean') {
-          return false; // 默认不需要登录鉴权
-        }
-
-        // 如果是对象格式，使用requireAuth配置
-        return modules.pricing?.requireAuth === true;
-      } catch (error) {
-        console.error('解析顶栏模块配置失败:', error);
-        return false; // 默认不需要登录
-      }
-    }
-    return false; // 默认不需要登录
-  }, [statusState?.status?.HeaderNavModules]);
+  const headerNavModulesConfig = statusState?.status?.HeaderNavModules;
+  const pricingAccess = useMemo(
+    () => getHeaderNavModuleAccess(headerNavModulesConfig, 'pricing'),
+    [headerNavModulesConfig],
+  );
+  const rankingsAccess = useMemo(
+    () => getHeaderNavModuleAccess(headerNavModulesConfig, 'rankings'),
+    [headerNavModulesConfig],
+  );
 
   return (
     <SetupCheck>
@@ -348,20 +350,27 @@ function App() {
         <Route
           path='/pricing'
           element={
-            pricingRequireAuth ? (
-              <PrivateRoute>
-                <Suspense
-                  fallback={<Loading></Loading>}
-                  key={location.pathname}
-                >
-                  <Pricing />
-                </Suspense>
-              </PrivateRoute>
-            ) : (
+            <HeaderModuleRoute
+              enabled={pricingAccess.enabled}
+              requireAuth={pricingAccess.requireAuth}
+            >
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <Pricing />
               </Suspense>
-            )
+            </HeaderModuleRoute>
+          }
+        />
+        <Route
+          path='/rankings'
+          element={
+            <HeaderModuleRoute
+              enabled={rankingsAccess.enabled}
+              requireAuth={rankingsAccess.requireAuth}
+            >
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <Rankings />
+              </Suspense>
+            </HeaderModuleRoute>
           }
         />
         <Route

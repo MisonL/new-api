@@ -46,6 +46,10 @@ import {
   DEFAULT_MODEL_TEST_ENDPOINT_TYPE,
   DEFAULT_MODEL_TEST_RUNTIME_CONFIG,
 } from '../../components/table/channels/modelTestRuntimeConfig';
+import {
+  getChannelPinOrderMoveUpdates,
+  getNextChannelPinOrder,
+} from '../../helpers/channelPinOrder';
 
 const CHANNEL_PAGE_SIZE_STORAGE_KEY = 'channel-page-size';
 const LEGACY_PAGE_SIZE_STORAGE_KEY = 'page-size';
@@ -106,6 +110,7 @@ export const useChannelsData = () => {
   const [pageSize, setPageSize] = useState(() => getStoredChannelPageSize());
   const [channelCount, setChannelCount] = useState(0);
   const [groupOptions, setGroupOptions] = useState([]);
+  const [topChannels, setTopChannels] = useState([]);
 
   // UI states
   const [showEdit, setShowEdit] = useState(false);
@@ -266,6 +271,7 @@ export const useChannelsData = () => {
     loadChannelModels().then();
     fetchRuntimePolicyOptions().then();
     fetchChannelRoutingConfig().then();
+    fetchTopChannels().then();
   }, []);
 
   // Column visibility management
@@ -537,6 +543,66 @@ export const useChannelsData = () => {
         idSort,
       );
     }
+    await fetchTopChannels();
+  };
+
+  const fetchTopChannels = async () => {
+    try {
+      const res = await API.get('/api/channel/pins');
+      if (!res?.data?.success) {
+        throw new Error(res?.data?.message || t('获取置顶渠道失败'));
+      }
+      const items = Array.isArray(res.data.data) ? res.data.data : [];
+      setTopChannels(items);
+      return items;
+    } catch (error) {
+      showError(error?.message || t('获取置顶渠道失败'));
+      return [];
+    }
+  };
+
+  const updateChannelPinOrders = async (updates, successMessage) => {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      showInfo(t('没有可移动的置顶渠道'));
+      return false;
+    }
+    try {
+      const res = await API.put('/api/channel/pins', updates);
+      if (!res?.data?.success) {
+        throw new Error(res?.data?.message || t('更新置顶顺序失败'));
+      }
+      showSuccess(successMessage);
+      await refresh();
+      return true;
+    } catch (error) {
+      showError(error?.message || t('更新置顶顺序失败'));
+      return false;
+    }
+  };
+
+  const pinChannel = async (record) => {
+    await updateChannelPinOrders(
+      [{ id: record.id, pin_order: getNextChannelPinOrder(topChannels) }],
+      t('渠道已置顶'),
+    );
+  };
+
+  const unpinChannel = async (record) => {
+    await updateChannelPinOrders(
+      [{ id: record.id, pin_order: 0 }],
+      t('已取消渠道置顶'),
+    );
+  };
+
+  const movePinnedChannel = async (record, direction) => {
+    const authoritativeRecord =
+      topChannels.find((channel) => channel.id === record.id) || record;
+    const updates = getChannelPinOrderMoveUpdates(
+      authoritativeRecord,
+      topChannels,
+      direction,
+    );
+    await updateChannelPinOrders(updates, t('置顶顺序已更新'));
   };
 
   const locateChannelHealthRuntimeEntry = async (entry) => {

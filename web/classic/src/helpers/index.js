@@ -35,3 +35,7 @@ export * from './desktopRuntime';
 export * from './iframeMessaging';
 export * from './statusStyle';
 export * from './channelBalance';
+export * from './channelPinOrder';
+export * from './channelRouteWeight';
+export * from './deploymentUrl';
+export * from './headerNavModules';
