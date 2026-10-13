@@ -826,8 +826,7 @@ const SystemSetting = () => {
                     style={{ marginBottom: 20, marginTop: 16 }}
                   />
                   <Text>
-                    {t('仅支持')} new-api-worker{' '}
-                    {t('或其兼容new-api-worker格式的其他版本')}
+                    {t('仅支持 new-api-worker 或其兼容格式的其他版本')}
                   </Text>
                   <Row
                     gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
@@ -1593,7 +1592,18 @@ const SystemSetting = () => {
                   </Text>
                   <Banner
                     type='info'
-                    description={`${t('主页链接填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}，${t('重定向 URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/oidc`}
+                    description={t(
+                      '主页链接填 {{url}}，重定向 URL 填 {{callbackUrl}}',
+                      {
+                        url: inputs.ServerAddress
+                          ? inputs.ServerAddress
+                          : t('网站地址'),
+                        callbackUrl:
+                          (inputs.ServerAddress
+                            ? inputs.ServerAddress
+                            : t('网站地址')) + '/oauth/oidc',
+                      },
+                    )}
                     style={{ marginBottom: 20, marginTop: 16 }}
                   />
                   <Text>
@@ -1667,7 +1677,18 @@ const SystemSetting = () => {
                   <Text>{t('用以支持通过 GitHub 进行登录注册')}</Text>
                   <Banner
                     type='info'
-                    description={`${t('Homepage URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}，${t('Authorization callback URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/github`}
+                    description={t(
+                      'Homepage URL 填 {{url}}，Authorization callback URL 填 {{callbackUrl}}',
+                      {
+                        url: inputs.ServerAddress
+                          ? inputs.ServerAddress
+                          : t('网站地址'),
+                        callbackUrl:
+                          (inputs.ServerAddress
+                            ? inputs.ServerAddress
+                            : t('网站地址')) + '/oauth/github',
+                      },
+                    )}
                     style={{ marginBottom: 20, marginTop: 16 }}
                   />
                   <Row
@@ -1698,7 +1719,18 @@ const SystemSetting = () => {
                   <Text>{t('用以支持通过 Discord 进行登录注册')}</Text>
                   <Banner
                     type='info'
-                    description={`${t('Homepage URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}，${t('Authorization callback URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/discord`}
+                    description={t(
+                      'Homepage URL 填 {{url}}，Authorization callback URL 填 {{callbackUrl}}',
+                      {
+                        url: inputs.ServerAddress
+                          ? inputs.ServerAddress
+                          : t('网站地址'),
+                        callbackUrl:
+                          (inputs.ServerAddress
+                            ? inputs.ServerAddress
+                            : t('网站地址')) + '/oauth/discord',
+                      },
+                    )}
                     style={{ marginBottom: 20, marginTop: 16 }}
                   />
                   <Row
@@ -1744,7 +1776,12 @@ const SystemSetting = () => {
                   </Text>
                   <Banner
                     type='info'
-                    description={`${t('回调 URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/linuxdo`}
+                    description={t('回调 URL 填 {{callbackUrl}}', {
+                      callbackUrl:
+                        (inputs.ServerAddress
+                          ? inputs.ServerAddress
+                          : t('网站地址')) + '/oauth/linuxdo',
+                    })}
                     style={{ marginBottom: 20, marginTop: 16 }}
                   />
                   <Row
