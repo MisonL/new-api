@@ -121,7 +121,7 @@ const MissingModelsModal = ({ visible, onClose, onConfigureModel, t }) => {
               {t('未配置的模型列表')}
             </Typography.Text>
             <Typography.Text type='tertiary' size='small'>
-              {t('共')} {missingModels.length} {t('个未配置模型')}
+              {t('共 {{count}} 个未配置模型', { count: missingModels.length })}
             </Typography.Text>
           </div>
         </div>

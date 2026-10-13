@@ -256,7 +256,9 @@ const ViewDetailsModal = ({ visible, onCancel, deployment, t }) => {
                           <FaServer className='text-purple-500' />
                         </Badge>
                         <Text>
-                          {t('总计')} {details.total_gpus} {t('个GPU')}
+                          {t('总计 {{count}} 个GPU', {
+                            count: details.total_gpus,
+                          })}
                         </Text>
                       </div>
                     ),

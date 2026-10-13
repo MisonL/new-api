@@ -104,7 +104,7 @@ const ImageUrlInput = ({
         </Typography.Text>
       ) : (
         <Typography.Text className='text-xs text-gray-500 mb-2 block'>
-          {t('已添加')} {imageUrls.length} {t('张图片')}
+          {t('已添加 {{count}} 张图片', { count: imageUrls.length })}
           {disabled ? ` (${t('自定义模式下不可用')})` : ''}
         </Typography.Text>
       )}

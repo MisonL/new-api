@@ -413,7 +413,9 @@ export const getDeploymentsColumns = ({
             )}
             {showProgress && showRemainingMeta && (
               <div className='text-[10px]' style={{ color: theme.textColor }}>
-                {t('剩余')} {record.compute_minutes_remaining} {t('分钟')}
+                {t('剩余 {{count}} 分钟', {
+                  count: record.compute_minutes_remaining,
+                })}
               </div>
             )}
           </div>
