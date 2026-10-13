@@ -673,7 +673,9 @@ const JSONEditor = ({
         {hasJsonError && (
           <Banner
             type='danger'
-            description={`JSON 格式错误: ${jsonError}`}
+            description={t('JSON 格式错误: {{message}}', {
+              message: jsonError,
+            })}
             className='mb-3'
           />
         )}

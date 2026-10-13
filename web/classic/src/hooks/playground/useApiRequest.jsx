@@ -372,7 +372,9 @@ export const useApiRequest = (
           }
         } catch (error) {
           console.error('Failed to parse SSE message:', error);
-          const errorInfo = `解析错误: ${error.message}`;
+          const errorInfo = t('解析错误: {{message}}', {
+            message: error.message,
+          });
 
           setDebugData((prev) => ({
             ...prev,

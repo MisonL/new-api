@@ -260,7 +260,7 @@ const ExtendDurationModal = ({
   };
 
   const currentRemainingTime = deployment?.time_remaining || '0分钟';
-  const newTotalTime = `${currentRemainingTime} + ${durationHours}${t('小时')}`;
+  const newTotalTime = `${currentRemainingTime} + ${t('{{count}} 小时', { count: durationHours })}`;
 
   const priceData = priceEstimation || {};
   const breakdown = priceData.price_breakdown || priceData.PriceBreakdown || {};
@@ -413,8 +413,8 @@ const ExtendDurationModal = ({
                 }}
               >
                 {hours < 24
-                  ? `${hours}${t('小时')}`
-                  : `${hours / 24}${t('天')}`}
+                  ? t('{{count}} 小时', { count: hours })
+                  : t('{{count}} 天', { count: hours / 24 })}
               </Button>
             ))}
           </Space>
@@ -436,7 +436,7 @@ const ExtendDurationModal = ({
               <div className='flex items-center justify-between'>
                 <Text>{t('延长时长')}:</Text>
                 <Text strong>
-                  {Math.round(durationHours)} {t('小时')}
+                  {t('{{count}} 小时', { count: Math.round(durationHours) })}
                 </Text>
               </div>
 

@@ -317,7 +317,9 @@ const MessageContent = ({
                       <div key={index} className='max-w-sm'>
                         <img
                           src={imgItem.image_url.url}
-                          alt={`用户上传的图片 ${index + 1}`}
+                          alt={t('用户上传的图片 {{index}}', {
+                            index: index + 1,
+                          })}
                           className='rounded-lg max-w-full h-auto shadow-sm border'
                           style={{ maxHeight: '300px' }}
                           onError={(e) => {

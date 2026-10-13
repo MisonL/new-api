@@ -132,13 +132,13 @@ const formatRemainingMinutes = (minutes, t) => {
   const parts = [];
 
   if (days > 0) {
-    parts.push(`${days}${t('天')}`);
+    parts.push(t('{{count}} 天', { count: days }));
   }
   if (hours > 0) {
-    parts.push(`${hours}${t('小时')}`);
+    parts.push(t('{{count}} 小时', { count: hours }));
   }
   if (parts.length === 0 || mins > 0) {
-    parts.push(`${mins}${t('分钟')}`);
+    parts.push(t('{{count}} 分钟', { count: mins }));
   }
 
   return parts.join(' ');
@@ -400,13 +400,13 @@ export const getDeploymentsColumns = ({
                 {humanReadable && (
                   <span className='flex items-center gap-1'>
                     <FaClock className='text-[11px]' />
-                    {t('约')} {humanReadable}
+                    {t('约 {{duration}}', { duration: humanReadable })}
                   </span>
                 )}
                 {percentUsed !== null && (
                   <span className='flex items-center gap-1'>
                     <FaCheckCircle className='text-[11px]' />
-                    {t('已用')} {percentUsed}%
+                    {t('已用 {{percent}}%', { percent: percentUsed })}
                   </span>
                 )}
               </div>

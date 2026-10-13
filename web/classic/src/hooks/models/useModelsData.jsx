@@ -185,7 +185,8 @@ export const useModelsData = () => {
         const skipped = (data?.skipped_models || []).length || 0;
         showSuccess(
           t(
-            `已同步：新增 ${createdModels} 模型，新增 ${createdVendors} 供应商，跳过 ${skipped} 项`,
+            '已同步：新增 {{models}} 模型，新增 {{vendors}} 供应商，跳过 {{skipped}} 项',
+            { models: createdModels, vendors: createdVendors, skipped },
           ),
         );
         await loadVendors();
@@ -238,7 +239,13 @@ export const useModelsData = () => {
         const skipped = (data?.skipped_models || []).length || 0;
         showSuccess(
           t(
-            `完成：新增 ${createdModels} 模型，更新 ${updatedModels} 模型，新增 ${createdVendors} 供应商，跳过 ${skipped} 项`,
+            '完成：新增 {{created}} 模型，更新 {{updated}} 模型，新增 {{vendors}} 供应商，跳过 {{skipped}} 项',
+            {
+              created: createdModels,
+              updated: updatedModels,
+              vendors: createdVendors,
+              skipped,
+            },
           ),
         );
         await loadVendors();
@@ -391,13 +398,16 @@ export const useModelsData = () => {
           successCount++;
         } else {
           showError(
-            `删除模型 ${selectedKeys[index].model_name} 失败: ${res.data.message}`,
+            t('删除模型 {{model}} 失败: {{message}}', {
+              model: selectedKeys[index].model_name,
+              message: res.data.message,
+            }),
           );
         }
       });
 
       if (successCount > 0) {
-        showSuccess(t(`成功删除 ${successCount} 个模型`));
+        showSuccess(t('成功删除 {{count}} 个模型', { count: successCount }));
         setSelectedKeys([]);
         await refresh();
       }

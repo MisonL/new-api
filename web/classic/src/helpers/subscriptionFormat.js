@@ -29,9 +29,11 @@ export function formatSubscriptionDuration(plan, t) {
   };
   if (unit === 'custom') {
     const seconds = plan?.custom_seconds || 0;
-    if (seconds >= 86400) return `${Math.floor(seconds / 86400)} ${t('天')}`;
-    if (seconds >= 3600) return `${Math.floor(seconds / 3600)} ${t('小时')}`;
-    return `${seconds} ${t('秒')}`;
+    if (seconds >= 86400)
+      return t('{{count}} 天', { count: Math.floor(seconds / 86400) });
+    if (seconds >= 3600)
+      return t('{{count}} 小时', { count: Math.floor(seconds / 3600) });
+    return t('{{count}} 秒', { count: seconds });
   }
   return `${value} ${unitLabels[unit] || unit}`;
 }
@@ -44,10 +46,13 @@ export function formatSubscriptionResetPeriod(plan, t) {
   if (period === 'monthly') return t('每月');
   if (period === 'custom') {
     const seconds = Number(plan?.quota_reset_custom_seconds || 0);
-    if (seconds >= 86400) return `${Math.floor(seconds / 86400)} ${t('天')}`;
-    if (seconds >= 3600) return `${Math.floor(seconds / 3600)} ${t('小时')}`;
-    if (seconds >= 60) return `${Math.floor(seconds / 60)} ${t('分钟')}`;
-    return `${seconds} ${t('秒')}`;
+    if (seconds >= 86400)
+      return t('{{count}} 天', { count: Math.floor(seconds / 86400) });
+    if (seconds >= 3600)
+      return t('{{count}} 小时', { count: Math.floor(seconds / 3600) });
+    if (seconds >= 60)
+      return t('{{count}} 分钟', { count: Math.floor(seconds / 60) });
+    return t('{{count}} 秒', { count: seconds });
   }
   return t('不重置');
 }

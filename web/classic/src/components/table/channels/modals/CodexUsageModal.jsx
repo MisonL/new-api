@@ -118,9 +118,11 @@ const formatDurationSeconds = (seconds, t) => {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const secs = total % 60;
-  if (hours > 0) return `${hours}${tt('小时')} ${minutes}${tt('分钟')}`;
-  if (minutes > 0) return `${minutes}${tt('分钟')} ${secs}${tt('秒')}`;
-  return `${secs}${tt('秒')}`;
+  if (hours > 0)
+    return `${tt('{{count}} 小时', { count: hours })} ${tt('{{count}} 分钟', { count: minutes })}`;
+  if (minutes > 0)
+    return `${tt('{{count}} 分钟', { count: minutes })} ${tt('{{count}} 秒', { count: secs })}`;
+  return `${tt('{{count}} 秒', { count: secs })}`;
 };
 
 const formatUnixSeconds = (unixSeconds) => {
