@@ -232,6 +232,12 @@ type RelayInfo struct {
 	// and is used only to build continuation rounds without losing opaque fields.
 	CodexFoldedBaseRequestBody []byte
 
+	// ThinkTagSplitter holds per-request streaming state for think-tag
+	// extraction. It is allocated lazily by the extraction helpers in
+	// think_tag.go only when a frame may carry a tag, so untagged traffic
+	// never pays for the state.
+	ThinkTagSplitter *ThinkTagStreamSplitter
+
 	PriceData types.PriceData
 
 	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
