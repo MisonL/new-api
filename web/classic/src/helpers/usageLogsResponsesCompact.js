@@ -471,7 +471,7 @@ function formatNativeCompactionAttempt(event, t) {
   if (event.upstreamPath) {
     details.push(t('路径：{{path}}', { path: event.upstreamPath }));
   }
-  return details.length > 0 ? details.join('；') : t('已尝试');
+  return details.length > 0 ? details.join(t('；')) : t('已尝试');
 }
 
 function formatAutoFallbackWindow(event, t) {
@@ -488,7 +488,7 @@ function formatAutoFallbackWindow(event, t) {
       }),
     );
   }
-  return details.length > 0 ? details.join('；') : t('已启用');
+  return details.length > 0 ? details.join(t('；')) : t('已启用');
 }
 
 function formatCodexCompaction(event, t) {
@@ -508,7 +508,9 @@ function formatCodexCompaction(event, t) {
   if (event.strategy) {
     details.push(t('策略：{{value}}', { value: event.strategy }));
   }
-  return details.length > 0 ? details.join('；') : event.client || t('已观测');
+  return details.length > 0
+    ? details.join(t('；'))
+    : event.client || t('已观测');
 }
 
 function getGatewayBodyReductionSourceLabel(source, t) {
@@ -545,8 +547,8 @@ function getGatewayBodyReductionValue(event, t) {
   if (event.inputItems !== undefined) {
     parts.push(t('输入项：{{count}}', { count: event.inputItems }));
   }
-  const details = parts.slice(source ? 1 : 0).join('；');
-  return source ? `${source}：${details}` : details;
+  const details = parts.slice(source ? 1 : 0).join(t('；'));
+  return source ? t('{{source}}：{{details}}', { source, details }) : details;
 }
 
 export function getResponsesRoutingEventDisplay(event, t) {

@@ -698,7 +698,9 @@ const AccountManagement = ({
                         </Typography.Text>
                         <div className='mt-2 text-xs text-gray-500 space-y-1'>
                           <div>
-                            {t('最后使用时间')}：{lastUsedLabel}
+                            {t('最后使用时间：{{value}}', {
+                              value: lastUsedLabel,
+                            })}
                           </div>
                           {/*{passkeyEnabled && (*/}
                           {/*  <div>*/}

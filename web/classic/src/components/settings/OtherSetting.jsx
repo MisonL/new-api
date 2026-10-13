@@ -545,7 +545,7 @@ const OtherSetting = () => {
         </Form>
       </Col>
       <Modal
-        title={t('新版本') + '：' + updateData.tag_name}
+        title={t('新版本：{{version}}', { version: updateData.tag_name })}
         visible={showUpdateModal}
         onCancel={() => setShowUpdateModal(false)}
         footer={[

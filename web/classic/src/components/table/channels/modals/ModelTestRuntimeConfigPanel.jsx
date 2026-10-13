@@ -113,7 +113,9 @@ const RuntimeSummaryTag = ({
     <button
       type='button'
       className='m-0 inline-flex cursor-pointer border-0 bg-transparent p-0 text-left transition-opacity hover:opacity-80'
-      title={`${label}: ${text}。${t('点击打开渠道编辑')}`}
+      title={t('{{value}}。点击打开渠道编辑', {
+        value: `${label}: ${text}`,
+      })}
       onClick={onEdit}
     >
       <Tag color={color} size='small'>

@@ -450,7 +450,7 @@ export const useApiRequest = (
           source.status !== 200 &&
           !isStreamComplete
         ) {
-          const errorInfo = handleApiError(new Error('HTTP状态错误'));
+          const errorInfo = handleApiError(new Error(t('HTTP状态错误')));
           errorInfo.status = source.status;
           errorInfo.readyState = source.readyState;
 

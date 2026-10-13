@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+import i18next from 'i18next';
+
 function getWindowObject() {
   if (typeof window === 'undefined') {
     return null;
@@ -68,7 +70,7 @@ export async function openDesktopExternalUrl(url) {
 
   const currentWindow = getWindowObject();
   if (!currentWindow || typeof currentWindow.open !== 'function') {
-    throw new Error('当前环境不支持打开外部链接');
+    throw new Error(i18next.t('当前环境不支持打开外部链接'));
   }
 
   currentWindow.open(String(url), '_blank', 'noopener,noreferrer');

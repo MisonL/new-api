@@ -96,7 +96,7 @@ const SubscriptionPurchaseModal = ({
             <div className='space-y-3'>
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>
-                  {t('套餐名称')}：
+                  {t('套餐名称：')}
                 </Text>
                 <Typography.Text
                   ellipsis={{ rows: 1, showTooltip: true }}
@@ -108,7 +108,7 @@ const SubscriptionPurchaseModal = ({
               </div>
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>
-                  {t('有效期')}：
+                  {t('有效期：')}
                 </Text>
                 <div className='flex items-center'>
                   <CalendarClock size={14} className='mr-1 text-slate-500' />
@@ -120,7 +120,7 @@ const SubscriptionPurchaseModal = ({
               {formatSubscriptionResetPeriod(plan, t) !== t('不重置') && (
                 <div className='flex justify-between items-center'>
                   <Text strong className='text-slate-700 dark:text-slate-200'>
-                    {t('重置周期')}：
+                    {t('重置周期：')}
                   </Text>
                   <Text className='text-slate-900 dark:text-slate-100'>
                     {formatSubscriptionResetPeriod(plan, t)}
@@ -129,12 +129,14 @@ const SubscriptionPurchaseModal = ({
               )}
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>
-                  {t('总额度')}：
+                  {t('总额度：')}
                 </Text>
                 <div className='flex items-center'>
                   <Package size={14} className='mr-1 text-slate-500' />
                   {totalAmount > 0 ? (
-                    <Tooltip content={`${t('原生额度')}：${totalAmount}`}>
+                    <Tooltip
+                      content={t('原生额度：{{value}}', { value: totalAmount })}
+                    >
                       <Text className='text-slate-900 dark:text-slate-100'>
                         {renderQuota(totalAmount)}
                       </Text>
@@ -149,7 +151,7 @@ const SubscriptionPurchaseModal = ({
               {plan?.upgrade_group ? (
                 <div className='flex justify-between items-center'>
                   <Text strong className='text-slate-700 dark:text-slate-200'>
-                    {t('升级分组')}：
+                    {t('升级分组：')}
                   </Text>
                   <Text className='text-slate-900 dark:text-slate-100'>
                     {plan.upgrade_group}
@@ -159,7 +161,7 @@ const SubscriptionPurchaseModal = ({
               <Divider margin={8} />
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>
-                  {t('应付金额')}：
+                  {t('应付金额：')}
                 </Text>
                 <Text strong className='text-xl text-purple-600'>
                   {symbol}
@@ -182,7 +184,7 @@ const SubscriptionPurchaseModal = ({
           {hasAnyPayment ? (
             <div className='space-y-3'>
               <Text size='small' type='tertiary'>
-                {t('选择支付方式')}：
+                {t('选择支付方式：')}
               </Text>
 
               {/* Stripe / Creem */}

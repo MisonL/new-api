@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import axios from 'axios';
+import i18next from 'i18next';
 import { getUserIdFromLocalStorage, showError } from './utils';
 import { handleAuthExpired } from './authRedirect';
 import { isReadonlyBlockedRequest as shouldBlockReadonlyRequest } from './readonlyGuard';
@@ -57,7 +58,7 @@ function applyReadonlyRequestGuard(instance) {
     }
 
     if (isReadonlyBlockedRequest(config.method, config.url)) {
-      return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
+      return Promise.reject(new Error(i18next.t(READONLY_FRONTEND_MESSAGE)));
     }
 
     return config;
@@ -93,7 +94,7 @@ function installReadonlyFetchGuard() {
           ? input.href
           : input.url;
     if (isReadonlyBlockedRequest(method, url)) {
-      return Promise.reject(new Error(READONLY_FRONTEND_MESSAGE));
+      return Promise.reject(new Error(i18next.t(READONLY_FRONTEND_MESSAGE)));
     }
     return originalFetch(input, init);
   };

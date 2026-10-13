@@ -72,10 +72,10 @@ const ConfirmationDialog = ({
     >
       <div className='space-y-4'>
         <Text type='danger' strong>
-          {t('此操作具有风险，请确认要继续执行')}。
+          {t('此操作具有风险，请确认要继续执行。')}
         </Text>
         <Text>
-          {t('请输入部署名称以完成二次确认')}：
+          {t('请输入部署名称以完成二次确认：')}
           <Text code className='ml-1'>
             {requiredText || t('未知部署')}
           </Text>

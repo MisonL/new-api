@@ -333,7 +333,7 @@ const PageLayout = () => {
                   lineHeight: 1.5,
                 }}
               >
-                {READONLY_FRONTEND_MESSAGE}
+                {t(READONLY_FRONTEND_MESSAGE)}
               </div>
             )}
             <ErrorBoundary>

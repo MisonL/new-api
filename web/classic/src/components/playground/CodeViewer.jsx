@@ -186,7 +186,7 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
     }
     return (
       formattedContent.substring(0, PERFORMANCE_CONFIG.PREVIEW_LENGTH) +
-      '\n\n// ... 内容被截断以提升性能 ...'
+      t('\n\n// ... 内容被截断以提升性能 ...')
     );
   }, [formattedContent, contentMetrics.isLarge, isExpanded]);
 

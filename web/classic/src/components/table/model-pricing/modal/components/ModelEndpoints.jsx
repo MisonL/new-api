@@ -48,7 +48,7 @@ const ModelEndpoints = ({ modelData, endpointMap = {}, t }) => {
           <span className='flex items-center pr-5'>
             <Badge dot type='success' className='mr-2' />
             {type}
-            {path && '：'}
+            {path && t('{{value}}：', { value: type })}
             {path && (
               <span className='text-gray-500 md:ml-1 break-all'>{path}</span>
             )}

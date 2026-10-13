@@ -82,7 +82,10 @@ function formatChannelAttempt(attempt, t) {
   if (error) {
     details.push(t('错误：{{error}}', { error }));
   }
-  return `${formatChannelLabel(attempt.channel_id, t)}；${details.join('；')}`;
+  return t('{{channel}}：{{details}}', {
+    channel: formatChannelLabel(attempt.channel_id, t),
+    details: details.join(t('；')),
+  });
 }
 
 function RoutingOverview({ other, t }) {
@@ -219,7 +222,10 @@ export function ResponsesRoutingTrace({ other, t, compact = false }) {
                   {t('跳过渠道')}
                 </span>
                 <span className='usage-log-routing-trace-event-value is-code'>
-                  {formatChannelLabel(skip.channel_id, t)}；{skip.reason}
+                  {t('{{channel}}；{{reason}}', {
+                    channel: formatChannelLabel(skip.channel_id, t),
+                    reason: skip.reason,
+                  })}
                 </span>
               </div>
             ))}

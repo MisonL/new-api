@@ -95,10 +95,10 @@ function buildChannelAffinityTooltip(affinity, t) {
 
   const lines = [
     t('渠道亲和性'),
-    `${t('规则')}：${affinity.rule_name || '-'}`,
-    `${t('分组')}：${affinity.selected_group || '-'}`,
-    `${t('Key')}：${keyText}`,
-    ...(keyHint ? [`${t('Key 摘要')}：${keyHint}`] : []),
+    t('规则：{{value}}', { value: affinity.rule_name || '-' }),
+    t('分组：{{value}}', { value: affinity.selected_group || '-' }),
+    t('Key：{{value}}', { value: keyText }),
+    ...(keyHint ? [t('Key 摘要：{{value}}', { value: keyHint })] : []),
   ];
 
   return (
@@ -379,7 +379,7 @@ function buildStreamStatusTooltip(ss, t) {
   const reasonLabel = isCanceled
     ? t('客户端已断开')
     : ss.end_reason || 'unknown';
-  const lines = [t('流状态') + '：' + statusLabel, reasonLabel];
+  const lines = [t('流状态：{{value}}', { value: statusLabel }), reasonLabel];
   if (ss.error_count > 0) {
     lines.push(`${t('软错误')}: ${ss.error_count}`);
   }
@@ -1156,10 +1156,12 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
         groupText ? { text: groupText, tone: 'primary' } : null,
         { text: t('违规扣费'), tone: 'primary' },
         {
-          text: `${t('扣费')}：${renderQuota(feeQuota, 6)}`,
+          text: t('扣费：{{value}}', { value: renderQuota(feeQuota, 6) }),
           tone: 'secondary',
         },
-        text ? { text: `${t('详情')}：${text}`, tone: 'secondary' } : null,
+        text
+          ? { text: t('详情：{{value}}', { value: text }), tone: 'secondary' }
+          : null,
       ].filter(Boolean),
     };
   }
@@ -1205,7 +1207,7 @@ export const getLogsColumns = ({
       render: (text, record, index) => {
         let isMultiKey = false;
         let multiKeyIndex = -1;
-        let content = t('渠道') + `：${record.channel}`;
+        let content = t('渠道：{{value}}', { value: record.channel });
         let routeText = String(record.channel || '');
         let affinity = null;
         let showMarker = false;
@@ -1221,7 +1223,7 @@ export const getLogsColumns = ({
             adminInfo.use_channel.length > 0
           ) {
             routeText = adminInfo.use_channel.join(' -> ');
-            content = t('渠道') + `：${routeText}`;
+            content = t('渠道：{{value}}', { value: routeText });
           }
           if (adminInfo.channel_affinity) {
             affinity = adminInfo.channel_affinity;
@@ -1628,7 +1630,11 @@ export const getLogsColumns = ({
         if (isSubscription) {
           // Subscription billed: show only tag (no $0), but keep tooltip for equivalent cost.
           return (
-            <Tooltip content={`${t('由订阅抵扣')}：${renderQuota(text, 6)}`}>
+            <Tooltip
+              content={t('由订阅抵扣：{{value}}', {
+                value: renderQuota(text, 6),
+              })}
+            >
               <span>{renderBillingTag(record, t)}</span>
             </Tooltip>
           );
@@ -1708,7 +1714,7 @@ export const getLogsColumns = ({
         if (!(record.type === 2 || record.type === 5)) {
           return <></>;
         }
-        let content = t('渠道') + `：${record.channel}`;
+        let content = t('渠道：{{value}}', { value: record.channel });
         if (record.other !== '') {
           let other = JSON.parse(record.other);
           if (other === null) {
@@ -1722,7 +1728,7 @@ export const getLogsColumns = ({
             ) {
               let useChannel = other.admin_info.use_channel;
               let useChannelStr = useChannel.join('->');
-              content = t('渠道') + `：${useChannelStr}`;
+              content = t('渠道：{{value}}', { value: useChannelStr });
             }
           }
         }

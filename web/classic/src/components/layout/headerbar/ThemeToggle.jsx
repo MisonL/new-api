@@ -103,8 +103,9 @@ const ThemeToggle = ({ theme, onThemeToggle, t }) => {
           ))}
           {theme === 'auto' && (
             <div className='mt-1 border-t border-semi-color-border px-3 py-2 text-xs text-semi-color-text-2 dark:border-gray-600 dark:text-gray-400'>
-              {t('当前跟随系统')}：
-              {actualTheme === 'dark' ? t('深色') : t('浅色')}
+              {t('当前跟随系统：{{value}}', {
+                value: actualTheme === 'dark' ? t('深色') : t('浅色'),
+              })}
             </div>
           )}
         </>

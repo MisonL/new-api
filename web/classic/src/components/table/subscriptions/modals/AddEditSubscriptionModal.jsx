@@ -315,8 +315,11 @@ const AddEditSubscriptionModal = ({
                         min={0}
                         precision={2}
                         rules={[{ required: true, message: t('请输入总额度') }]}
-                        extraText={`${t('0 表示不限')} · ${t('原生额度')}：${displayAmountToQuota(
-                          values.total_amount,
+                        extraText={`${t('0 表示不限')} · ${t(
+                          '原生额度：{{value}}',
+                          {
+                            value: displayAmountToQuota(values.total_amount),
+                          },
                         )}`}
                         style={{ width: '100%' }}
                       />

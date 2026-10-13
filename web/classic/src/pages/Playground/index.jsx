@@ -214,7 +214,8 @@ const Playground = () => {
                 (url) => url.trim() !== '',
               );
               if (validImageUrls.length > 0) {
-                const textContent = getTextContent(messages[i]) || '示例消息';
+                const textContent =
+                  getTextContent(messages[i]) || t('示例消息');
                 const content = buildMessageContent(
                   textContent,
                   validImageUrls,

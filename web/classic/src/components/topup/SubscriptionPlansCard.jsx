@@ -454,7 +454,9 @@ const SubscriptionPlansCard = ({
                           {t('总额度')}:{' '}
                           {totalAmount > 0 ? (
                             <Tooltip
-                              content={`${t('原生额度')}：${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`}
+                              content={t('原生额度：{{value}}', {
+                                value: `${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`,
+                              })}
                             >
                               <span>
                                 {renderQuota(usedAmount)}/
@@ -518,7 +520,9 @@ const SubscriptionPlansCard = ({
                   totalAmount > 0
                     ? {
                         label: totalLabel,
-                        tooltip: `${t('原生额度')}：${totalAmount}`,
+                        tooltip: t('原生额度：{{value}}', {
+                          value: totalAmount,
+                        }),
                       }
                     : { label: totalLabel },
                   limitLabel ? { label: limitLabel } : null,

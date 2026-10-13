@@ -649,7 +649,7 @@ export const useLogsData = () => {
     if (isAdminUser && (log.type === 0 || log.type === 2 || log.type === 6)) {
       expandDataLocal.push({
         key: t('渠道信息'),
-        value: `${log.channel} - ${log.channel_name || '[未知]'}`,
+        value: `${log.channel} - ${log.channel_name || t('[未知]')}`,
       });
     }
     if (log.request_id) {
@@ -927,9 +927,13 @@ export const useLogsData = () => {
         });
       }
       const settlementLines = [
-        `${t('预扣')}：${pre} ${unit}`,
-        `${t('结算差额')}：${postDelta > 0 ? '+' : ''}${postDelta} ${unit}`,
-        `${t('最终抵扣')}：${finalConsumed} ${unit}`,
+        t('预扣：{{value}}', { value: pre + ' ' + unit }),
+        t('结算差额：{{value}}', {
+          value: (postDelta > 0 ? '+' : '') + postDelta + ' ' + unit,
+        }),
+        t('最终抵扣：{{value}}', {
+          value: finalConsumed + ' ' + unit,
+        }),
       ].join('\n');
       expandDataLocal.push({
         key: t('订阅结算'),

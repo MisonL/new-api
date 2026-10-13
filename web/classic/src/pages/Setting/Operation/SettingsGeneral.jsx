@@ -383,7 +383,7 @@ export default function GeneralSettings(props) {
               </Col>
               <Col span={24}>
                 <Text type='tertiary' size='small'>
-                  {t('预览效果')}：{previewText}
+                  {t('预览效果：{{value}}', { value: previewText })}
                 </Text>
               </Col>
             </Row>

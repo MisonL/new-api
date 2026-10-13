@@ -1890,11 +1890,15 @@ export default function TieredPricingEditor({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Text strong style={{ fontSize: 15 }}>
-                  {t('预计费用')}：{renderQuota(evalResult.cost, 4)}
+                  {t('预计费用：{{value}}', {
+                    value: renderQuota(evalResult.cost, 4),
+                  })}
                 </Text>
                 {evalResult.matchedTier && (
                   <Tag size='small' color='blue' type='light'>
-                    {t('命中档位')}：{evalResult.matchedTier}
+                    {t('命中档位：{{value}}', {
+                      value: evalResult.matchedTier,
+                    })}
                   </Tag>
                 )}
               </div>
@@ -1906,7 +1910,9 @@ export default function TieredPricingEditor({
                   color: 'var(--semi-color-text-3)',
                 }}
               >
-                {t('原始额度')}：{evalResult.cost.toLocaleString()}
+                {t('原始额度：{{value}}', {
+                  value: evalResult.cost.toLocaleString(),
+                })}
               </Text>
             </div>
           )}

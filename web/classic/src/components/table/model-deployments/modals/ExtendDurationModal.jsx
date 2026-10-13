@@ -259,7 +259,7 @@ const ExtendDurationModal = ({
     onCancel();
   };
 
-  const currentRemainingTime = deployment?.time_remaining || '0分钟';
+  const currentRemainingTime = deployment?.time_remaining || t('0分钟');
   const newTotalTime = `${currentRemainingTime} + ${t('{{count}} 小时', { count: durationHours })}`;
 
   const priceData = priceEstimation || {};

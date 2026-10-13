@@ -285,12 +285,23 @@ const EditUserModal = (props) => {
     switch (adjustMode) {
       case 'add':
         result = current + Math.abs(val);
-        return `${t('当前额度')}：${renderQuota(current)}，+${renderQuota(Math.abs(val))} = ${renderQuota(result)}`;
+        return t('当前额度：{{current}}，+{{change}} = {{result}}', {
+          current: renderQuota(current),
+          change: renderQuota(Math.abs(val)),
+          result: renderQuota(result),
+        });
       case 'subtract':
         result = current - Math.abs(val);
-        return `${t('当前额度')}：${renderQuota(current)}，-${renderQuota(Math.abs(val))} = ${renderQuota(result)}`;
+        return t('当前额度：{{current}}，-{{change}} = {{result}}', {
+          current: renderQuota(current),
+          change: renderQuota(Math.abs(val)),
+          result: renderQuota(result),
+        });
       case 'override':
-        return `${t('当前额度')}：${renderQuota(current)} → ${renderQuota(val)}`;
+        return t('当前额度：{{current}} → {{value}}', {
+          current: renderQuota(current),
+          value: renderQuota(val),
+        });
       default:
         return '';
     }

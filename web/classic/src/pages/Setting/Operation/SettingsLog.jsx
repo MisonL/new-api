@@ -118,13 +118,13 @@ export default function SettingsLog(props) {
       content: (
         <div style={{ lineHeight: '1.8' }}>
           <p>
-            <Text>{t('当前时间')}：</Text>
+            <Text>{t('当前时间：')}</Text>
             <Text strong style={{ color: '#52c41a' }}>
               {currentTime}
             </Text>
           </p>
           <p>
-            <Text>{t('选择时间')}：</Text>
+            <Text>{t('选择时间：')}</Text>
             <Text strong type='danger'>
               {targetTime}
             </Text>
@@ -146,7 +146,7 @@ export default function SettingsLog(props) {
             }}
           >
             <Text strong style={{ color: '#d46b08' }}>
-              {t('注意')}：
+              {t('注意：')}
             </Text>
             <Text style={{ color: '#333' }}>{t('将删除')} </Text>
             <Text strong style={{ color: '#cf1322' }}>

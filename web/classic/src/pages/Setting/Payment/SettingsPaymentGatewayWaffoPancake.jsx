@@ -250,7 +250,7 @@ export default function SettingsPaymentGatewayWaffoPancake(props) {
                   }}
                 />
                 <br />
-                {t('回调地址')}：
+                {t('回调地址：')}
                 {props.options.ServerAddress
                   ? removeTrailingSlash(props.options.ServerAddress)
                   : t('网站地址')}

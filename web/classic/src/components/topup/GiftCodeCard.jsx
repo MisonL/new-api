@@ -372,7 +372,9 @@ const GiftCodeCard = ({
                       <Text>{renderQuota(giftCode.quota)}</Text>
                       {giftCode.received_username && (
                         <Text type='tertiary'>
-                          {t('接收人')}：{giftCode.received_username}
+                          {t('接收人：{{value}}', {
+                            value: giftCode.received_username,
+                          })}
                         </Text>
                       )}
                     </Space>
@@ -418,14 +420,18 @@ const GiftCodeCard = ({
         {receiveInfo && (
           <Space vertical align='start' style={{ width: '100%' }}>
             <Text>
-              {t('赠送人')}：{receiveInfo.creator_username || '-'}
+              {t('赠送人：{{value}}', {
+                value: receiveInfo.creator_username || '-',
+              })}
             </Text>
             <Text>
-              {t('礼品额度')}：{renderQuota(receiveInfo.quota)}
+              {t('礼品额度：{{value}}', {
+                value: renderQuota(receiveInfo.quota),
+              })}
             </Text>
             {receiveInfo.message && (
               <Text>
-                {t('留言')}：{receiveInfo.message}
+                {t('留言：{{value}}', { value: receiveInfo.message })}
               </Text>
             )}
             <TextArea

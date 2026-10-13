@@ -120,7 +120,7 @@ export const useDashboardCharts = (
     title: {
       visible: true,
       text: t('模型调用次数占比'),
-      subtext: `${t('总计')}：${renderNumber(0)}`,
+      subtext: t('总计：{{value}}', { value: renderNumber(0) }),
     },
     legends: {
       visible: true,
@@ -163,7 +163,7 @@ export const useDashboardCharts = (
     title: {
       visible: true,
       text: t('模型消耗分布'),
-      subtext: `${t('总计')}：${renderQuota(0, 2)}`,
+      subtext: t('总计：{{value}}', { value: renderQuota(0, 2) }),
     },
     bar: {
       state: {
@@ -592,7 +592,7 @@ export const useDashboardCharts = (
       updateChartSpec(
         setSpecPie,
         newPieData,
-        `${t('总计')}：${renderNumber(totalTimes)}`,
+        t('总计：{{value}}', { value: renderNumber(totalTimes) }),
         displayModelColors,
         'id0',
       );
@@ -600,7 +600,7 @@ export const useDashboardCharts = (
       updateChartSpec(
         setSpecLine,
         newLineData,
-        `${t('总计')}：${renderQuota(totalQuota, 2)}`,
+        t('总计：{{value}}', { value: renderQuota(totalQuota, 2) }),
         displayModelColors,
         'barData',
       );
@@ -656,7 +656,7 @@ export const useDashboardCharts = (
       updateChartSpec(
         setSpecModelLine,
         modelLineData,
-        `${t('总计')}：${renderNumber(totalTimes)}`,
+        t('总计：{{value}}', { value: renderNumber(totalTimes) }),
         displayModelColors,
         'lineData',
       );
@@ -664,7 +664,7 @@ export const useDashboardCharts = (
       updateChartSpec(
         setSpecRankBar,
         rankData,
-        `${t('总计')}：${renderNumber(totalTimes)}`,
+        t('总计：{{value}}', { value: renderNumber(totalTimes) }),
         displayModelColors,
         'rankData',
       );
@@ -714,7 +714,9 @@ export const useDashboardCharts = (
         data: [{ id: 'userRankData', values: userRankValues }],
         title: {
           ...prev.title,
-          subtext: `${t('总计')}：${renderQuota(totalUserQuota, 2)}`,
+          subtext: t('总计：{{value}}', {
+            value: renderQuota(totalUserQuota, 2),
+          }),
         },
       }));
 
@@ -730,7 +732,9 @@ export const useDashboardCharts = (
         data: [{ id: 'userTrendData', values: userTrendValues }],
         title: {
           ...prev.title,
-          subtext: `${t('总计')}：${renderQuota(totalUserQuota, 2)}`,
+          subtext: t('总计：{{value}}', {
+            value: renderQuota(totalUserQuota, 2),
+          }),
         },
       }));
     },

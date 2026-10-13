@@ -264,7 +264,7 @@ function formatEventContext(event, t) {
         }),
       );
     }
-    return details.join('；');
+    return details.join(t('；'));
   }
 
   const details = [];
@@ -293,7 +293,7 @@ function formatEventContext(event, t) {
     event.routeKey ? `route=${event.routeKey.slice(0, 12)}` : '',
   ].filter(Boolean);
   if (route.length > 0) details.push(route.join(' | '));
-  return details.length > 0 ? details.join('；') : t('无额外详情');
+  return details.length > 0 ? details.join(t('；')) : t('无额外详情');
 }
 
 export function getChannelHealthRoutingEventDisplay(event, t) {

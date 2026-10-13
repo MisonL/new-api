@@ -486,7 +486,7 @@ export default function SettingsChannelAffinity(props) {
       title: t('确认清空该规则缓存'),
       content: (
         <div style={{ lineHeight: '1.6' }}>
-          <Text>{t('规则')}：</Text> <Text strong>{name}</Text>
+          <Text>{t('规则：')}</Text> <Text strong>{name}</Text>
         </div>
       ),
       onOk: async () => {
@@ -1418,7 +1418,7 @@ export default function SettingsChannelAffinity(props) {
           </Text>
           <div style={{ marginTop: 8, marginBottom: 8 }}>
             <Text type='tertiary' size='small'>
-              {t('常用上下文 Key（用于 context_*）')}：
+              {t('常用上下文 Key（用于 context_*）：')}
             </Text>
             <div style={{ marginTop: 6 }}>
               {(CONTEXT_KEY_PRESETS || []).map((x) => (
