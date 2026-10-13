@@ -344,5 +344,69 @@ class BareCitationTests(unittest.TestCase):
         self.assertIn("blank at base", failures[0][2])
 
 
+class SlashLineListTests(unittest.TestCase):
+    """第 52 轮：`path.go:33/81/102` 形态的斜杠行号列表此前只核对第一个行号，
+    其余静默失检（9.2.4 一行 10 个测试行号仅 1 个进闸门）。行号组改为
+    `\\d+(?:/\\d+)*` 后，全部提取器必须把列表展开为逐行引用。"""
+
+    def test_expand_lines_splits_and_sorts_not(self):
+        # 顺序保持原样，不去重排序（去重由调用方 seen/claimed 逻辑负责）。
+        self.assertEqual(list(MODULE._expand_lines("33/81/102")), [33, 81, 102])
+        self.assertEqual(list(MODULE._expand_lines("18")), [18])
+
+    def test_extract_citations_expands_slash_list(self):
+        text = "relaykit/dto/values.go:1/2/3"
+        self.assertEqual(
+            MODULE.extract_citations(text),
+            [("relaykit/dto/values.go", 1), ("relaykit/dto/values.go", 2),
+             ("relaykit/dto/values.go", 3)],
+        )
+
+    def test_short_citation_expands_slash_list(self):
+        text = "internal/oai_chat/to_claude_messages_resp.go:100/101"
+        self.assertEqual(
+            MODULE.extract_citations(text),
+            [("relaykit/relayconvert/internal/oai_chat/to_claude_messages_resp.go", 100),
+             ("relaykit/relayconvert/internal/oai_chat/to_claude_messages_resp.go", 101)],
+        )
+
+    def test_host_citation_expands_slash_list(self):
+        text = "service/convert.go:526/527"
+        self.assertEqual(
+            MODULE.extract_host_citations(text),
+            [("service/convert.go", 526), ("service/convert.go", 527)],
+        )
+
+    def test_upstream_full_expands_slash_list(self):
+        text = "upstream/main:relay/claude_handler.go:41/42"
+        self.assertEqual(
+            MODULE.extract_upstream_full(text),
+            [("relay/claude_handler.go", 41), ("relay/claude_handler.go", 42)],
+        )
+
+    def test_bare_citation_expands_slash_list(self):
+        text = "relay-claude.go:37/38"
+        self.assertEqual(
+            MODULE.extract_bare_citations(text),
+            [("relay-claude.go", 37), ("relay-claude.go", 38)],
+        )
+
+    def test_bare_subtraction_covers_all_list_members(self):
+        # 全路径引用展开后，裸引用扫描必须逐个扣除，而不是只扣第一个。
+        text = "relaykit/dto/values.go:1/2 dto/values.go:1/2"
+        self.assertEqual(MODULE.extract_bare_citations(text), [])
+
+    def test_check_slash_list_checks_every_line(self):
+        # 第二个行号越界必须失败——这是第 52 轮盲区的反向验证。
+        doc = "relaykit/dto/values.go:1/99"
+        lines = ["package dto"]
+
+        ok, failures = MODULE.check(doc, "ref", reader=lambda r, p: lines)
+
+        self.assertEqual(ok, 1)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("out of range", failures[0][2])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -54,7 +54,18 @@ import re
 import subprocess
 import sys
 
-CITATION = re.compile(r"relaykit/([A-Za-z0-9_./-]+\.go):(\d+)")
+def _expand_lines(spec):
+    """展开 `33/81/102` 这类斜杠行号列表为 int 迭代。
+
+    文档大量把同一文件的多个行号压成 `path.go:33/81/102/...`（第 52 轮发现：
+    9.2.4 一整行的 10 个测试行号只有第一个进闸门，其余静默失检）。五个提取
+    正则的行号组改为 `\\d+(?:/\\d+)*`，各提取器经本函数展开为逐行 (path, line)。
+    """
+    for part in spec.split("/"):
+        yield int(part)
+
+
+CITATION = re.compile(r"relaykit/([A-Za-z0-9_./-]+\.go):(\d+(?:/\d+)*)")
 
 # The doc also cites relaykit files by shorthand that omits the
 # `relaykit/relayconvert/` prefix -- e.g. `internal/oai_chat/foo.go:12`,
@@ -82,7 +93,7 @@ SHORT_PACKAGES = {
 
 SHORT_CITATION = re.compile(
     r"(?<![A-Za-z0-9_./-])"
-    r"((?:" + "|".join(SHORT_PACKAGES) + r")/[A-Za-z0-9_./-]+\.go):(\d+)"
+    r"((?:" + "|".join(SHORT_PACKAGES) + r")/[A-Za-z0-9_./-]+\.go):(\d+(?:/\d+)*)"
 )
 
 DEFAULT_REF = "upstream/main"
@@ -117,22 +128,23 @@ HOST_SUFFIX = r"\.(?:go|sh|py|yml|yaml|md|json)"
 # extract_upstream_full / their sha form respectively).
 HOST_CITATION = re.compile(
     r"(?<![A-Za-z0-9_./:-])((?:" + "|".join(HOST_DIRS) + r")/[A-Za-z0-9_./-]+"
-    + HOST_SUFFIX + r"):(\d+)"
+    + HOST_SUFFIX + r"):(\d+(?:/\d+)*)"
 )
 
 # Full-format upstream citations for non-relaykit host paths. relaykit/ paths
 # under this prefix are already captured by CITATION (it has no lookbehind);
 # duplicates are dropped by (path, line) in main().
 UPSTREAM_FULL = re.compile(
-    r"upstream/main:([A-Za-z0-9_./-]+" + HOST_SUFFIX + r"):(\d+)"
+    r"upstream/main:([A-Za-z0-9_./-]+" + HOST_SUFFIX + r"):(\d+(?:/\d+)*)"
 )
 
 
 def extract_host_citations(text):
     """Bare host citations as sorted unique (path, line) pairs."""
     seen = {}
-    for path, line in HOST_CITATION.findall(text):
-        seen.setdefault((path, int(line)), None)
+    for path, spec in HOST_CITATION.findall(text):
+        for line in _expand_lines(spec):
+            seen.setdefault((path, line), None)
     return sorted(seen)
 
 
@@ -143,10 +155,11 @@ def extract_upstream_full(text):
     has no lookbehind), so they are dropped here to avoid double counting.
     """
     seen = {}
-    for path, line in UPSTREAM_FULL.findall(text):
+    for path, spec in UPSTREAM_FULL.findall(text):
         if path.startswith("relaykit/"):
             continue
-        seen.setdefault((path, int(line)), None)
+        for line in _expand_lines(spec):
+            seen.setdefault((path, line), None)
     return sorted(seen)
 
 
@@ -180,7 +193,7 @@ def list_go_files(ref, prefix=None):
 # lookbehind keeps the match from starting mid-path or just after a `:` --
 # the latter also excludes `upstream/main:<path>` and `dbfbc096f:<path>` forms,
 # which the upstream-full extractor handles.
-BARE_CITATION = re.compile(r"(?<![A-Za-z0-9_./:-])([A-Za-z0-9_./-]+\.go):(\d+)")
+BARE_CITATION = re.compile(r"(?<![A-Za-z0-9_./:-])([A-Za-z0-9_./-]+\.go):(\d+(?:/\d+)*)")
 
 
 def _raw_claimed(text):
@@ -190,12 +203,15 @@ def _raw_claimed(text):
     citation. Group(1) of each extractor is the path as it appears in the doc.
     """
     claimed = set()
-    for path, line in CITATION.findall(text):
-        claimed.add(("relaykit/" + path, int(line)))
-    for path, line in SHORT_CITATION.findall(text):
-        claimed.add((path, int(line)))
-    for path, line in HOST_CITATION.findall(text):
-        claimed.add((path, int(line)))
+    for path, spec in CITATION.findall(text):
+        for line in _expand_lines(spec):
+            claimed.add(("relaykit/" + path, line))
+    for path, spec in SHORT_CITATION.findall(text):
+        for line in _expand_lines(spec):
+            claimed.add((path, line))
+    for path, spec in HOST_CITATION.findall(text):
+        for line in _expand_lines(spec):
+            claimed.add((path, line))
     return claimed
 
 
@@ -203,13 +219,14 @@ def extract_bare_citations(text):
     """Bare `path.go:line` refs not already covered by the three extractors."""
     claimed = _raw_claimed(text)
     seen = {}
-    for path, line in BARE_CITATION.findall(text):
+    for path, spec in BARE_CITATION.findall(text):
         if path.startswith("relaykit/"):
             continue
-        key = (path, int(line))
-        if key in claimed:
-            continue
-        seen.setdefault(key, None)
+        for line in _expand_lines(spec):
+            key = (path, line)
+            if key in claimed:
+                continue
+            seen.setdefault(key, None)
     return sorted(seen)
 
 
@@ -342,12 +359,14 @@ def _expand(path):
 def extract_citations(text):
     """Return sorted unique (path, line) pairs, path relative to repo root."""
     seen = {}
-    for path, line in CITATION.findall(text):
-        seen.setdefault(("relaykit/" + path, int(line)), None)
-    for path, line in SHORT_CITATION.findall(text):
+    for path, spec in CITATION.findall(text):
+        for line in _expand_lines(spec):
+            seen.setdefault(("relaykit/" + path, line), None)
+    for path, spec in SHORT_CITATION.findall(text):
         expanded = _expand(path)
         if expanded is not None:
-            seen.setdefault((expanded, int(line)), None)
+            for line in _expand_lines(spec):
+                seen.setdefault((expanded, line), None)
     return sorted(seen)
 
 
