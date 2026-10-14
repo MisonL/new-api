@@ -1091,9 +1091,13 @@ func ResponseOpenAI2ClaudeWithError(openAIResponse *dto.OpenAITextResponse, info
 		if tagVisible, tagReasoning, tagFound := relaycommon.SplitThinkTaggedContent(taggedText); tagFound {
 			choice.Message.Content = tagVisible
 			// 与流式 appendReasoningWithoutDuplication 对齐：已有推理内容时
-			// 追加而非丢弃，tag 内文本不丢失。
+			// 按包含关系判重后追加，上游双写 reasoning_content 与 think 标签
+			// 且内容一致时不输出两份推理；tag 内为空不引入孤立换行。
 			if existing := choice.Message.GetReasoningContent(); existing != "" {
-				merged := existing + "\n" + tagReasoning
+				merged := existing
+				if tagReasoning != "" && !strings.Contains(existing, tagReasoning) {
+					merged += "\n" + tagReasoning
+				}
 				choice.Message.ReasoningContent = &merged
 			} else {
 				choice.Message.ReasoningContent = &tagReasoning

@@ -368,10 +368,13 @@ func EnabledListModels(c *gin.Context) {
 // auto 分组按 distributor 相同的规则展开为用户可用分组与 auto 列表的交集，
 // 否则窄组 token 可借 404/200 之差探测其他分组的模型存在性（预言机），
 // 持 auto token 的用户也可能被假阴性 404。
-func modelIsRoutableForUser(c *gin.Context, groups string, tokenGroup string, userGroup string, modelName string) bool {
+func modelIsRoutableForUser(c *gin.Context, userGroup string, tokenGroup string, modelName string) bool {
 	if strings.TrimSpace(modelName) == "" {
 		return false
 	}
+	// auto 分组按 distributor 相同的规则展开为用户可用分组与 auto 列表的交集；
+	// token 指定具体分组时 distributor 只用该组路由（不回退 userGroup），
+	// 这里保持一致，否则同一模型出现 retrieve 200 而调用失败的偏差。
 	groupList := make([]string, 0, 4)
 	if common.IsAutoGroup(tokenGroup) {
 		if userGroup != "" {
@@ -379,10 +382,11 @@ func modelIsRoutableForUser(c *gin.Context, groups string, tokenGroup string, us
 		}
 	} else if tokenGroup != "" {
 		groupList = append(groupList, tokenGroup)
-	}
-	for _, group := range strings.Split(groups, ",") {
-		if group = strings.TrimSpace(group); group != "" {
-			groupList = append(groupList, group)
+	} else {
+		for _, group := range strings.Split(userGroup, ",") {
+			if group = strings.TrimSpace(group); group != "" {
+				groupList = append(groupList, group)
+			}
 		}
 	}
 	if len(groupList) == 0 {
@@ -404,6 +408,9 @@ func RetrieveModel(c *gin.Context, modelType int) {
 	// 可路由性以 ability 为准：静态目录只覆盖各 adaptor 硬编码的型号列表，
 	// 网关实际服务的模型可以不在其中。不可路由的模型对 SDK 调用方必须是
 	// 404（返回 200 + error 对象会被 SDK 当成查询成功）。
+	// 有意保留的旁路：静态目录命中的模型不做可路由性检查。目录 ID 是
+	// adaptor 硬编码的公共知识，不泄露部署级渠道配置，而目录内模型的
+	// 200 语义是 OpenAI SDK 兼容面的一部分。
 	if _, ok := openAIModelsMap[modelId]; !ok {
 		userGroup := ""
 		if userId := c.GetInt("id"); userId > 0 {
@@ -412,7 +419,7 @@ func RetrieveModel(c *gin.Context, modelType int) {
 			}
 		}
 		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
-		if !modelIsRoutableForUser(c, userGroup, tokenGroup, userGroup, modelId) {
+		if !modelIsRoutableForUser(c, userGroup, tokenGroup, modelId) {
 			openAIError := types.OpenAIError{
 				Message: fmt.Sprintf("The model '%s' does not exist", modelId),
 				Type:    types.StandardErrorTypeName(types.ErrorCodeModelNotFound, http.StatusNotFound),
