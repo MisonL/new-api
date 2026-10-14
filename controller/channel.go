@@ -996,9 +996,9 @@ func DisableTagChannels(c *gin.Context) {
 		return
 	}
 	err = model.DisableChannelByTagWithActor(channelTag.Tag, model.ChannelStatusActor{
-		AdminID:      c.GetInt("id"),
+		AdminID:       c.GetInt("id"),
 		AdminUsername: c.GetString("username"),
-		Source:       "tag_disable",
+		Source:        "tag_disable",
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -1023,9 +1023,9 @@ func EnableTagChannels(c *gin.Context) {
 		return
 	}
 	err = model.EnableChannelByTagWithActor(channelTag.Tag, model.ChannelStatusActor{
-		AdminID:      c.GetInt("id"),
+		AdminID:       c.GetInt("id"),
 		AdminUsername: c.GetString("username"),
-		Source:       "tag_enable",
+		Source:        "tag_enable",
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -1288,9 +1288,9 @@ func UpdateChannel(c *gin.Context) {
 		}
 		if originChannel.Status != channel.Status {
 			if ok := model.UpdateChannelStatusWithActor(channel.Id, "", channel.Status, "", model.ChannelStatusActor{
-				AdminID:      c.GetInt("id"),
+				AdminID:       c.GetInt("id"),
 				AdminUsername: c.GetString("username"),
-				Source:       "channel_update",
+				Source:        "channel_update",
 			}); !ok {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,

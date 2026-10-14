@@ -848,13 +848,13 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// truncated JSON envelope that looks like a normal response.
 	if resp.Body == nil {
 		return &TaskSubmitResult{
-				Platform:      platform,
-				Quota:         info.PriceData.Quota,
-				RouteSnapshot: routeSnapshot,
-			}, normalizeTaskSubmitResponseError(
-				service.TaskErrorWrapperLocal(errors.New("task submit upstream response body is empty"), "empty_response", http.StatusBadGateway),
-				info.PublicTaskID,
-			)
+			Platform:      platform,
+			Quota:         info.PriceData.Quota,
+			RouteSnapshot: routeSnapshot,
+		}, normalizeTaskSubmitResponseError(
+			service.TaskErrorWrapperLocal(errors.New("task submit upstream response body is empty"), "empty_response", http.StatusBadGateway),
+			info.PublicTaskID,
+		)
 	}
 	resp.Body = &boundedTaskSubmitResponseBody{reader: resp.Body, remaining: maxTaskSubmitResponseBodyBytes}
 	defer service.CloseResponseBodyGracefully(resp)

@@ -22,13 +22,13 @@ type AwsClaudeRequest struct {
 	MaxTokens        uint                `json:"max_tokens,omitempty"`
 	Temperature      *float64            `json:"temperature,omitempty"`
 	// 指针类型保留显式零值：top_p:0（贪心采样）与省略 top_p 是不同请求。
-	TopP             *float64            `json:"top_p,omitempty"`
-	TopK             *int                `json:"top_k,omitempty"`
-	StopSequences    []string            `json:"stop_sequences,omitempty"`
-	Tools            any                 `json:"tools,omitempty"`
-	ToolChoice       any                 `json:"tool_choice,omitempty"`
-	Thinking         *dto.Thinking       `json:"thinking,omitempty"`
-	OutputConfig     common.RawMessage   `json:"output_config,omitempty"`
+	TopP          *float64          `json:"top_p,omitempty"`
+	TopK          *int              `json:"top_k,omitempty"`
+	StopSequences []string          `json:"stop_sequences,omitempty"`
+	Tools         any               `json:"tools,omitempty"`
+	ToolChoice    any               `json:"tool_choice,omitempty"`
+	Thinking      *dto.Thinking     `json:"thinking,omitempty"`
+	OutputConfig  common.RawMessage `json:"output_config,omitempty"`
 	//Metadata         json.RawMessage     `json:"metadata,omitempty"`
 }
 

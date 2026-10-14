@@ -10,9 +10,9 @@ import (
 // with an empty username means the system (automatic disable/enable); a
 // nonzero AdminID names the operator.
 type ChannelStatusActor struct {
-	AdminID      int
+	AdminID       int
 	AdminUsername string
-	Source       string
+	Source        string
 }
 
 // statusAuditLog writes one manage-log entry describing a channel status

@@ -272,7 +272,8 @@ func frameErrorMessageForStatus(frameError *types.OpenAIError) string {
 	return fmt.Sprintf("upstream error frame: type=%s code=%s message=%s", frameError.Type, fmt.Sprintf("%v", frameError.Code), frameError.Message)
 }
 
-func retryableUpstreamStreamInterruptedError(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {	if info == nil || info.StreamStatus == nil {
+func retryableUpstreamStreamInterruptedError(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if info == nil || info.StreamStatus == nil {
 		return nil
 	}
 	if info.StreamStatus.EndReason != relaycommon.StreamEndReasonUpstreamInterrupted {
