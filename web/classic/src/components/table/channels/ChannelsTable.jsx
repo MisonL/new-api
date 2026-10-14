@@ -64,6 +64,11 @@ const ChannelsTable = (channelsData) => {
     detectChannelUpstreamUpdates,
     channelHealthRuntime,
     channelRoutingConfig,
+    // Pinned channels
+    topChannels,
+    pinChannel,
+    unpinChannel,
+    movePinnedChannel,
   } = channelsData;
 
   // Get all columns
@@ -93,6 +98,10 @@ const ChannelsTable = (channelsData) => {
       detectChannelUpstreamUpdates,
       channelHealthRuntime,
       channelRoutingConfig,
+      topChannels,
+      pinChannel,
+      unpinChannel,
+      movePinnedChannel,
     });
   }, [
     t,
@@ -119,6 +128,10 @@ const ChannelsTable = (channelsData) => {
     detectChannelUpstreamUpdates,
     channelHealthRuntime,
     channelRoutingConfig,
+    topChannels,
+    pinChannel,
+    unpinChannel,
+    movePinnedChannel,
   ]);
 
   // Filter columns based on visibility settings

@@ -1464,6 +1464,13 @@ export const useChannelsData = () => {
     initDefaultColumns,
     getDefaultColumnVisibility,
 
+    // Pinned channels
+    topChannels,
+    fetchTopChannels,
+    pinChannel,
+    unpinChannel,
+    movePinnedChannel,
+
     // Setters
     setIdSort,
     setEnableTagMode,
