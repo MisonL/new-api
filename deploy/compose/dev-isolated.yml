@@ -27,6 +27,8 @@ services:
       - REDIS_CONN_STRING=${DEV_REDIS_CONN_STRING:?set DEV_REDIS_CONN_STRING}
       - TZ=${DEV_TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${DEV_ERROR_LOG_ENABLED:-true}
+      # 日志文件保留天数：启动时清理超过该天数的轮转 oneapi-*.log；0 或未设表示不清理
+      - LOG_RETENTION_DAYS=${DEV_LOG_RETENTION_DAYS:-7}
       - BATCH_UPDATE_ENABLED=${DEV_BATCH_UPDATE_ENABLED:-true}
       # 全局限流阈值（仅环境变量生效，后台设置页无对应选项）。
       # 默认值与正式环境一致，便于在隔离环境复现限流与豁免行为。

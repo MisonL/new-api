@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,12 +29,57 @@ const (
 
 const maxLogCount = 1000000
 
+// logRetentionDays controls startup cleanup of old oneapi-*.log files. The
+// rotation counter creates a new file per maxLogCount entries and never
+// deletes, so a long-lived deployment accumulates files unboundedly. Zero or
+// negative disables the cleanup.
+var logRetentionDays = func() int {
+	days, err := strconv.Atoi(strings.TrimSpace(os.Getenv("LOG_RETENTION_DAYS")))
+	if err != nil || days <= 0 {
+		return 0
+	}
+	return days
+}()
+
 var logCount atomic.Uint64
 var setupLogLock sync.Mutex
 var setupLogWorking atomic.Bool
 var currentLogPath string
 var currentLogPathMu sync.RWMutex
 var currentLogFile *os.File
+
+// cleanupOldLogs removes rotated oneapi-*.log files older than retentionDays.
+// It runs at logger setup, before the new file is created, and never deletes
+// the file currently being written: rotation only renames the path, so the
+// live file's mtime is recent by construction, but the explicit guard keeps a
+// clock skew or a fresh-touch old file from being removed under the writer.
+func cleanupOldLogs(dir string, retentionDays int) {
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	currentLogPathMu.RLock()
+	livePath := currentLogPath
+	currentLogPathMu.RUnlock()
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "oneapi-") || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		full := filepath.Join(dir, name)
+		if livePath != "" && full == livePath {
+			continue
+		}
+		if err := os.Remove(full); err != nil {
+			log.Printf("failed to remove old log file %s: %v", full, err)
+		}
+	}
+}
 
 func GetCurrentLogPath() string {
 	currentLogPathMu.RLock()
@@ -45,6 +92,9 @@ func SetupLogger() {
 		setupLogWorking.Store(false)
 	}()
 	if *common.LogDir != "" {
+		if logRetentionDays > 0 {
+			cleanupOldLogs(*common.LogDir, logRetentionDays)
+		}
 		ok := setupLogLock.TryLock()
 		if !ok {
 			log.Println("setup log is already working")
