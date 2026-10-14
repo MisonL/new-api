@@ -38,6 +38,10 @@ func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 	// 提取必须发生在转换之前：模型名门控覆盖不到的上游会把 think 标签原样
 	// 放进 content，转换后 Claude 客户端就把原始标记当成正文渲染。
 	data = relaycommon.ExtractThinkTagsFromChatChunk(info, data)
+	// 终端帧触发 flush：流被截断在 think 块内部或以未闭合标记结尾时，
+	// splitter 缓冲的推理/可见字节必须在这里释放，否则内容丢失且照常计费。
+	// 幂等：非终端帧 flush 结果为空，无副作用。
+	data = relaycommon.FinishThinkTagStream(info, data)
 	var streamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
 		return err
@@ -57,6 +61,10 @@ func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 }
 
 func handleGeminiFormat(c *gin.Context, data string, info *relaycommon.RelayInfo) error {
+	// 与 Claude 路径对称：先提取（模型名门控覆盖不到的上游会把 think 标签
+	// 放进 content），终端帧再 flush splitter 缓冲的字节。幂等。
+	data = relaycommon.ExtractThinkTagsFromChatChunk(info, data)
+	data = relaycommon.FinishThinkTagStream(info, data)
 	var streamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
 		logger.LogError(c, "failed to unmarshal stream response: "+err.Error())

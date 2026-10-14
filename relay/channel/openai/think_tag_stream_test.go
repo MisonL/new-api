@@ -133,3 +133,81 @@ func TestHandleStreamFormatLeavesThinkTagsForThinkingToContentChannel(t *testing
 	require.NoError(t, common.UnmarshalJsonStr(payloads[0], &chunk))
 	require.Equal(t, "answer"+testThinkOpen+"reasoning"+testThinkClose, chunk.Choices[0].Delta.GetContentString())
 }
+
+// TestHandleStreamFormatFlushesSplitterOnTerminalFrame is the flush wiring
+// regression: a stream truncated inside an open think block must still deliver
+// the buffered reasoning instead of dropping it, and the trailing bytes held by
+// the splitter must reach the client. Before the fix FinishThinkTagStream had
+// no production caller, so any withheld bytes were silently lost.
+func TestHandleStreamFormatFlushesSplitterOnTerminalFrame(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	run := func(t *testing.T, relayFormat types.RelayFormat) {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+
+		info := claudeThinkTagInfo()
+		info.RelayFormat = relayFormat
+
+		first := dto.ChatCompletionsStreamResponse{
+			Id:    "chatcmpl-truncated",
+			Model: "some-upstream-model",
+			Choices: []dto.ChatCompletionsStreamResponseChoice{{
+				Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+					Content: common.GetPointer("answer " + testThinkOpen + "\ntruncated reasoning"),
+				},
+			}},
+		}
+		raw, err := common.Marshal(first)
+		require.NoError(t, err)
+		require.NoError(t, HandleStreamFormat(c, info, string(raw), false, false))
+
+		// 终端帧：delta 为空，只有 finish_reason。
+		fr := "length"
+		terminal := dto.ChatCompletionsStreamResponse{
+			Id:    "chatcmpl-truncated",
+			Model: "some-upstream-model",
+			Choices: []dto.ChatCompletionsStreamResponseChoice{{
+				Delta:        dto.ChatCompletionsStreamResponseChoiceDelta{},
+				FinishReason: &fr,
+			}},
+		}
+		raw, err = common.Marshal(terminal)
+		require.NoError(t, err)
+		require.NoError(t, HandleStreamFormat(c, info, string(raw), false, false))
+
+		var recovered string
+		for _, payload := range sseDataPayloads(t, recorder.Body.String()) {
+			if relayFormat == types.RelayFormatGemini {
+				var gemini dto.GeminiChatResponse
+				if err := common.UnmarshalJsonStr(payload, &gemini); err == nil {
+					for _, candidate := range gemini.Candidates {
+						for _, part := range candidate.Content.Parts {
+							recovered += part.Text
+						}
+					}
+				}
+				continue
+			}
+			var event dto.ClaudeResponse
+			if err := common.UnmarshalJsonStr(payload, &event); err != nil {
+				continue
+			}
+			if event.Delta != nil && event.Delta.Thinking != nil {
+				recovered += *event.Delta.Thinking
+			}
+			if event.Delta != nil && event.Delta.Text != nil {
+				recovered += *event.Delta.Text
+			}
+		}
+		// Flush 把未闭合标记按"不是标签"规则以原始字节归还（与
+		// SplitThinkTaggedContent 的语义一致）。关键是内容不能丢：推理或
+		// 原始字节二者必有一处承载被缓冲的文本。
+		require.Contains(t, recovered, "\ntruncated reasoning",
+			"bytes buffered by the splitter must reach the client, not be dropped")
+	}
+
+	t.Run("claude", func(t *testing.T) { run(t, types.RelayFormatClaude) })
+	t.Run("gemini", func(t *testing.T) { run(t, types.RelayFormatGemini) })
+}
