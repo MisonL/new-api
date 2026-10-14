@@ -98,12 +98,17 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
 	}
 
+	var toolNameRestorer *relaycommon.ResponsesToolNameRestorer
 	responsesReq, err := service.ChatCompletionsRequestToResponsesRequestWithOptions(&overriddenChatReq, service.ChatCompletionsToResponsesOptions{
 		PreserveReasoningContent: shouldPreservePlainTextReasoningForResponses(info, &overriddenChatReq),
+		ToolNameRestorerOut:      &toolNameRestorer,
 	})
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
+	// 上游 Responses echo 的工具别名经此映射还原为客户端原始名（响应侧
+	// OaiResponsesToChat* 读取）；无别名时为 nil，响应原样透传。
+	info.ResponsesToolNameRestorer = toolNameRestorer
 	info.AppendRequestConversion(types.RelayFormatOpenAIResponses)
 
 	savedRelayMode := info.RelayMode

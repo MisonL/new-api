@@ -46,6 +46,16 @@ func (r *toolNameAliasRegistry) normalizeDeclaration(name string) (string, error
 	return alias, nil
 }
 
+// originalByAliasCopy returns a copy of the alias-to-original mapping for
+// callers that need to build a response-side restorer after conversion ends.
+func (r *toolNameAliasRegistry) originalByAliasCopy() map[string]string {
+	out := make(map[string]string, len(r.originalByAlias))
+	for alias, original := range r.originalByAlias {
+		out[alias] = original
+	}
+	return out
+}
+
 func (r *toolNameAliasRegistry) normalizeReference(name string) (string, error) {
 	original := strings.TrimSpace(name)
 	if original == "" {

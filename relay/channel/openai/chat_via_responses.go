@@ -224,6 +224,29 @@ func outputTextFromResponsesOutput(item *dto.ResponsesOutput) string {
 	return builder.String()
 }
 
+// restoreChatToolCallNames rewrites tool-call names echoed by a Responses
+// upstream back to the client's original names on the non-streaming chat path.
+func restoreChatToolCallNames(chatResp *dto.OpenAITextResponse, restorer *relaycommon.ResponsesToolNameRestorer) {
+	if chatResp == nil || restorer == nil {
+		return
+	}
+	for i := range chatResp.Choices {
+		calls := chatResp.Choices[i].Message.ParseToolCalls()
+		changed := false
+		for j := range calls {
+			if restored := restorer.RestoreName(calls[j].Function.Name); restored != calls[j].Function.Name {
+				calls[j].Function.Name = restored
+				changed = true
+			}
+		}
+		if changed {
+			if raw, err := common.Marshal(calls); err == nil {
+				chatResp.Choices[i].Message.ToolCalls = raw
+			}
+		}
+	}
+}
+
 func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
@@ -253,6 +276,12 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(&responsesResp, chatId)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+
+	// 请求侧的 chat→responses 转换可能把客户端工具名归一化为别名；上游 echo
+	// 的别名在发给客户端前换回原始名。restorer 为空（无别名）时原样透传。
+	if restorer := responsesToolNameRestorer(info); restorer != nil {
+		restoreChatToolCallNames(chatResp, restorer)
 	}
 
 	if usage == nil || usage.TotalTokens == 0 {
@@ -549,6 +578,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			toolCallIndexByID[callID] = idx
 		}
 		if name != "" {
+			// 请求侧 chat→responses 转换注册过的别名先还原回客户端原始名，
+			// 再走兜底归一化（处理上游自造的、请求里没有的名字）。
+			if restorer := responsesToolNameRestorer(info); restorer != nil {
+				name = restorer.RestoreName(name)
+			}
 			// Responses tool names are stricter than some upstream Chat/agent
 			// implementations. Normalize names at the last boundary before they
 			// are emitted as Chat Completions, including calls that were not

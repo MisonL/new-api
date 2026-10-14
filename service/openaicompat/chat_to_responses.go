@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/samber/lo"
 )
 
@@ -83,6 +84,11 @@ func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) (js
 type ChatCompletionsToResponsesOptions struct {
 	PreserveReasoningContent bool
 	EnableCustomToolBridge   bool
+	// ToolNameRestorerOut, when non-nil, receives the alias registry built
+	// during conversion. The caller attaches it to the request-scoped relay
+	// info so the chat response path (OaiResponsesToChat*) can map an alias
+	// the upstream echoes back to the client's original tool name.
+	ToolNameRestorerOut **relaycommon.ResponsesToolNameRestorer
 }
 
 func parseChatToolCallsStrict(msg dto.Message, messageIndex int) ([]dto.ToolCallRequest, error) {
@@ -542,6 +548,10 @@ func ChatCompletionsRequestToResponsesRequestWithOptions(req *dto.GeneralOpenAIR
 			Effort:  req.ReasoningEffort,
 			Summary: "detailed",
 		}
+	}
+
+	if options.ToolNameRestorerOut != nil {
+		*options.ToolNameRestorerOut = relaycommon.NewResponsesToolNameRestorer(aliases.originalByAliasCopy())
 	}
 
 	return out, nil
