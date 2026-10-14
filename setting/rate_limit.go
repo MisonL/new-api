@@ -28,11 +28,18 @@ func ModelRequestRateLimitGroup2JSONString() string {
 }
 
 func UpdateModelRequestRateLimitGroupByJSONString(jsonStr string) error {
-	ModelRequestRateLimitMutex.RLock()
-	defer ModelRequestRateLimitMutex.RUnlock()
+	// 整体替换 map 是写操作，必须持写锁：持读锁替换时，配置保存可与请求
+	// 路径上的读并发，触发 concurrent map read/write 的 fatal error。
+	// 先完整解析再替换：解析失败时保留现值，不让一次坏配置清空生效中的限流。
+	ModelRequestRateLimitMutex.Lock()
+	defer ModelRequestRateLimitMutex.Unlock()
 
-	ModelRequestRateLimitGroup = make(map[string][2]int)
-	return json.Unmarshal([]byte(jsonStr), &ModelRequestRateLimitGroup)
+	next := make(map[string][2]int)
+	if err := json.Unmarshal([]byte(jsonStr), &next); err != nil {
+		return err
+	}
+	ModelRequestRateLimitGroup = next
+	return nil
 }
 
 func GetGroupRateLimit(group string) (totalCount, successCount int, found bool) {

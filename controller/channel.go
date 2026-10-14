@@ -995,7 +995,11 @@ func DisableTagChannels(c *gin.Context) {
 		})
 		return
 	}
-	err = model.DisableChannelByTag(channelTag.Tag)
+	err = model.DisableChannelByTagWithActor(channelTag.Tag, model.ChannelStatusActor{
+		AdminID:      c.GetInt("id"),
+		AdminUsername: c.GetString("username"),
+		Source:       "tag_disable",
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1279,7 +1283,11 @@ func UpdateChannel(c *gin.Context) {
 			return
 		}
 		if originChannel.Status != channel.Status {
-			if ok := model.UpdateChannelStatus(channel.Id, "", channel.Status, ""); !ok {
+			if ok := model.UpdateChannelStatusWithActor(channel.Id, "", channel.Status, "", model.ChannelStatusActor{
+				AdminID:      c.GetInt("id"),
+				AdminUsername: c.GetString("username"),
+				Source:       "channel_update",
+			}); !ok {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
 					"message": "更新渠道状态失败",

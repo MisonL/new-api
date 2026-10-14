@@ -340,3 +340,23 @@ func BuildURL(base string, endpoint string) string {
 	}
 	return u.ResolveReference(ref).String()
 }
+
+// randomStringFromCrypto draws an alphanumeric string from crypto/rand. It is
+// the source for bearer secrets (desktop handoff tokens, OAuth state): a
+// seeded pseudo-random generator is reproducible from its seed and therefore
+// predictable.
+func randomStringFromCrypto(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	max := big.NewInt(int64(len(charset)))
+	for i := range b {
+		n, err := crand.Int(crand.Reader, max)
+		if err != nil {
+			// crypto/rand failure is not recoverable for a secret; panic rather
+			// than return a guessable token.
+			panic("crypto/rand unavailable: " + err.Error())
+		}
+		b[i] = charset[n.Int64()]
+	}
+	return string(b)
+}

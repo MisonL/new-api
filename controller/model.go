@@ -362,8 +362,56 @@ func EnabledListModels(c *gin.Context) {
 	})
 }
 
+// modelIsRoutableForUser reports whether at least one of the caller's groups
+// has an enabled ability for the model on an enabled channel. It mirrors the
+// distributor's routing boundary so /v1/models/{id} and an actual call agree.
+func modelIsRoutableForUser(c *gin.Context, groups string, modelName string) bool {
+	if strings.TrimSpace(modelName) == "" || strings.TrimSpace(groups) == "" {
+		return false
+	}
+	model.InitChannelCache()
+	for _, group := range strings.Split(groups, ",") {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		for _, enabled := range model.GetGroupEnabledModels(group) {
+			if enabled == modelName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func RetrieveModel(c *gin.Context, modelType int) {
 	modelId := c.Param("model")
+	// 可路由性以 ability 为准：静态目录只覆盖各 adaptor 硬编码的型号列表，
+	// 网关实际服务的模型可以不在其中。不可路由的模型对 SDK 调用方必须是
+	// 404（返回 200 + error 对象会被 SDK 当成查询成功）。
+	if _, ok := openAIModelsMap[modelId]; !ok {
+		groups := ""
+		if userId := c.GetInt("id"); userId > 0 {
+			if userGroup, err := model.GetUserGroup(userId, false); err == nil {
+				groups = userGroup
+			}
+		}
+		if tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup); tokenGroup != "" && !common.IsAutoGroup(tokenGroup) {
+			groups = tokenGroup
+		}
+		if !modelIsRoutableForUser(c, groups, modelId) {
+			openAIError := types.OpenAIError{
+				Message: fmt.Sprintf("The model '%s' does not exist", modelId),
+				Type:    types.StandardErrorTypeName(types.ErrorCodeModelNotFound, http.StatusNotFound),
+				Param:   "model",
+				Code:    types.ErrorCodeModelNotFound,
+			}
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": openAIError,
+			})
+			return
+		}
+	}
 	if aiModel, ok := openAIModelsMap[modelId]; ok {
 		switch modelType {
 		case constant.ChannelTypeAnthropic:
@@ -377,14 +425,8 @@ func RetrieveModel(c *gin.Context, modelType int) {
 			c.JSON(200, aiModel)
 		}
 	} else {
-		openAIError := types.OpenAIError{
-			Message: fmt.Sprintf("The model '%s' does not exist", modelId),
-			Type:    "invalid_request_error",
-			Param:   "model",
-			Code:    "model_not_found",
-		}
-		c.JSON(200, gin.H{
-			"error": openAIError,
-		})
+		// 可路由但不在静态目录：按目录条目的形状合成一个模型对象返回，
+		// 让 SDK 的 retrieve 成功。
+		c.JSON(200, buildOpenAIModel(modelId, nil))
 	}
 }

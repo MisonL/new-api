@@ -184,6 +184,14 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 		Group:    "default",
 		Status:   common.UserStatusEnabled,
 	}).Error)
+	// GetGroupEnabledModels joins channels on enabled status, so the abilities
+	// below are only visible through a live channel row.
+	zeroPriority := int64(0)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 1, Name: "tiered-list-channel", Key: "sk-tiered-list",
+		Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled,
+		Priority: &zeroPriority,
+	}).Error)
 	require.NoError(t, db.Create(&[]model.Ability{
 		{Group: "default", Model: "zz-tiered-visible-model", ChannelId: 1, Enabled: true},
 		{Group: "default", Model: "zz-tiered-empty-expr-model", ChannelId: 1, Enabled: true},

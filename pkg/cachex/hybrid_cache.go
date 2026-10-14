@@ -151,7 +151,7 @@ func (c *HybridCache[V]) SetWithTTL(key string, v V, ttl time.Duration) error {
 
 // Keys returns keys with valid values. In Redis, it returns all matching keys.
 func (c *HybridCache[V]) Keys() ([]string, error) {
-	if c.redisConfigured() {
+	if client := c.resolveRedis(); client != nil && c.redisConfigured() {
 		return c.scanKeys(c.ns.MatchPattern())
 	}
 	return c.memCache().Keys(), nil
@@ -179,7 +179,7 @@ func (c *HybridCache[V]) scanKeys(match string) ([]string, error) {
 }
 
 func (c *HybridCache[V]) Purge() error {
-	if c.redisConfigured() {
+	if client := c.resolveRedis(); client != nil && c.redisConfigured() {
 		keys, err := c.scanKeys(c.ns.MatchPattern())
 		if err != nil {
 			return err
@@ -204,7 +204,7 @@ func (c *HybridCache[V]) DeleteByPrefix(prefix string) (int, error) {
 		fullPrefix += ":"
 	}
 
-	if c.redisConfigured() {
+	if client := c.resolveRedis(); client != nil && c.redisConfigured() {
 		match := fullPrefix + "*"
 		keys, err := c.scanKeys(match)
 		if err != nil {
@@ -268,8 +268,7 @@ func (c *HybridCache[V]) DeleteMany(keys []string) (map[string]bool, error) {
 		return res, nil
 	}
 
-	if c.redisConfigured() {
-		client := c.resolveRedis()
+	if client := c.resolveRedis(); client != nil && c.redisConfigured() {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultRedisDelTimeout)
 		defer cancel()
 

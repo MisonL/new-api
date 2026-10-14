@@ -201,6 +201,12 @@ func AddToken(c *gin.Context) {
 		})
 		return
 	}
+	// 分组校验在写入前执行：一个用户无权使用的分组过去会被存库并列表返回，
+	// 然后每次请求都在 TokenAuth 处以"无权访问"失败。
+	if err := validateTokenGroup(c, token.Group); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	key, err := common.GenerateKey()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgTokenGenerateFailed)

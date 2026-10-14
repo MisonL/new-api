@@ -26,7 +26,7 @@ var defaultClaudeSettings = ClaudeSettings{
 	HeadersSettings:        map[string]map[string][]string{},
 	ThinkingAdapterEnabled: true,
 	DefaultMaxTokens: map[string]int{
-		"default": 8192,
+		"default": ClaudeDefaultMaxTokens,
 	},
 	ThinkingAdapterBudgetTokensPercentage: 0.8,
 }
@@ -41,10 +41,8 @@ func init() {
 
 // GetClaudeSettings 获取Claude配置
 func GetClaudeSettings() *ClaudeSettings {
-	// check default max tokens must have default key
-	if _, ok := claudeSettings.DefaultMaxTokens["default"]; !ok {
-		claudeSettings.DefaultMaxTokens["default"] = 8192
-	}
+	// 缺省键的兜底不再就地写 map：并发读时写入是 fatal error（不可恢复），
+	// 兜底常量由 GetDefaultMaxTokens 在读取路径返回。
 	return &claudeSettings
 }
 
@@ -205,5 +203,12 @@ func (c *ClaudeSettings) GetDefaultMaxTokens(model string) int {
 	if maxTokens, ok := c.DefaultMaxTokens[model]; ok {
 		return maxTokens
 	}
-	return c.DefaultMaxTokens["default"]
+	if maxTokens, ok := c.DefaultMaxTokens["default"]; ok {
+		return maxTokens
+	}
+	return ClaudeDefaultMaxTokens
 }
+
+// ClaudeDefaultMaxTokens is the fallback when a saved config carries no
+// "default" entry: 0 would make max_tokens invalid upstream.
+const ClaudeDefaultMaxTokens = 8192

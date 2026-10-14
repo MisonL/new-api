@@ -65,6 +65,26 @@ func MidjourneyErrorWithStatusCodeWrapper(code int, desc string, statusCode int)
 //	return openaiErr
 //}
 
+// anthropicErrorTypeName maps an HTTP status onto the Anthropic error type
+// vocabulary that Claude clients switch on.
+func anthropicErrorTypeName(statusCode int) string {
+	switch {
+	case statusCode == http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case statusCode == http.StatusRequestTimeout:
+		return "timeout_error"
+	case statusCode == http.StatusNotFound:
+		return "not_found_error"
+	case statusCode == http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case statusCode >= 400 && statusCode < 500:
+		return "invalid_request_error"
+	case statusCode >= 500:
+		return "api_error"
+	}
+	return "api_error"
+}
+
 func ClaudeErrorWrapper(err error, code string, statusCode int) *dto.ClaudeErrorWithStatusCode {
 	if err == nil {
 		err = errors.New("upstream request failed")
@@ -79,7 +99,10 @@ func ClaudeErrorWrapper(err error, code string, statusCode int) *dto.ClaudeError
 	}
 	claudeError := types.ClaudeError{
 		Message: text,
-		Type:    "new_api_error",
+		// Claude 客户端按 Anthropic 错误词汇分发：5xx 是 api_error，
+		// 429 是 rate_limit_error 等。内部标记 new_api_error 不属于任何
+		// Anthropic 客户端的 switch。
+		Type: anthropicErrorTypeName(statusCode),
 	}
 	return &dto.ClaudeErrorWithStatusCode{
 		Error:      claudeError,
@@ -154,6 +177,10 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
+			// 上游可能带来自家词汇的 type（如 internal_server_error、Python SDK
+			// 类名）。这里统一映射到 OpenAI 标准词汇，消息与 code 不动。
+			standardized := types.StandardizeErrorType(*oaiError, resp.StatusCode)
+			oaiError = &standardized
 			options := make([]types.NewAPIErrorOptions, 0, 3)
 			if statusErrorCode != types.ErrorCodeBadResponseStatusCode {
 				options = append(options, types.ErrOptionWithErrorCode(statusErrorCode))

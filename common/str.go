@@ -12,8 +12,6 @@ import (
 	"strings"
 	"unicode/utf8"
 	"unsafe"
-
-	"github.com/samber/lo"
 )
 
 var (
@@ -119,7 +117,7 @@ func GetRandomString(length int) string {
 	if length <= 0 {
 		return ""
 	}
-	return lo.RandomString(length, lo.AlphanumericCharset)
+	return randomStringFromCrypto(length)
 }
 
 func MapToJsonStr(m map[string]interface{}) string {

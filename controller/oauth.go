@@ -26,6 +26,14 @@ func GenerateOAuthCode(c *gin.Context) {
 	session := sessions.Default(c)
 	state := common.GetRandomString(12)
 	affCode := c.Query("aff")
+	// aff 来自未认证的查询参数，会写进 session cookie。超长值会让
+	// securecookie 拒绝保存整个会话（cookie 上限 4096 字节），把 state
+	// 一起带崩，访客从此无法发起任何 OAuth 登录。正常邀请码远短于此；
+	// 超过 2KB 的输入视为滥用直接拒绝，4096 以内的余量留给 state 与
+	// 其他会话字段。
+	if len(affCode) > 2048 {
+		affCode = ""
+	}
 	if affCode != "" {
 		session.Set("aff", affCode)
 	}
