@@ -138,8 +138,7 @@ func redisRateLimiterWithKey(c *gin.Context, maxRequestNum int, duration int64, 
 		// See: https://stackoverflow.com/questions/50970900/why-is-time-since-returning-negative-durations-on-windows
 		if int64(nowTime.Sub(oldTime).Seconds()) < duration {
 			rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
+			abortRateLimited(c, int(duration))
 			return
 		} else {
 			rdb.LPush(ctx, key, time.Now().Format(timeFormat))
@@ -152,8 +151,7 @@ func redisRateLimiterWithKey(c *gin.Context, maxRequestNum int, duration int64, 
 func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
 	key := mark + c.ClientIP()
 	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
-		c.Status(http.StatusTooManyRequests)
-		c.Abort()
+		abortRateLimited(c, int(duration))
 		return
 	}
 }
@@ -283,8 +281,7 @@ func requestKeyRateLimitFactory(maxRequestNum int, duration int64, mark string, 
 func memoryRequestKeyRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string, keyFunc func(c *gin.Context) string) {
 	key := buildRateLimitKey(mark, c, keyFunc)
 	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
-		c.Status(http.StatusTooManyRequests)
-		c.Abort()
+		abortRateLimited(c, int(duration))
 		return
 	}
 }
@@ -329,8 +326,7 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 		}
 		key := fmt.Sprintf("%s:user:%d", mark, userId)
 		if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
+			abortRateLimited(c, int(duration))
 			return
 		}
 	}

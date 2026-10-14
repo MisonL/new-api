@@ -276,6 +276,12 @@ func Max(a int, b int) int {
 }
 
 func MessageWithRequestId(message string, id string) string {
+	// An empty request id means the caller had no request context (test
+	// harnesses, system paths); appending an empty parenthetical would make
+	// the exact body text unstable for clients that match on it.
+	if strings.TrimSpace(id) == "" {
+		return message
+	}
 	return fmt.Sprintf("%s (request id: %s)", message, id)
 }
 

@@ -73,6 +73,9 @@ func TurnstileCheck() gin.HandlerFunc {
 					"message": "无法保存会话信息，请重试",
 					"success": false,
 				})
+				// A rejected request must always abort, or the handler chain
+				// continues into the protected route.
+				c.Abort()
 				return
 			}
 		}

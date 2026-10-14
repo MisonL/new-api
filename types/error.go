@@ -109,6 +109,18 @@ var standardErrorTypes = map[string]struct{}{
 // "type": "bad_response_status_code" -- a value that exists nowhere in the
 // OpenAI API. The status code is the primary signal; the code only breaks ties
 // where the status alone is ambiguous.
+// StandardErrorTypeForStatus exposes the status-driven mapping for callers
+// outside this package (middleware abort helpers) that have no error code.
+func StandardErrorTypeForStatus(statusCode int) string {
+	return standardErrorType("", statusCode)
+}
+
+// StandardErrorTypeName exposes the full code+status mapping for callers
+// outside this package that carry an error code.
+func StandardErrorTypeName(code ErrorCode, statusCode int) string {
+	return standardErrorType(code, statusCode)
+}
+
 func standardErrorType(code ErrorCode, statusCode int) string {
 	switch statusCode {
 	case http.StatusUnauthorized:

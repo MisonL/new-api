@@ -412,7 +412,9 @@ func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
 	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json") {
 		modelRequest, err := getModelFromJSONBody(c)
 		if err != nil {
-			return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
+			// No prefix here: Distribute (the caller that turns the error into
+			// a response) applies MsgDistributorInvalidRequest exactly once.
+			return nil, err
 		}
 		return modelRequest, nil
 	}
@@ -420,7 +422,8 @@ func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
 	var modelRequest ModelRequest
 	err := common.UnmarshalBodyReusable(c, &modelRequest)
 	if err != nil {
-		return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
+		// Same: the response-side caller owns the user-facing prefix.
+		return nil, err
 	}
 	return &modelRequest, nil
 }

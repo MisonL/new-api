@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -47,6 +48,7 @@ func redisEmailVerificationRateLimiter(c *gin.Context) {
 		waitSeconds = int64(ttl.Seconds())
 	}
 
+	c.Header("Retry-After", strconv.FormatInt(waitSeconds, 10))
 	c.JSON(http.StatusTooManyRequests, gin.H{
 		"success": false,
 		"message": fmt.Sprintf("发送过于频繁，请等待 %d 秒后再试", waitSeconds),
@@ -58,6 +60,9 @@ func memoryEmailVerificationRateLimiter(c *gin.Context) {
 	key := EmailVerificationRateLimitMark + ":" + c.ClientIP()
 
 	if !inMemoryRateLimiter.Request(key, EmailVerificationMaxRequests, EmailVerificationDuration) {
+		// The in-memory limiter tracks a fixed window of the configured
+		// duration, so the full window is the honest hint.
+		c.Header("Retry-After", strconv.Itoa(EmailVerificationDuration))
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"success": false,
 			"message": "发送过于频繁，请稍后再试",
