@@ -485,16 +485,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				if realtimeEvent.Type == dto.RealtimeEventTypeResponseDone {
 					realtimeUsage := realtimeEvent.Response.Usage
 					if realtimeUsage != nil {
-						usage.TotalTokens += realtimeUsage.TotalTokens
-						usage.InputTokens += realtimeUsage.InputTokens
-						usage.OutputTokens += realtimeUsage.OutputTokens
-						usage.InputTokenDetails.AudioTokens += realtimeUsage.InputTokenDetails.AudioTokens
-						usage.InputTokenDetails.CachedTokens += realtimeUsage.InputTokenDetails.CachedTokens
-						usage.InputTokenDetails.TextTokens += realtimeUsage.InputTokenDetails.TextTokens
-						usage.InputTokenDetails.ImageTokens += realtimeUsage.InputTokenDetails.ImageTokens
-						usage.OutputTokenDetails.AudioTokens += realtimeUsage.OutputTokenDetails.AudioTokens
-						usage.OutputTokenDetails.TextTokens += realtimeUsage.OutputTokenDetails.TextTokens
-						usage.OutputTokenDetails.ImageTokens += realtimeUsage.OutputTokenDetails.ImageTokens
+						addRealtimeUsage(usage, realtimeUsage)
 						err := preConsumeUsage(c, info, usage, sumUsage)
 						if err != nil {
 							errChan <- fmt.Errorf("error consume usage: %v", err)
@@ -655,21 +646,35 @@ func replaceRealtimeModelField(rawModel common.RawMessage, upstreamModel string)
 	return common.Marshal(strings.TrimSpace(upstreamModel))
 }
 
+// addRealtimeUsage aggregates one realtime turn's usage into a session total.
+// The tiered billing expression can price cache creation, image, and audio
+// tokens separately (service/tiered_settle.go reads those detail fields), so
+// every detail field a turn reports must survive the aggregation; a field
+// dropped here reads as zero in the expression and its tokens are billed at
+// the text rate.
+func addRealtimeUsage(dst, src *dto.RealtimeUsage) {
+	if dst == nil || src == nil {
+		return
+	}
+	dst.TotalTokens += src.TotalTokens
+	dst.InputTokens += src.InputTokens
+	dst.OutputTokens += src.OutputTokens
+	dst.InputTokenDetails.CachedTokens += src.InputTokenDetails.CachedTokens
+	dst.InputTokenDetails.CachedCreationTokens += src.InputTokenDetails.CachedCreationTokens
+	dst.InputTokenDetails.TextTokens += src.InputTokenDetails.TextTokens
+	dst.InputTokenDetails.AudioTokens += src.InputTokenDetails.AudioTokens
+	dst.InputTokenDetails.ImageTokens += src.InputTokenDetails.ImageTokens
+	dst.OutputTokenDetails.TextTokens += src.OutputTokenDetails.TextTokens
+	dst.OutputTokenDetails.AudioTokens += src.OutputTokenDetails.AudioTokens
+	dst.OutputTokenDetails.ImageTokens += src.OutputTokenDetails.ImageTokens
+}
+
 func preConsumeUsage(ctx *gin.Context, info *relaycommon.RelayInfo, usage *dto.RealtimeUsage, totalUsage *dto.RealtimeUsage) error {
 	if usage == nil || totalUsage == nil {
 		return fmt.Errorf("invalid usage pointer")
 	}
 
-	totalUsage.TotalTokens += usage.TotalTokens
-	totalUsage.InputTokens += usage.InputTokens
-	totalUsage.OutputTokens += usage.OutputTokens
-	totalUsage.InputTokenDetails.CachedTokens += usage.InputTokenDetails.CachedTokens
-	totalUsage.InputTokenDetails.TextTokens += usage.InputTokenDetails.TextTokens
-	totalUsage.InputTokenDetails.AudioTokens += usage.InputTokenDetails.AudioTokens
-	totalUsage.InputTokenDetails.ImageTokens += usage.InputTokenDetails.ImageTokens
-	totalUsage.OutputTokenDetails.TextTokens += usage.OutputTokenDetails.TextTokens
-	totalUsage.OutputTokenDetails.AudioTokens += usage.OutputTokenDetails.AudioTokens
-	totalUsage.OutputTokenDetails.ImageTokens += usage.OutputTokenDetails.ImageTokens
+	addRealtimeUsage(totalUsage, usage)
 	// clear usage
 	err := service.PreWssConsumeQuota(ctx, info, usage)
 	return err
