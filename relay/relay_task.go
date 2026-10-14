@@ -1036,6 +1036,13 @@ func sunoFetchRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.Ta
 		Code: "success",
 		Data: tasks,
 	})
+	if err != nil {
+		// A task row whose stored data column is not valid JSON fails here.
+		// Swallowing the error would surface as a generic empty_response 502
+		// and hide the real cause from the client.
+		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+		return
+	}
 	return
 }
 
@@ -1057,6 +1064,10 @@ func sunoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dt
 		Code: "success",
 		Data: TaskModel2Dto(originTask),
 	})
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+		return
+	}
 	return
 }
 

@@ -128,6 +128,12 @@ func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest
 	if _, err := request.EffectiveTools(); err != nil {
 		return nil, fmt.Errorf("invalid responses tools: %w", err)
 	}
+	if lo.FromPtrOr(request.MaxOutputTokens, uint(0)) > math.MaxInt32/2 {
+		return nil, errors.New("max_output_tokens is invalid")
+	}
+	if request.Temperature != nil && (*request.Temperature < 0 || *request.Temperature > 2) {
+		return nil, errors.New("temperature is invalid")
+	}
 	return request, nil
 }
 
@@ -179,6 +185,12 @@ func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIRespon
 		if len(items) == 0 {
 			return nil, errors.New("input must contain at least one item")
 		}
+	}
+	if lo.FromPtrOr(request.MaxOutputTokens, uint(0)) > math.MaxInt32/2 {
+		return nil, errors.New("max_output_tokens is invalid")
+	}
+	if request.Temperature != nil && (*request.Temperature < 0 || *request.Temperature > 2) {
+		return nil, errors.New("temperature is invalid")
 	}
 	if _, err := request.ToResponsesRequest().EffectiveTools(); err != nil {
 		return nil, fmt.Errorf("invalid responses tools: %w", err)
@@ -286,6 +298,9 @@ func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest
 	if textRequest.Model == "" {
 		return nil, errors.New("field model is required")
 	}
+	if lo.FromPtrOr(textRequest.MaxTokens, uint(0)) > math.MaxInt32/2 {
+		return nil, errors.New("max_tokens is invalid")
+	}
 
 	//if textRequest.Stream {
 	//	relayInfo.IsStream = true
@@ -310,6 +325,12 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 
 	if lo.FromPtrOr(textRequest.MaxTokens, uint(0)) > math.MaxInt32/2 {
 		return nil, errors.New("max_tokens is invalid")
+	}
+	if lo.FromPtrOr(textRequest.MaxCompletionTokens, uint(0)) > math.MaxInt32/2 {
+		return nil, errors.New("max_completion_tokens is invalid")
+	}
+	if textRequest.Temperature != nil && (*textRequest.Temperature < 0 || *textRequest.Temperature > 2) {
+		return nil, errors.New("temperature is invalid")
 	}
 	if textRequest.Model == "" {
 		return nil, errors.New("model is required")
@@ -360,6 +381,9 @@ func GetAndValidateGeminiRequest(c *gin.Context) (*dto.GeminiChatRequest, error)
 	}
 	if len(request.Contents) == 0 && len(request.Requests) == 0 {
 		return nil, errors.New("contents is required")
+	}
+	if lo.FromPtrOr(request.GenerationConfig.MaxOutputTokens, uint(0)) > math.MaxInt32/2 {
+		return nil, errors.New("maxOutputTokens is invalid")
 	}
 
 	//if c.Query("alt") == "sse" {
