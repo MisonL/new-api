@@ -65,6 +65,11 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			!strings.HasSuffix(openAIRequest.Model, thinkingSuffix) {
 			openAIRequest.Model = openAIRequest.Model + thinkingSuffix
 		}
+		// output_config.effort 是 Claude 侧的推理努力声明，OpenAI 兼容上游
+		// 用 reasoning_effort 承载同一语义，转发时不丢弃。
+		if effort := claudeRequest.GetEfforts(); effort != "" {
+			openAIRequest.ReasoningEffort = effort
+		}
 	}
 
 	// Convert stop sequences
@@ -524,6 +529,11 @@ func IsDeepSeekModelName(model string) bool {
 }
 
 func shouldExposeReasoningAsClaudeThinking(model string, info *relaycommon.RelayInfo) bool {
+	if relaycommon.ThinkTagsExtracted(info) {
+		// 提取器已从 think 标签剥离出推理内容：这份数据本身就是思考，模型名
+		// 无需再参与判断，否则提取结果会被这里丢掉。
+		return true
+	}
 	return hasDeepSeekModelName(model, info)
 }
 
@@ -1074,7 +1084,20 @@ func ResponseOpenAI2ClaudeWithError(openAIResponse *dto.OpenAITextResponse, info
 		if parseErr != nil {
 			return nil, fmt.Errorf("choice[%d]: %w", choice.Index, parseErr)
 		}
-		if allowClaudeThinking {
+		// 上游可能把推理以 think 标签内嵌在可见文本里；非流式也走一次提取，
+		// 与流式 splitter 行为对齐（见 TestThinkTaggedResponseOpenAI2ClaudeKeepsReasoning）。
+		taggedText := choice.Message.StringContent()
+		tagUnlock := false
+		if tagVisible, tagReasoning, tagFound := relaycommon.SplitThinkTaggedContent(taggedText); tagFound {
+			choice.Message.Content = tagVisible
+			if choice.Message.ReasoningContent == nil {
+				choice.Message.ReasoningContent = &tagReasoning
+			}
+			// 提取到完整标签对本身就证明这块内容是推理，直接解锁 thinking 块，
+			// 不再依赖模型名门控。
+			tagUnlock = true
+		}
+		if allowClaudeThinking || tagUnlock {
 			reasoningContent := choice.Message.GetReasoningContent()
 			preserveEmptyReasoning := reasoningContent == "" &&
 				(choice.Message.ReasoningContent != nil || choice.Message.ThinkingContent != nil || choice.Message.Reasoning != nil) &&
@@ -1883,7 +1906,17 @@ func ResponseOpenAI2GeminiWithError(openAIResponse *dto.OpenAITextResponse, info
 			}
 			content.Parts = append(content.Parts, mediaParts...)
 		} else if textContent := choice.Message.StringContent(); textContent != "" {
-			content.Parts = append(content.Parts, dto.GeminiPart{Text: textContent})
+			// 上游可能把推理以 think 标签内嵌在可见文本里；转为 thought part
+			// 并从可见文本中移除，与流式路径行为一致。无标签时原样透传。
+			if visible, reasoning, found := relaycommon.SplitThinkTaggedContent(textContent); found {
+				if reasoning != "" {
+					content.Parts = append(content.Parts, dto.GeminiPart{Thought: true, Text: reasoning})
+				}
+				textContent = visible
+			}
+			if textContent != "" {
+				content.Parts = append(content.Parts, dto.GeminiPart{Text: textContent})
+			}
 		}
 		for _, toolCall := range toolCalls {
 			if strings.TrimSpace(toolCall.ID) == "" || strings.TrimSpace(toolCall.Function.Name) == "" {
