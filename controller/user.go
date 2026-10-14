@@ -91,6 +91,13 @@ func setupLogin(user *model.User, c *gin.Context) {
 func setupLoginWithResult(user *model.User, c *gin.Context) (bool, string) {
 	session := sessions.Default(c)
 
+	// OAuth 登录走到会话签发即 state 校验已通过：在这里消费一次性 nonce，
+	// 旧式回调（GitHub/OIDC/Discord/LinuxDO/微信/Telegram）因此不再留有
+	// 会话存活期内的 state 重放窗口。consumeOAuthState 幂等，custom_oauth
+	// 等已在响应前消费过的路径此处为空操作。2FA 挑战路径同样消费：挑战
+	// 响应不是登录失败，重放同一个 state 仍不应通过。
+	consumeOAuthState(c)
+
 	// 直接读取 2FA 记录而不是用 IsTwoFAEnabled：后者在查询出错时返回 false（放行），
 	// 门控不能把查询错误当成"没有开启二次验证"。
 	twoFA, err := model.GetTwoFAByUserId(user.Id)

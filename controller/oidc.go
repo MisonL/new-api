@@ -219,6 +219,8 @@ func OidcBind(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// 绑定成功即消费一次性 state，封住会话存活期内的重放窗口。
+	consumeOAuthState(c)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "bind",
