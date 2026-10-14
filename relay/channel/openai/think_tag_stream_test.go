@@ -176,6 +176,9 @@ func TestHandleStreamFormatFlushesSplitterOnTerminalFrame(t *testing.T) {
 		raw, err = common.Marshal(terminal)
 		require.NoError(t, err)
 		require.NoError(t, HandleStreamFormat(c, info, string(raw), false, false))
+		// flush 接线在 HandleFinalResponseWithError：流结束时一次性释放。
+		require.NoError(t, HandleFinalResponseWithError(c, info, string(raw),
+			"chatcmpl-truncated", 0, "some-upstream-model", "", &dto.Usage{}, false))
 
 		var recovered string
 		for _, payload := range sseDataPayloads(t, recorder.Body.String()) {
@@ -210,4 +213,64 @@ func TestHandleStreamFormatFlushesSplitterOnTerminalFrame(t *testing.T) {
 
 	t.Run("claude", func(t *testing.T) { run(t, types.RelayFormatClaude) })
 	t.Run("gemini", func(t *testing.T) { run(t, types.RelayFormatGemini) })
+}
+
+// TestHandleStreamFormatKeepsPerFrameExtractionAcrossFrames is the regression
+// for the 06a063ef0 follow-up: an earlier attempt called FinishThinkTagStream
+// on every frame, which re-fed each frame's already-extracted bytes into the
+// splitter, leaked the raw open marker as content and broke extraction for the
+// rest of the stream. Per-frame handling must only extract; the flush is
+// terminal-only (HandleFinalResponseWithError).
+func TestHandleStreamFormatKeepsPerFrameExtractionAcrossFrames(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	info := claudeThinkTagInfo()
+
+	// 帧尾停留在 open 块内部：内容必须被 withheld，原始标记不得外泄。
+	first := dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-multiframe",
+		Model: "some-upstream-model",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+				Content: common.GetPointer("a" + testThinkOpen + "held1"),
+			},
+		}},
+	}
+	raw, err := common.Marshal(first)
+	require.NoError(t, err)
+	require.NoError(t, HandleStreamFormat(c, info, string(raw), false, false))
+
+	second := dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-multiframe",
+		Model: "some-upstream-model",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+				Content: common.GetPointer("held2" + testThinkClose + "b"),
+			},
+		}},
+	}
+	raw, err = common.Marshal(second)
+	require.NoError(t, err)
+	require.NoError(t, HandleStreamFormat(c, info, string(raw), false, false))
+
+	var thinking string
+	var text string
+	for _, payload := range sseDataPayloads(t, recorder.Body.String()) {
+		var event dto.ClaudeResponse
+		if err := common.UnmarshalJsonStr(payload, &event); err != nil {
+			continue
+		}
+		if event.Delta != nil && event.Delta.Thinking != nil {
+			thinking += *event.Delta.Thinking
+		}
+		if event.Delta != nil && event.Delta.Text != nil {
+			text += *event.Delta.Text
+		}
+	}
+	require.Equal(t, "ab", text, "bytes before the open marker and after the close marker are visible")
+	require.Equal(t, "held1held2", thinking, "reasoning reassembles across frames")
+	require.NotContains(t, text, testThinkOpen, "the raw marker must not leak as content")
+	require.NotContains(t, text, "held1", "withheld in-tag bytes must not leak as content")
 }

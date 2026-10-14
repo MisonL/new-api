@@ -37,11 +37,11 @@ func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string
 func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo) error {
 	// 提取必须发生在转换之前：模型名门控覆盖不到的上游会把 think 标签原样
 	// 放进 content，转换后 Claude 客户端就把原始标记当成正文渲染。
+	// 注意：这里只做逐帧提取，不能同时调 FinishThinkTagStream——该函数会
+	// 把本帧已被 Extract 消费过的字节重喂进 splitter 并提前 flush，破坏
+	// 多帧流的提取（见 06a063ef0 回归）。缓冲字节的释放只在流结束处的
+	// HandleFinalResponseWithError 做一次。
 	data = relaycommon.ExtractThinkTagsFromChatChunk(info, data)
-	// 终端帧触发 flush：流被截断在 think 块内部或以未闭合标记结尾时，
-	// splitter 缓冲的推理/可见字节必须在这里释放，否则内容丢失且照常计费。
-	// 幂等：非终端帧 flush 结果为空，无副作用。
-	data = relaycommon.FinishThinkTagStream(info, data)
 	var streamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
 		return err
@@ -61,10 +61,9 @@ func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 }
 
 func handleGeminiFormat(c *gin.Context, data string, info *relaycommon.RelayInfo) error {
-	// 与 Claude 路径对称：先提取（模型名门控覆盖不到的上游会把 think 标签
-	// 放进 content），终端帧再 flush splitter 缓冲的字节。幂等。
+	// 与 Claude 路径对称：逐帧提取；flush 只在流结束处的
+	// HandleFinalResponseWithError 做一次（理由见 handleClaudeFormat 注释）。
 	data = relaycommon.ExtractThinkTagsFromChatChunk(info, data)
-	data = relaycommon.FinishThinkTagStream(info, data)
 	var streamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
 		logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
@@ -247,6 +246,9 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		return nil
 
 	case types.RelayFormatClaude:
+		// 流结束的一次性 flush：释放 splitter 缓冲的字节（截断在 think 块内、
+		// 帧尾未闭合标记前缀等场景），再转换终端帧。
+		lastStreamData = relaycommon.FinishThinkTagStream(info, lastStreamData)
 		var streamResponse dto.ChatCompletionsStreamResponse
 		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &streamResponse); err != nil {
 			return err
@@ -265,6 +267,8 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		return nil
 
 	case types.RelayFormatGemini:
+		// 与 Claude 分支同：流结束处一次性 flush。
+		lastStreamData = relaycommon.FinishThinkTagStream(info, lastStreamData)
 		var streamResponse dto.ChatCompletionsStreamResponse
 		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &streamResponse); err != nil {
 			return err
