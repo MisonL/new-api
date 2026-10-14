@@ -113,6 +113,11 @@ func runProgram(prog *vm.Program, params TokenParams, request RequestInput) (flo
 	if !ok {
 		return 0, trace, fmt.Errorf("expr result is %T, want float64", out)
 	}
+	// 零除让 expr-lang 返回 +Inf/NaN，转 int 得到实现定义值，可能以巨额
+	// 负数结算。非有限结果一律拒绝。
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, trace, fmt.Errorf("expr result is not finite: %v", f)
+	}
 	return f, trace, nil
 }
 

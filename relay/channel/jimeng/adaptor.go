@@ -48,25 +48,28 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 }
 
 type LogoInfo struct {
-	AddLogo         bool    `json:"add_logo,omitempty"`
-	Position        int     `json:"position,omitempty"`
-	Language        int     `json:"language,omitempty"`
-	Opacity         float64 `json:"opacity,omitempty"`
-	LogoTextContent string  `json:"logo_text_content,omitempty"`
+	AddLogo         *bool    `json:"add_logo,omitempty"`
+	Position        *int     `json:"position,omitempty"`
+	Language        *int     `json:"language,omitempty"`
+	Opacity         *float64 `json:"opacity,omitempty"`
+	LogoTextContent string   `json:"logo_text_content,omitempty"`
 }
 
+// 布尔/数值字段全部用指针：上游默认与 Go 零值不同（seed 默认 -1，
+// use_pre_llm/use_sr 默认 true），指针让显式的 false/0 得以转发，
+// 未提及的字段仍按 omitempty 省略以应用上游默认。
 type imageRequestPayload struct {
-	ReqKey     string   `json:"req_key"`                      // Service identifier, fixed value: jimeng_high_aes_general_v21_L
-	Prompt     string   `json:"prompt"`                       // Prompt for image generation, supports both Chinese and English
-	Seed       int64    `json:"seed,omitempty"`               // Random seed, default -1 (random)
-	Width      int      `json:"width,omitempty"`              // Image width, default 512, range [256, 768]
-	Height     int      `json:"height,omitempty"`             // Image height, default 512, range [256, 768]
-	UsePreLLM  bool     `json:"use_pre_llm,omitempty"`        // Enable text expansion, default true
-	UseSR      bool     `json:"use_sr,omitempty"`             // Enable super resolution, default true
-	ReturnURL  bool     `json:"return_url,omitempty"`         // Whether to return image URL (valid for 24 hours)
-	LogoInfo   LogoInfo `json:"logo_info,omitempty"`          // Watermark information
-	ImageUrls  []string `json:"image_urls,omitempty"`         // Image URLs for input
-	BinaryData []string `json:"binary_data_base64,omitempty"` // Base64 encoded binary data
+	ReqKey     string    `json:"req_key"`                      // Service identifier, fixed value: jimeng_high_aes_general_v21_L
+	Prompt     string    `json:"prompt"`                       // Prompt for image generation, supports both Chinese and English
+	Seed       *int64    `json:"seed,omitempty"`               // Random seed, default -1 (random)
+	Width      *int      `json:"width,omitempty"`              // Image width, default 512, range [256, 768]
+	Height     *int      `json:"height,omitempty"`             // Image height, default 512, range [256, 768]
+	UsePreLLM  *bool     `json:"use_pre_llm,omitempty"`        // Enable text expansion, default true
+	UseSR      *bool     `json:"use_sr,omitempty"`             // Enable super resolution, default true
+	ReturnURL  bool      `json:"return_url,omitempty"`         // Whether to return image URL (valid for 24 hours)
+	LogoInfo   *LogoInfo `json:"logo_info,omitempty"`          // Watermark information
+	ImageUrls  []string  `json:"image_urls,omitempty"`         // Image URLs for input
+	BinaryData []string  `json:"binary_data_base64,omitempty"` // Base64 encoded binary data
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {

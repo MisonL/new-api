@@ -146,10 +146,16 @@ func LogDebug(ctx context.Context, msg string, args ...any) {
 }
 
 func logHelper(ctx context.Context, level string, msg string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	id := ctx.Value(common.RequestIdKey)
 	if id == nil {
 		id = "SYSTEM"
 	}
+	// 请求可控的值（模型名、上游错误体）会原样进入日志；内嵌换行会伪造出
+	// 一条看起来真实的日志行，这里统一中和。
+	msg = common.SanitizeLogLine(msg)
 	now := time.Now()
 	common.LogWriterMu.RLock()
 	writer := gin.DefaultErrorWriter
