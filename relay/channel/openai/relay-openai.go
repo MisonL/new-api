@@ -126,11 +126,21 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var streamItems []string // store stream items
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	var streamFrameError *types.OpenAIError
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		// 上游可能在 HTTP 200 的 SSE 流内用 error 帧报告限流、配额或内容策略
+		// 拒绝。该帧不能作为普通 chunk 转发给客户端，也不能让请求按成功结算。
+		if frameError := streamErrorFrameWithContent(data); frameError != nil {
+			streamFrameError = frameError
+			info.StreamStatus.RecordError(frameErrorMessageForStatus(frameError))
+			lastStreamData = "" // 丢弃错误帧本身，不作为内容转发
+			sr.Stop(fmt.Errorf("%s", frameError.Message))
+			return
+		}
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
@@ -150,6 +160,13 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	})
 	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonHandlerStop && info.StreamStatus.EndError != nil {
 		return nil, types.NewOpenAIError(info.StreamStatus.EndError, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+	}
+
+	// 帧级错误在 HTTP 200 流内到达：按上游错误内容映射状态码返回，且不产出
+	// 计费 usage（失败请求不能按成功结算）。
+	if streamFrameError != nil {
+		statusCode := frameErrorStatusCode(streamFrameError)
+		return nil, types.WithOpenAIError(*streamFrameError, statusCode, types.ErrOptionWithSkipRetry())
 	}
 
 	if newAPIError := retryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
@@ -206,8 +223,56 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	return usage, nil
 }
 
-func retryableUpstreamStreamInterruptedError(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
-	if info == nil || info.StreamStatus == nil {
+// streamErrorFrameWithContent reports whether an SSE data frame is an upstream
+// error frame carrying real content. GetOpenAIError is non-nil for any present
+// `error` key, so a content check is required: benign placeholder frames such
+// as `{"error":{}}` or `{"error":{"message":""}}` must not abort a healthy
+// stream, while a code-only frame is still a failure.
+func streamErrorFrameWithContent(data string) *types.OpenAIError {
+	var frame struct {
+		Error *types.OpenAIError `json:"error"`
+	}
+	if !strings.Contains(data, `"error"`) {
+		return nil
+	}
+	if err := common.Unmarshal([]byte(data), &frame); err != nil {
+		return nil
+	}
+	if frame.Error == nil {
+		return nil
+	}
+	if frame.Error.Type == "" && frame.Error.Message == "" && frame.Error.Param == "" && frame.Error.Code == nil {
+		return nil
+	}
+	return frame.Error
+}
+
+// frameErrorStatusCode maps an upstream error frame to a client status code.
+// Rate-limit and quota codes get their canonical statuses; everything else
+// surfaces as a bad gateway so the failure is attributed to upstream.
+func frameErrorStatusCode(frameError *types.OpenAIError) int {
+	if frameError == nil {
+		return http.StatusBadGateway
+	}
+	code := strings.ToLower(fmt.Sprintf("%v", frameError.Code))
+	errorType := strings.ToLower(frameError.Type)
+	if code == "rate_limit_exceeded" || strings.Contains(errorType, "rate_limit") {
+		return http.StatusTooManyRequests
+	}
+	if code == "insufficient_quota" || strings.Contains(errorType, "insufficient_quota") {
+		return http.StatusPaymentRequired
+	}
+	return http.StatusBadGateway
+}
+
+func frameErrorMessageForStatus(frameError *types.OpenAIError) string {
+	if frameError == nil {
+		return ""
+	}
+	return fmt.Sprintf("upstream error frame: type=%s code=%s message=%s", frameError.Type, fmt.Sprintf("%v", frameError.Code), frameError.Message)
+}
+
+func retryableUpstreamStreamInterruptedError(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {	if info == nil || info.StreamStatus == nil {
 		return nil
 	}
 	if info.StreamStatus.EndReason != relaycommon.StreamEndReasonUpstreamInterrupted {

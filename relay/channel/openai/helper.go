@@ -35,6 +35,9 @@ func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string
 }
 
 func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo) error {
+	// 提取必须发生在转换之前：模型名门控覆盖不到的上游会把 think 标签原样
+	// 放进 content，转换后 Claude 客户端就把原始标记当成正文渲染。
+	data = relaycommon.ExtractThinkTagsFromChatChunk(info, data)
 	var streamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
 		return err
@@ -287,6 +290,15 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 	return nil
 }
 
+// isOpaqueFutureEventData reports whether an SSE frame carries the opaque
+// future-extension markers. Frames that carry them are preserved verbatim for
+// forward compatibility, so any rewrite must skip them.
+func isOpaqueFutureEventData(data string) bool {
+	return strings.Contains(data, `"future_event"`) ||
+		strings.Contains(data, `"future_response"`) ||
+		strings.Contains(data, `"future_item"`)
+}
+
 func sendResponsesStreamData(c *gin.Context, info *relaycommon.RelayInfo, streamResponse dto.ResponsesStreamResponse, data string) {
 	if data == "" {
 		return
@@ -296,6 +308,14 @@ func sendResponsesStreamData(c *gin.Context, info *relaycommon.RelayInfo, stream
 	if restorer := responsesToolNameRestorer(info); restorer != nil {
 		if restored, changed := restorer.RestoreRawJSON(common.StringToByteSlice(data)); changed {
 			data = string(restored)
+		}
+	}
+	// usage 嵌在 response.usage 的 terminal 事件也要补齐 token-detail 对象，
+	// 与非流式路径保持一致的客户端可见形状。计费用已解码 struct，不受影响。
+	// 带 future_* 标记的 opaque 负载承诺逐字节保留，不参与任何改写。
+	if !isOpaqueFutureEventData(data) {
+		if filled, changed := ensureUsageDetailObjectsAt(common.StringToByteSlice(data), "response.usage"); changed {
+			data = string(filled)
 		}
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesStreamPreludeRetrySafe, false)
