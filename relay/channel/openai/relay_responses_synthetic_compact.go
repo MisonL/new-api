@@ -99,7 +99,7 @@ func OaiSyntheticRemoteResponsesCompactionHandler(c *gin.Context, info *relaycom
 		if err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
 		}
-		sendResponsesStreamData(c, dto.ResponsesStreamResponse{Type: event.Type}, string(data))
+		sendResponsesStreamData(c, info, dto.ResponsesStreamResponse{Type: event.Type}, string(data))
 	}
 	return usage, nil
 }

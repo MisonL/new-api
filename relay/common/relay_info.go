@@ -237,6 +237,10 @@ type RelayInfo struct {
 	// think_tag.go only when a frame may carry a tag, so untagged traffic
 	// never pays for the state.
 	ThinkTagSplitter *ThinkTagStreamSplitter
+	// ResponsesToolNameRestorer maps relay-normalized tool names back to the
+	// client's original names for the current /v1/responses request. It is
+	// produced by NormalizeResponsesToolNamesWithRestorer at request entry.
+	ResponsesToolNameRestorer *ResponsesToolNameRestorer
 
 	PriceData types.PriceData
 

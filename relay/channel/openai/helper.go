@@ -287,9 +287,16 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 	return nil
 }
 
-func sendResponsesStreamData(c *gin.Context, streamResponse dto.ResponsesStreamResponse, data string) {
+func sendResponsesStreamData(c *gin.Context, info *relaycommon.RelayInfo, streamResponse dto.ResponsesStreamResponse, data string) {
 	if data == "" {
 		return
+	}
+	// 上游 echo 回归一化的工具别名时，转发前换回客户端原始名；无别名
+	// 或无 restorer 时逐字节原样转发。
+	if restorer := responsesToolNameRestorer(info); restorer != nil {
+		if restored, changed := restorer.RestoreRawJSON(common.StringToByteSlice(data)); changed {
+			data = string(restored)
+		}
 	}
 	common.SetContextKey(c, appconstant.ContextKeyResponsesStreamPreludeRetrySafe, false)
 	helper.ResponseChunkData(c, streamResponse, data)

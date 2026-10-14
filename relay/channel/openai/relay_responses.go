@@ -845,6 +845,15 @@ func markResponsesCompactionOutputContext(c *gin.Context, item *dto.ResponsesOut
 	return true
 }
 
+// responsesToolNameRestorer returns the request-scoped restorer carried by the
+// relay info, or nil when this request never normalized any tool name.
+func responsesToolNameRestorer(info *relaycommon.RelayInfo) *relaycommon.ResponsesToolNameRestorer {
+	if info == nil {
+		return nil
+	}
+	return info.ResponsesToolNameRestorer
+}
+
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -887,7 +896,13 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		common.SetContextKey(c, constant.ContextKeyResponsesCompactionOutput, true)
 	}
 
-	// 写入新的 response body
+	// 写入新的 response body。上游 echo 回归一化的工具别名，这里在转发前
+	// 用请求侧的 restorer 把它们换回客户端原始名；无别名时逐字节原样转发。
+	if restorer := responsesToolNameRestorer(info); restorer != nil {
+		if restored, changed := restorer.RestoreRawJSON(responseBody); changed {
+			responseBody = restored
+		}
+	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage
@@ -1196,9 +1211,9 @@ func hasOnlyResponsesOutputItemAddedPreludeFields(data string) bool {
 	return true
 }
 
-func flushResponsesStreamPrelude(c *gin.Context, pending *[]pendingResponsesStreamEvent) {
+func flushResponsesStreamPrelude(c *gin.Context, info *relaycommon.RelayInfo, pending *[]pendingResponsesStreamEvent) {
 	for _, event := range *pending {
-		sendResponsesStreamData(c, event.response, event.data)
+		sendResponsesStreamData(c, info, event.response, event.data)
 	}
 	*pending = nil
 }
@@ -1336,7 +1351,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			if streamResponse.Type == "response.completed" {
 				for _, event := range remoteState.events {
-					sendResponsesStreamData(c, event.response, event.data)
+					sendResponsesStreamData(c, info, event.response, event.data)
 				}
 			}
 			return
@@ -1344,16 +1359,16 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if isResponsesStreamPreludeEvent(streamResponse, data) {
 			if len(pendingPrelude) >= maxPendingResponsesStreamPreludeEvents {
 				markResponsesStreamFirstCommittedEvent(c, streamResponse.Type)
-				flushResponsesStreamPrelude(c, &pendingPrelude)
-				sendResponsesStreamData(c, streamResponse, data)
+				flushResponsesStreamPrelude(c, info, &pendingPrelude)
+				sendResponsesStreamData(c, info, streamResponse, data)
 				return
 			}
 			pendingPrelude = append(pendingPrelude, pendingResponsesStreamEvent{response: streamResponse, data: data})
 			return
 		}
 		markResponsesStreamFirstCommittedEvent(c, streamResponse.Type)
-		flushResponsesStreamPrelude(c, &pendingPrelude)
-		sendResponsesStreamData(c, streamResponse, data)
+		flushResponsesStreamPrelude(c, info, &pendingPrelude)
+		sendResponsesStreamData(c, info, streamResponse, data)
 	}, helper.StreamScannerOptions{FirstDataEventTimeout: firstDataEventTimeout})
 	if remoteCompaction && info != nil && info.StreamStatus != nil &&
 		info.StreamStatus.EndReason == relaycommon.StreamEndReasonFirstDataTimeout &&
