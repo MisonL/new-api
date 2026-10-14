@@ -364,17 +364,32 @@ func EnabledListModels(c *gin.Context) {
 
 // modelIsRoutableForUser reports whether at least one of the caller's groups
 // has an enabled ability for the model on an enabled channel. It mirrors the
-// distributor's routing boundary so /v1/models/{id} and an actual call agree.
-func modelIsRoutableForUser(c *gin.Context, groups string, modelName string) bool {
-	if strings.TrimSpace(modelName) == "" || strings.TrimSpace(groups) == "" {
+// distributor's routing boundary so /v1/models/{id} and an actual call agree:
+// auto 分组按 distributor 相同的规则展开为用户可用分组与 auto 列表的交集，
+// 否则窄组 token 可借 404/200 之差探测其他分组的模型存在性（预言机），
+// 持 auto token 的用户也可能被假阴性 404。
+func modelIsRoutableForUser(c *gin.Context, groups string, tokenGroup string, userGroup string, modelName string) bool {
+	if strings.TrimSpace(modelName) == "" {
+		return false
+	}
+	groupList := make([]string, 0, 4)
+	if common.IsAutoGroup(tokenGroup) {
+		if userGroup != "" {
+			groupList = append(groupList, service.GetUserAutoGroup(userGroup)...)
+		}
+	} else if tokenGroup != "" {
+		groupList = append(groupList, tokenGroup)
+	}
+	for _, group := range strings.Split(groups, ",") {
+		if group = strings.TrimSpace(group); group != "" {
+			groupList = append(groupList, group)
+		}
+	}
+	if len(groupList) == 0 {
 		return false
 	}
 	model.InitChannelCache()
-	for _, group := range strings.Split(groups, ",") {
-		group = strings.TrimSpace(group)
-		if group == "" {
-			continue
-		}
+	for _, group := range groupList {
 		for _, enabled := range model.GetGroupEnabledModels(group) {
 			if enabled == modelName {
 				return true
@@ -390,21 +405,28 @@ func RetrieveModel(c *gin.Context, modelType int) {
 	// 网关实际服务的模型可以不在其中。不可路由的模型对 SDK 调用方必须是
 	// 404（返回 200 + error 对象会被 SDK 当成查询成功）。
 	if _, ok := openAIModelsMap[modelId]; !ok {
-		groups := ""
+		userGroup := ""
 		if userId := c.GetInt("id"); userId > 0 {
-			if userGroup, err := model.GetUserGroup(userId, false); err == nil {
-				groups = userGroup
+			if group, err := model.GetUserGroup(userId, false); err == nil {
+				userGroup = group
 			}
 		}
-		if tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup); tokenGroup != "" && !common.IsAutoGroup(tokenGroup) {
-			groups = tokenGroup
-		}
-		if !modelIsRoutableForUser(c, groups, modelId) {
+		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+		if !modelIsRoutableForUser(c, userGroup, tokenGroup, userGroup, modelId) {
 			openAIError := types.OpenAIError{
 				Message: fmt.Sprintf("The model '%s' does not exist", modelId),
 				Type:    types.StandardErrorTypeName(types.ErrorCodeModelNotFound, http.StatusNotFound),
 				Param:   "model",
 				Code:    types.ErrorCodeModelNotFound,
+			}
+			// Anthropic 格式的调用方期待 Anthropic 错误信封；目录命中路径
+			// 下的模型对象已做同样分流，404 分支保持一致。
+			if modelType == constant.ChannelTypeAnthropic {
+				c.JSON(http.StatusNotFound, gin.H{
+					"type":  "error",
+					"error": openAIError,
+				})
+				return
 			}
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": openAIError,
