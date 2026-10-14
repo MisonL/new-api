@@ -491,8 +491,10 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 						usage.InputTokenDetails.AudioTokens += realtimeUsage.InputTokenDetails.AudioTokens
 						usage.InputTokenDetails.CachedTokens += realtimeUsage.InputTokenDetails.CachedTokens
 						usage.InputTokenDetails.TextTokens += realtimeUsage.InputTokenDetails.TextTokens
+						usage.InputTokenDetails.ImageTokens += realtimeUsage.InputTokenDetails.ImageTokens
 						usage.OutputTokenDetails.AudioTokens += realtimeUsage.OutputTokenDetails.AudioTokens
 						usage.OutputTokenDetails.TextTokens += realtimeUsage.OutputTokenDetails.TextTokens
+						usage.OutputTokenDetails.ImageTokens += realtimeUsage.OutputTokenDetails.ImageTokens
 						err := preConsumeUsage(c, info, usage, sumUsage)
 						if err != nil {
 							errChan <- fmt.Errorf("error consume usage: %v", err)
@@ -664,8 +666,10 @@ func preConsumeUsage(ctx *gin.Context, info *relaycommon.RelayInfo, usage *dto.R
 	totalUsage.InputTokenDetails.CachedTokens += usage.InputTokenDetails.CachedTokens
 	totalUsage.InputTokenDetails.TextTokens += usage.InputTokenDetails.TextTokens
 	totalUsage.InputTokenDetails.AudioTokens += usage.InputTokenDetails.AudioTokens
+	totalUsage.InputTokenDetails.ImageTokens += usage.InputTokenDetails.ImageTokens
 	totalUsage.OutputTokenDetails.TextTokens += usage.OutputTokenDetails.TextTokens
 	totalUsage.OutputTokenDetails.AudioTokens += usage.OutputTokenDetails.AudioTokens
+	totalUsage.OutputTokenDetails.ImageTokens += usage.OutputTokenDetails.ImageTokens
 	// clear usage
 	err := service.PreWssConsumeQuota(ctx, info, usage)
 	return err
