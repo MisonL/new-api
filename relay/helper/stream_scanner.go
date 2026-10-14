@@ -176,7 +176,7 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = context.WithValue(ctx, "stop_chan", stopChan)
+	ctx = context.WithValue(ctx, constant.ContextKeyRelayStopChan, stopChan)
 
 	// 改进资源清理，确保所有 goroutine 正确退出
 	defer func() {
