@@ -194,6 +194,15 @@ const (
 	ContextKeyLogResponsePayload ContextKey = "log_response_payload"
 	ContextKeyIsStream           ContextKey = "is_stream"
 	ContextKeyRequestBodySize    ContextKey = "request_body_size"
+
+	// ContextKeyRelayStopChan carries the relay stream's stop channel from
+	// relay/helper into the gopool panic handler through the request context.
+	// context.WithValue matches on the dynamic type, so both sides must use
+	// this shared typed key: a bare string on either side makes the handler
+	// silently fail to find the channel. The handler is defense in depth —
+	// relay goroutines recover their own panics (relay/helper/stream_scanner.go),
+	// so gopool only sees one if that recover is removed.
+	ContextKeyRelayStopChan ContextKey = "relay_stop_chan"
 )
 
 const (

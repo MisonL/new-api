@@ -391,7 +391,8 @@ func MaskSensitiveInfo(str string) string {
 
 func isAuthSchemeProseWord(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "has", "is", "required", "missing", "unavailable", "invalid", "expired", "present", "not", "no", "none", "was", "were", "needed", "set", "provided", "count", "usage", "token":
+	case "has", "is", "required", "missing", "unavailable", "invalid", "expired", "present", "not", "no", "none", "was", "were", "needed", "set", "provided", "count", "usage", "token",
+		"quota", "remain", "model", "access", "configuration", "id", "endpoint", "authentication", "state", "scope":
 		return true
 	default:
 		return false

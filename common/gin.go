@@ -183,7 +183,7 @@ func UnmarshalBodyReusable(c *gin.Context, v any) error {
 		return err
 	}
 	if strings.HasPrefix(contentType, "application/json") {
-		err = Unmarshal(requestBody, v)
+		err = SanitizeJSONDecodeError(Unmarshal(requestBody, v))
 	} else if strings.Contains(contentType, gin.MIMEPOSTForm) {
 		err = parseFormData(requestBody, v)
 	} else if strings.Contains(contentType, gin.MIMEMultipartPOSTForm) {

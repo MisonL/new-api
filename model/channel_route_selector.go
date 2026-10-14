@@ -480,6 +480,11 @@ func routeV2EntriesFromDatabaseWithRouteFilter(group string, routeCandidates []r
 			}
 			resolvedCandidate, mappingErr := prepareResolvedRouteCandidate(resolver, channel, candidate)
 			if mappingErr != nil {
+				// Same diagnostic contract as the legacy path: an invalid
+				// mapping is reported, never dropped in silence.
+				if IsChannelModelMappingError(mappingErr) {
+					common.SysError(fmt.Sprintf("route candidate skipped invalid model mapping: channel_id=%d model=%s error=%v", channel.Id, candidate.model, mappingErr))
+				}
 				continue
 			}
 			if !channelSupportsCompactRouteCandidate(channel, resolvedCandidate) {

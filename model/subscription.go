@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/go-redis/redis/v8"
 	"github.com/samber/hot"
 	"gorm.io/gorm"
 )
@@ -87,9 +88,11 @@ func getSubscriptionPlanCache() *cachex.HybridCache[SubscriptionPlan] {
 		ttl := subscriptionPlanCacheTTL()
 		subscriptionPlanCache = cachex.NewHybridCache[SubscriptionPlan](cachex.HybridCacheConfig[SubscriptionPlan]{
 			Namespace: cachex.Namespace(subscriptionPlanCacheNamespace),
-			Redis:     common.RDB,
-			RedisEnabled: func() bool {
-				return common.RedisEnabled && common.RDB != nil
+			RedisFunc: func() *redis.Client {
+				if !common.RedisEnabled {
+					return nil
+				}
+				return common.RDB
 			},
 			RedisCodec: cachex.JSONCodec[SubscriptionPlan]{},
 			Memory: func() *hot.HotCache[string, SubscriptionPlan] {
@@ -108,9 +111,11 @@ func getSubscriptionPlanInfoCache() *cachex.HybridCache[SubscriptionPlanInfo] {
 		ttl := subscriptionPlanInfoCacheTTL()
 		subscriptionPlanInfoCache = cachex.NewHybridCache[SubscriptionPlanInfo](cachex.HybridCacheConfig[SubscriptionPlanInfo]{
 			Namespace: cachex.Namespace(subscriptionPlanInfoCacheNamespace),
-			Redis:     common.RDB,
-			RedisEnabled: func() bool {
-				return common.RedisEnabled && common.RDB != nil
+			RedisFunc: func() *redis.Client {
+				if !common.RedisEnabled {
+					return nil
+				}
+				return common.RDB
 			},
 			RedisCodec: cachex.JSONCodec[SubscriptionPlanInfo]{},
 			Memory: func() *hot.HotCache[string, SubscriptionPlanInfo] {
@@ -1100,7 +1105,7 @@ func RefundSubscriptionPreConsume(requestId string) error {
 			record.Status = "refunded"
 			return tx.Save(&record).Error
 		}
-		if err := PostConsumeUserSubscriptionDelta(record.UserSubscriptionId, -record.PreConsumed); err != nil {
+		if err := postConsumeUserSubscriptionDeltaTx(tx, record.UserSubscriptionId, -record.PreConsumed); err != nil {
 			return err
 		}
 		record.Status = "refunded"
@@ -1200,20 +1205,28 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 		return nil
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
-		var sub UserSubscription
-		if err := forUpdate(tx).
-			Where("id = ?", userSubscriptionId).
-			First(&sub).Error; err != nil {
-			return err
-		}
-		newUsed := sub.AmountUsed + delta
-		if newUsed < 0 {
-			newUsed = 0
-		}
-		if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
-			return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
-		}
-		sub.AmountUsed = newUsed
-		return tx.Save(&sub).Error
+		return postConsumeUserSubscriptionDeltaTx(tx, userSubscriptionId, delta)
 	})
+}
+
+// postConsumeUserSubscriptionDeltaTx applies the delta on the caller's
+// transaction. RefundSubscriptionPreConsume needs this form: running the delta
+// in its own transaction commits the quota refund even when the surrounding
+// transaction later fails, so a retry would refund a second time.
+func postConsumeUserSubscriptionDeltaTx(tx *gorm.DB, userSubscriptionId int, delta int64) error {
+	var sub UserSubscription
+	if err := forUpdate(tx).
+		Where("id = ?", userSubscriptionId).
+		First(&sub).Error; err != nil {
+		return err
+	}
+	newUsed := sub.AmountUsed + delta
+	if newUsed < 0 {
+		newUsed = 0
+	}
+	if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
+		return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
+	}
+	sub.AmountUsed = newUsed
+	return tx.Save(&sub).Error
 }

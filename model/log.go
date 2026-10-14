@@ -1158,12 +1158,29 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {
 	var total int64 = 0
 
+	// SQLite does not accept DELETE ... LIMIT, and gorm silently drops the
+	// Limit clause when the dialect cannot render it, so a single statement
+	// would remove every expired row at once — the opposite of the bounded
+	// batches the caller is asking for. Deleting by id ranges works on all
+	// three dialects and keeps every DELETE statement within the limit.
 	for {
 		if nil != ctx.Err() {
 			return total, ctx.Err()
 		}
 
-		result := LOG_DB.Where("created_at < ?", targetTimestamp).Limit(limit).Delete(&Log{})
+		var batchIds []int64
+		if err := LOG_DB.Model(&Log{}).
+			Where("created_at < ?", targetTimestamp).
+			Order("id").
+			Limit(limit).
+			Pluck("id", &batchIds).Error; err != nil {
+			return total, err
+		}
+		if len(batchIds) == 0 {
+			break
+		}
+
+		result := LOG_DB.Where("id IN ?", batchIds).Delete(&Log{})
 		if nil != result.Error {
 			return total, result.Error
 		}

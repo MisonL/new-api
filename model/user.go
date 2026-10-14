@@ -35,7 +35,12 @@ type User struct {
 	WeChatId         string         `json:"wechat_id" gorm:"column:wechat_id;index"`
 	TelegramId       string         `json:"telegram_id" gorm:"column:telegram_id;index"`
 	VerificationCode string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
-	AccessToken      *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	// json:"-" keeps the system-management token out of every serialised User
+	// (self info, admin user lists): an admin reading /api/user/self of the
+	// root account must not obtain root's token. The owner reads their token
+	// through the explicit generate/GET endpoints, which return the field
+	// directly, so Go-level access stays intact.
+	AccessToken      *string        `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota            int            `json:"quota" gorm:"type:int;default:0"`
 	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
@@ -376,13 +381,18 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 		return errors.New("邀请额度不足！")
 	}
 
-	// 更新用户额度
-	user.AffQuota -= quota
-	user.Quota += quota
-
-	// 保存用户状态
-	if err := tx.Save(user).Error; err != nil {
-		return err
+	// 更新用户额度。相对更新在 SQL 层完成增减并携带 sufficiency guard：与
+	// 加锁查询之间的窗口内其他扣减不会把 aff_quota 打成负数——guard 不满足
+	// 时语句影响 0 行，按余额不足处理。
+	result := tx.Model(user).Where("aff_quota >= ?", quota).Updates(map[string]interface{}{
+		"aff_quota": gorm.Expr("aff_quota - ?", quota),
+		"quota":     gorm.Expr("quota + ?", quota),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("邀请额度不足！")
 	}
 
 	// 提交事务

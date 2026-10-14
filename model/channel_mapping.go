@@ -149,6 +149,13 @@ func parseChannelModelMappingEntries(modelMapping string) ([]channelModelMapping
 	if modelMapping == "" {
 		return nil, nil
 	}
+	// A persisted literal "null" is legacy data, not a mapping: it means the
+	// same as an empty string. Rejecting it silently removed the channel from
+	// routing, surfacing as "no available channel for model" with no trace of
+	// the real cause.
+	if strings.EqualFold(modelMapping, "null") {
+		return nil, nil
+	}
 
 	decoder := common.NewJsonDecoderUseNumber(strings.NewReader(modelMapping))
 	token, err := decoder.Token()

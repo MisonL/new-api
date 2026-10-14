@@ -33,6 +33,10 @@ func prepareChannelCacheTest(t *testing.T) {
 	channelSyncLock.Unlock()
 	channelCacheRefreshInFlight.Store(false)
 	channelCacheRefreshPending.Store(false)
+	// Status-change writes land in the shared manage-log table (LOG_DB), and
+	// the audit tests count entries exactly; stale rows from a previous test
+	// would be read as new ones.
+	require.NoError(t, LOG_DB.Exec("DELETE FROM logs").Error)
 }
 
 func TestUpdateChannelPinOrdersRefreshesMemoryCache(t *testing.T) {

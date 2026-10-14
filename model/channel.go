@@ -967,14 +967,21 @@ func (channel *Channel) UpdateBalance(balance float64) {
 }
 
 func (channel *Channel) Delete() error {
-	var err error
-	err = DB.Delete(channel).Error
+	// The channel row and its abilities must be removed atomically: deleting
+	// the channel first would leave orphan abilities on a later failure, and
+	// deleting abilities first would briefly advertise a channel with no
+	// routable model.
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(channel).Error; err != nil {
+			return err
+		}
+		return tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error
+	})
 	if err != nil {
 		return err
 	}
-	err = channel.DeleteAbilities()
 	refreshChannelCacheAfterWrite()
-	return err
+	return nil
 }
 
 func refreshChannelCacheAfterWrite() {
@@ -1157,22 +1164,33 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 }
 
 func EnableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
-	if err != nil {
-		return err
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Ability{}).Where("tag = ?", tag).Update("enabled", true).Error
+	})
+	if err == nil {
+		refreshChannelCacheAfterWrite()
 	}
-	err = UpdateAbilityStatusByTag(tag, true)
-	refreshChannelCacheAfterWrite()
 	return err
 }
 
+// DisableChannelByTag disables every channel carrying the tag and its
+// abilities in one transaction. Splitting the two writes used to commit a
+// half-state — channels disabled while abilities stayed enabled — when the
+// ability write failed, and the status write is what takes the channel out of
+// rotation, so the rollback boundary must cover both.
 func DisableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusManuallyDisabled).Error
-	if err != nil {
-		return err
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusManuallyDisabled).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Ability{}).Where("tag = ?", tag).Update("enabled", false).Error
+	})
+	if err == nil {
+		refreshChannelCacheAfterWrite()
 	}
-	err = UpdateAbilityStatusByTag(tag, false)
-	refreshChannelCacheAfterWrite()
 	return err
 }
 
@@ -1269,11 +1287,34 @@ func DeleteChannelByStatus(status int64) (int64, error) {
 }
 
 func DeleteDisabledChannel() (int64, error) {
-	result := DB.Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Delete(&Channel{})
-	if result.Error == nil && result.RowsAffected > 0 {
+	var deleted int64
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		// Collect the ids first so the ability cleanup can be scoped to exactly
+		// the rows this call deletes; a concurrent insert between the two
+		// statements would otherwise lose its abilities.
+		var ids []int
+		if err := tx.Model(&Channel{}).
+			Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).
+			Pluck("id", &ids).Error; err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		// A channel's abilities must not outlive it: an orphan ability row
+		// keeps the model listed as routable in some cached paths and breaks
+		// the recreated-channel-with-same-id scenario.
+		if err := tx.Where("channel_id IN ?", ids).Delete(&Ability{}).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id IN ?", ids).Delete(&Channel{})
+		deleted = result.RowsAffected
+		return result.Error
+	})
+	if err == nil && deleted > 0 {
 		refreshChannelCacheAfterWrite()
 	}
-	return result.RowsAffected, result.Error
+	return deleted, err
 }
 
 func GetPaginatedTags(offset int, limit int) ([]*string, error) {

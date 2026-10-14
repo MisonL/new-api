@@ -111,9 +111,13 @@ func ensureAbilityColumnsInitialized() {
 
 func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 	var abilities []AbilityWithChannel
+	// The router joins channels and requires channels.status = enabled, so an
+	// ability row whose channel is disabled or missing is never selected for a
+	// request. Listing paths must apply the same boundary, or /api/pricing and
+	// /v1/models advertise groups and models that cannot be called.
 	err := DB.Table("abilities").
 		Select("abilities.*, channels.type as channel_type").
-		Joins("left join channels on abilities.channel_id = channels.id").
+		Joins("JOIN channels ON channels.id = abilities.channel_id AND channels.status = ?", common.ChannelStatusEnabled).
 		Where("abilities.enabled = ?", true).
 		Scan(&abilities).Error
 	return abilities, err
@@ -122,15 +126,22 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 func GetGroupEnabledModels(group string) []string {
 	ensureAbilityColumnsInitialized()
 	var models []string
-	// Find distinct models
-	DB.Table("abilities").Where(commonGroupCol+" = ? and enabled = ?", group, true).Distinct("model").Pluck("model", &models)
+	// Same channel-status boundary as getEnabledAbilityQuery: an ability on a
+	// disabled or missing channel is not reachable.
+	DB.Table("abilities").
+		Joins("JOIN channels ON channels.id = abilities.channel_id AND channels.status = ?", common.ChannelStatusEnabled).
+		Where("abilities."+commonGroupCol+" = ? AND abilities.enabled = ?", group, true).
+		Distinct("model").Pluck("model", &models)
 	return models
 }
 
 func GetEnabledModels() []string {
 	var models []string
-	// Find distinct models
-	DB.Table("abilities").Where("enabled = ?", true).Distinct("model").Pluck("model", &models)
+	// Same channel-status boundary as GetGroupEnabledModels.
+	DB.Table("abilities").
+		Joins("JOIN channels ON channels.id = abilities.channel_id AND channels.status = ?", common.ChannelStatusEnabled).
+		Where("abilities.enabled = ?", true).
+		Distinct("model").Pluck("model", &models)
 	return models
 }
 
@@ -427,6 +438,11 @@ func loadRouteCandidateSelections(abilities []Ability, routeCandidate routeModel
 		resolvedCandidate, mappingErr := prepareResolvedRouteCandidate(resolver, channel, routeCandidate)
 		if mappingErr != nil {
 			if IsChannelModelMappingError(mappingErr) {
+				// An invalid mapping must be reported, not dropped in silence:
+				// the empty result is otherwise indistinguishable from "this
+				// model has no channel", and the operator only ever sees
+				// "no available channel for model".
+				common.SysError(fmt.Sprintf("route candidate skipped invalid model mapping: channel_id=%d model=%s error=%v", channel.Id, routeCandidate.model, mappingErr))
 				continue
 			}
 			return nil, mappingErr
@@ -881,9 +897,17 @@ func (channel *Channel) AddAbilities(tx *gorm.DB) error {
 		return err
 	}
 	for _, chunk := range lo.Chunk(abilities, 50) {
-		err := useDB.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk).Error
-		if err != nil {
-			return err
+		batch := chunk
+		result := useDB.Clauses(clause.OnConflict{DoNothing: true}).Create(&batch)
+		if result.Error != nil {
+			return result.Error
+		}
+		// OnConflict DoNothing silently swallows a collision with rows left
+		// behind by a deleted channel (or any pre-existing key), which would
+		// commit a channel that cannot route its models. A missing insert must
+		// surface as an error naming the cause.
+		if result.RowsAffected < int64(len(batch)) {
+			return fmt.Errorf("ability insert conflict with rows left behind by a deleted channel: channel_id=%d group=%s", channel.Id, channel.Group)
 		}
 	}
 	return nil
