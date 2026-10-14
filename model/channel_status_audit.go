@@ -132,3 +132,30 @@ func DisableChannelByTagWithActor(tag string, actor ChannelStatusActor) error {
 	refreshChannelCacheAfterWrite()
 	return nil
 }
+
+// EnableChannelByTagWithActor is the enable-side mirror of
+// DisableChannelByTagWithActor: 启用同样改变流量走向，逐渠道留审计，
+// 否则审计链可被"禁用有记录、启用无归因"半绕过。
+func EnableChannelByTagWithActor(tag string, actor ChannelStatusActor) error {
+	channels, err := GetChannelsByTag(tag, false, false)
+	if err != nil {
+		return err
+	}
+	actor = resolveAuditActor(actor)
+	for _, channel := range channels {
+		if channel.Status == common.ChannelStatusEnabled {
+			continue
+		}
+		if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).
+			Update("status", common.ChannelStatusEnabled).Error; err != nil {
+			return err
+		}
+		statusAuditLog(channel.Id, channel.Status, common.ChannelStatusEnabled, "", actor, "channel_status_audit",
+			fmt.Sprintf("渠道 %s（%d）随标签 %s 批量启用，操作者 %s，来源 %s", channel.Name, channel.Id, tag, actorLabel(actor), actor.Source))
+	}
+	if err := UpdateAbilityStatusByTag(tag, true); err != nil {
+		return err
+	}
+	refreshChannelCacheAfterWrite()
+	return nil
+}

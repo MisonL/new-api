@@ -1090,7 +1090,12 @@ func ResponseOpenAI2ClaudeWithError(openAIResponse *dto.OpenAITextResponse, info
 		tagUnlock := false
 		if tagVisible, tagReasoning, tagFound := relaycommon.SplitThinkTaggedContent(taggedText); tagFound {
 			choice.Message.Content = tagVisible
-			if choice.Message.ReasoningContent == nil {
+			// 与流式 appendReasoningWithoutDuplication 对齐：已有推理内容时
+			// 追加而非丢弃，tag 内文本不丢失。
+			if existing := choice.Message.GetReasoningContent(); existing != "" {
+				merged := existing + "\n" + tagReasoning
+				choice.Message.ReasoningContent = &merged
+			} else {
 				choice.Message.ReasoningContent = &tagReasoning
 			}
 			// 提取到完整标签对本身就证明这块内容是推理，直接解锁 thinking 块，

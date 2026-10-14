@@ -36,7 +36,11 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 }
 
 func EnableChannel(channelId int, usingKey string, channelName string) {
-	success := model.UpdateChannelStatus(channelId, usingKey, common.ChannelStatusEnabled, "")
+	// 启用与禁用同权：状态变更决定流量走向，两侧都必须可归因，否则
+	// "禁用有记录、启用无归因"会让审计链可被半绕过。
+	success := model.UpdateChannelStatusWithActor(channelId, usingKey, common.ChannelStatusEnabled, "", model.ChannelStatusActor{
+		Source: "channel_enable",
+	})
 	if success {
 		subject := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)
 		content := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)

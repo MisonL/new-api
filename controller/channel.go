@@ -1022,7 +1022,11 @@ func EnableTagChannels(c *gin.Context) {
 		})
 		return
 	}
-	err = model.EnableChannelByTag(channelTag.Tag)
+	err = model.EnableChannelByTagWithActor(channelTag.Tag, model.ChannelStatusActor{
+		AdminID:      c.GetInt("id"),
+		AdminUsername: c.GetString("username"),
+		Source:       "tag_enable",
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return

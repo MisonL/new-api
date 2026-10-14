@@ -299,7 +299,11 @@ func maybeAutoDisableMidjourneyChannel(channelID int, channel *model.Channel) {
 	if channel == nil || !common.AutomaticDisableChannelEnabled || !channel.GetAutoBan() {
 		return
 	}
-	model.UpdateChannelStatus(channelID, "", 2, "No available account instance")
+	// 与 service.DisableChannel 一致：自动禁用也要留审计（system actor），
+	// 否则 MJ 渠道被自动禁用时审计链缺一条记录。
+	model.UpdateChannelStatusWithActor(channelID, "", common.ChannelStatusAutoDisabled, "No available account instance", model.ChannelStatusActor{
+		Source: "auto_ban",
+	})
 }
 
 func RelayMidjourneyImage(c *gin.Context) {

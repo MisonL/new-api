@@ -58,8 +58,12 @@ func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, 
 		return nil, types.NewOpenAIError(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
 	}
 
-	if filled, changed := ensureResponsesUsageDetailObjects(responseBody); changed {
-		responseBody = filled
+	// 与 relay_responses.go / helper.go 一致：带 future 标记的 opaque 负载
+	// 承诺逐字节保留，不参与 usage 改写。
+	if !isOpaqueFutureEventData(string(responseBody)) {
+		if filled, changed := ensureResponsesUsageDetailObjects(responseBody); changed {
+			responseBody = filled
+		}
 	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
