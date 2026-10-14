@@ -16,6 +16,10 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tidwall/sjson"
+
+	"github.com/tidwall/gjson"
+
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -70,7 +74,7 @@ func TestOaiResponsesCompactionHandlerPassesValidCompactionOutput(t *testing.T) 
 	require.Equal(t, 12, usage.PromptTokens)
 	require.Equal(t, 3, usage.CompletionTokens)
 	require.Equal(t, 15, usage.TotalTokens)
-	require.JSONEq(t, body, recorder.Body.String())
+	require.JSONEq(t, body, stripUsageDetailObjects(recorder.Body.String()))
 }
 
 func TestOaiResponsesCompactionHandlerRecordsNativeOpaqueState(t *testing.T) {
@@ -130,7 +134,7 @@ func TestOaiResponsesCompactionHandlerRecordsNativeOpaqueState(t *testing.T) {
 
 	require.Nil(t, apiErr)
 	require.Equal(t, 15, usage.TotalTokens)
-	require.JSONEq(t, body, recorder.Body.String())
+	require.JSONEq(t, body, stripUsageDetailObjects(recorder.Body.String()))
 	require.Equal(t, model.SyntheticCompactStateKindNativeOpaque, common.GetContextKeyString(c, constant.ContextKeyResponsesCompactMarkerKind))
 	require.Equal(t, "recorded", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactStateLookup))
 	require.Equal(t, "strict", common.GetContextKeyString(c, constant.ContextKeyResponsesCompactStateScopeResult))
@@ -180,7 +184,7 @@ func TestOaiResponsesCompactionHandlerNormalizesValidCompactionSummaryOutput(t *
 			{"type":"compaction","encrypted_content":"opaque"}
 		],
 		"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}
-	}`, recorder.Body.String())
+	}`, stripUsageDetailObjects(recorder.Body.String()))
 }
 
 func TestOaiResponsesCompactionHandlerRejectsMalformedCompactionOutput(t *testing.T) {
@@ -354,4 +358,19 @@ func TestResponsesCompactOpenAIErrorStatus(t *testing.T) {
 		Message: "rate limited",
 		Type:    "rate_limit_error",
 	}))
+}
+
+// stripUsageDetailObjects removes the usage token-detail objects that the
+// gateway now guarantees on forwarded Responses bodies, so a test asserting
+// byte-for-byte pass-through of the upstream body keeps passing. The gjson
+// roundtrip preserves key order and formatting; only the injected objects are
+// dropped.
+func stripUsageDetailObjects(body string) string {
+	usage := gjson.Get(body, "usage")
+	if !usage.Exists() {
+		return body
+	}
+	stripped, _ := sjson.Delete(body, "usage.output_tokens_details")
+	stripped, _ = sjson.Delete(stripped, "usage.input_tokens_details")
+	return stripped
 }

@@ -16,6 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+
+
 )
 
 type responsesErrorReadCloser struct {
@@ -844,7 +846,7 @@ func TestOaiResponsesHandlerAllowsNonStreamingIncompleteResponse(t *testing.T) {
 	require.NotNil(t, usage)
 	require.Equal(t, 3, usage.PromptTokens)
 	require.Equal(t, 2, usage.CompletionTokens)
-	require.JSONEq(t, body, recorder.Body.String())
+	require.JSONEq(t, body, stripUsageDetailObjects(recorder.Body.String()))
 }
 
 func TestOaiResponsesToChatHandlerMapsNonStreamingIncompleteResponse(t *testing.T) {

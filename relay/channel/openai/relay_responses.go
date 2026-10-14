@@ -903,6 +903,15 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			responseBody = restored
 		}
 	}
+	// 补齐上游省略的 usage token-detail 对象。只改转发给客户端的字节，不回写
+	// responsesResponse：重解码会让插入的零值对象遮蔽上游自己的 fallback 字段，
+	// 把按 completion_tokens_details 计的用量清零。带 future 标记的 opaque
+	// 负载承诺逐字节保留，不参与改写。
+	if !isOpaqueFutureEventData(string(responseBody)) {
+		if filled, changed := ensureResponsesUsageDetailObjects(responseBody); changed {
+			responseBody = filled
+		}
+	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage

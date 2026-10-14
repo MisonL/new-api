@@ -64,6 +64,14 @@ func buildResponsesCompatUsage(usage *dto.Usage) *dto.Usage {
 			AudioTokens:  copied.PromptTokensDetails.AudioTokens,
 		}
 	}
+	if copied.OutputTokensDetails == nil {
+		copied.OutputTokensDetails = &dto.OutputTokenDetails{
+			TextTokens:      copied.CompletionTokenDetails.TextTokens,
+			AudioTokens:     copied.CompletionTokenDetails.AudioTokens,
+			ImageTokens:     copied.CompletionTokenDetails.ImageTokens,
+			ReasoningTokens: copied.CompletionTokenDetails.ReasoningTokens,
+		}
+	}
 	return &copied
 }
 

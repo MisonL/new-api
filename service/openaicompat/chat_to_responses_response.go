@@ -42,6 +42,14 @@ func buildResponsesUsageFromChat(resp *dto.OpenAITextResponse) *dto.Usage {
 			AudioTokens:  usage.PromptTokensDetails.AudioTokens,
 		}
 	}
+	if usage.OutputTokensDetails == nil {
+		usage.OutputTokensDetails = &dto.OutputTokenDetails{
+			TextTokens:      usage.CompletionTokenDetails.TextTokens,
+			AudioTokens:     usage.CompletionTokenDetails.AudioTokens,
+			ImageTokens:     usage.CompletionTokenDetails.ImageTokens,
+			ReasoningTokens: usage.CompletionTokenDetails.ReasoningTokens,
+		}
+	}
 	return &usage
 }
 

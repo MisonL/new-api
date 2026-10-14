@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/sjson"
 	"gorm.io/gorm"
 )
 
@@ -54,7 +55,7 @@ func TestRelayRetriesResponsesAfterUnreadableUpstreamBodyBeforeDownstreamWrite(t
 	require.Equal(t, int32(1), firstCalls.Load())
 	require.Equal(t, int32(1), secondCalls.Load())
 	require.Equal(t, []string{"4101", "4102"}, ctx.GetStringSlice("use_channel"))
-	require.JSONEq(t, successfulResponsesBody, recorder.Body.String())
+	require.JSONEq(t, successfulResponsesBody, stripUsageDetailObjects(recorder.Body.String()))
 	require.False(t, relaycommon.IsResponsesOpaqueEncryptedReplay(ctx))
 	require.Equal(t, second.Id, common.GetContextKeyInt(ctx, constant.ContextKeyChannelId))
 }
@@ -306,3 +307,12 @@ func opaqueResponsesReadBodyRetryRequest() string {
 }
 
 const successfulResponsesBody = `{"id":"resp_ok","object":"response","model":"responses-read-body-retry-integration-test","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+
+// stripUsageDetailObjects removes the usage token-detail objects the gateway
+// now guarantees on forwarded Responses bodies, so the pass-through assertion
+// compares the upstream bytes the gateway did not rewrite.
+func stripUsageDetailObjects(body string) string {
+	stripped, _ := sjson.Delete(body, "usage.output_tokens_details")
+	stripped, _ = sjson.Delete(stripped, "usage.input_tokens_details")
+	return stripped
+}

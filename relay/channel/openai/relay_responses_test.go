@@ -18,6 +18,8 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 
+
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -45,7 +47,7 @@ func TestOaiResponsesHandlerMarksCompactionOutput(t *testing.T) {
 	require.Equal(t, 3, usage.CompletionTokens)
 	require.Equal(t, 15, usage.TotalTokens)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactionOutput))
-	require.JSONEq(t, body, recorder.Body.String())
+	require.JSONEq(t, body, stripUsageDetailObjects(recorder.Body.String()))
 }
 
 func TestRecordResponsesBuiltInToolUsageKeepsNativeAndBridgedSourcesSeparate(t *testing.T) {
@@ -516,7 +518,7 @@ func TestOaiResponsesHandlerIgnoresBuiltInToolsWithoutRelayInfo(t *testing.T) {
 	require.Equal(t, 3, usage.CompletionTokens)
 	require.Equal(t, 15, usage.TotalTokens)
 	require.True(t, c.GetBool("image_generation_call"))
-	require.JSONEq(t, body, recorder.Body.String())
+	require.JSONEq(t, body, stripUsageDetailObjects(recorder.Body.String()))
 }
 
 func TestOaiResponsesStreamHandlerMarksContextCompactionItemDone(t *testing.T) {
@@ -3547,7 +3549,7 @@ func TestOaiResponsesHandlerAllowsNonStringCompactionEncryptedContent(t *testing
 	require.Nil(t, err)
 	require.Equal(t, 12, usage.PromptTokens)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactionOutput))
-	require.JSONEq(t, body, recorder.Body.String())
+	require.JSONEq(t, body, stripUsageDetailObjects(recorder.Body.String()))
 }
 
 func TestOaiResponsesHandlerMarksContextCompactionOutput(t *testing.T) {
@@ -3572,5 +3574,5 @@ func TestOaiResponsesHandlerMarksContextCompactionOutput(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, 12, usage.PromptTokens)
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesCompactionOutput))
-	require.JSONEq(t, body, recorder.Body.String())
+	require.JSONEq(t, body, stripUsageDetailObjects(recorder.Body.String()))
 }

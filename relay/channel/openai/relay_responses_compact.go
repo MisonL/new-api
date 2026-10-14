@@ -58,6 +58,9 @@ func OaiResponsesCompactionHandler(c *gin.Context, info *relaycommon.RelayInfo, 
 		return nil, types.NewOpenAIError(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
 	}
 
+	if filled, changed := ensureResponsesUsageDetailObjects(responseBody); changed {
+		responseBody = filled
+	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	usage := dto.Usage{}
