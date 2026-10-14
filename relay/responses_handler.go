@@ -234,6 +234,21 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return types.NewError(fmt.Errorf("failed to copy request to GeneralOpenAIRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
+	// 客户端携带 Responses/Chat 契约不接受的工具名时，归一化为确定性别名
+	// 并把别名→原始名的映射挂到本次请求的 RelayInfo 上；响应路径
+	// （OaiResponsesHandler / sendResponsesStreamData）据此把上游 echo 的
+	// 别名还原为客户端原始名。无别名时 restorer 为空，响应原样转发。
+	if !info.IsChannelTest {
+		normalizedRequest, normalizeResult, restorer, err := relaycommon.NormalizeResponsesToolNamesWithRestorer(*request)
+		if err != nil {
+			return newResponsesConvertRequestError(err)
+		}
+		if normalizeResult.ChangedCount > 0 {
+			*request = normalizedRequest
+			info.ResponsesToolNameRestorer = restorer
+		}
+	}
+
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
