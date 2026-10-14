@@ -274,3 +274,58 @@ func TestHandleStreamFormatKeepsPerFrameExtractionAcrossFrames(t *testing.T) {
 	require.NotContains(t, text, testThinkOpen, "the raw marker must not leak as content")
 	require.NotContains(t, text, "held1", "withheld in-tag bytes must not leak as content")
 }
+
+// TestHandleFinalResponseFlushesOnUsageOnlyTerminalFrame covers the terminal
+// shape include_usage produces: the last upstream frame carries an empty
+// choices array. The flush bytes must be emitted through their own terminal
+// frame (the old attach-to-last-chunk approach fabricated a choice with no
+// finish_reason there, which the converter neither consumed nor closed — the
+// client stream hung without message_stop).
+func TestHandleFinalResponseFlushesOnUsageOnlyTerminalFrame(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	info := claudeThinkTagInfo()
+
+	first := dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-usage-terminal",
+		Model: "some-upstream-model",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+				Content: common.GetPointer("a" + testThinkOpen + "\ntruncated reasoning"),
+			},
+		}},
+	}
+	raw, err := common.Marshal(first)
+	require.NoError(t, err)
+	require.NoError(t, HandleStreamFormat(c, info, string(raw), false, false))
+
+	// usage-only 终帧：choices 为空。
+	usageFrame := `{"id":"chatcmpl-usage-terminal","model":"some-upstream-model","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+	require.NoError(t, HandleFinalResponseWithError(c, info, usageFrame,
+		"chatcmpl-usage-terminal", 0, "some-upstream-model", "", &dto.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}, true))
+
+	var sawMessageStop bool
+	var recovered string
+	for _, payload := range sseDataPayloads(t, recorder.Body.String()) {
+		var event dto.ClaudeResponse
+		if err := common.UnmarshalJsonStr(payload, &event); err != nil {
+			continue
+		}
+		if event.Type == "message_stop" {
+			sawMessageStop = true
+		}
+		if event.Delta != nil && event.Delta.Thinking != nil {
+			recovered += *event.Delta.Thinking
+		}
+		if event.Delta != nil && event.Delta.Text != nil {
+			recovered += *event.Delta.Text
+		}
+	}
+	// 未闭合标签按"不是标签"规则以原始字节归还（SplitThinkTaggedContent 同
+	// 语义），所以这里断言字节不丢而不是断言进 thinking 块。
+	require.Contains(t, recovered, "\ntruncated reasoning",
+		"the buffered bytes must reach the client")
+	require.True(t, sawMessageStop, "the stream must terminate with message_stop")
+}

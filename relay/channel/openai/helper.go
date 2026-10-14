@@ -231,6 +231,29 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 	_ = HandleFinalResponseWithError(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 }
 
+// flushThinkTagFrame builds a chat frame carrying the bytes the think-tag
+// splitter still held at end of stream. The finish_reason is required so the
+// downstream converters treat it as a terminal frame and run their full
+// closing state machine instead of swallowing the bytes.
+func flushThinkTagFrame(visible string, reasoning string) *dto.ChatCompletionsStreamResponse {
+	delta := dto.ChatCompletionsStreamResponseChoiceDelta{}
+	if reasoning != "" {
+		delta.ReasoningContent = &reasoning
+	}
+	if visible != "" {
+		delta.SetContentString(visible)
+	}
+	finishReason := "stop"
+	return &dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-thinktag-flush",
+		Model: "",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Delta:        delta,
+			FinishReason: &finishReason,
+		}},
+	}
+}
+
 func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, lastStreamData string,
 	responseId string, createAt int64, model string, systemFingerprint string,
 	usage *dto.Usage, containStreamUsage bool) error {
@@ -246,9 +269,21 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		return nil
 
 	case types.RelayFormatClaude:
-		// 流结束的一次性 flush：释放 splitter 缓冲的字节（截断在 think 块内、
-		// 帧尾未闭合标记前缀等场景），再转换终端帧。
-		lastStreamData = relaycommon.FinishThinkTagStream(info, lastStreamData)
+		// 流结束的一次性 flush：splitter 缓冲的字节（截断在 think 块内、帧尾
+		// 未闭合标记前缀等场景）作为独立伪帧发送，带 finish_reason 保证转换器
+		// 走完整终止状态机。不能附着到终端帧本身：include_usage 时终端帧的
+		// choices 为空，附着会产生一个无 finish_reason 的伪造 choice，转换器
+		// 既不消费字节也不发终止事件，流就此悬挂。
+		if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
+			flushResponses, flushErr := service.StreamResponseOpenAI2ClaudeWithError(
+				flushThinkTagFrame(visible, reasoning), info)
+			if flushErr != nil {
+				return flushErr
+			}
+			for _, resp := range flushResponses {
+				_ = helper.ClaudeData(c, *resp)
+			}
+		}
 		var streamResponse dto.ChatCompletionsStreamResponse
 		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &streamResponse); err != nil {
 			return err
@@ -267,8 +302,22 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		return nil
 
 	case types.RelayFormatGemini:
-		// 与 Claude 分支同：流结束处一次性 flush。
-		lastStreamData = relaycommon.FinishThinkTagStream(info, lastStreamData)
+		// 与 Claude 分支同：flush 字节作为独立伪帧（带 finish_reason）发送。
+		if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
+			geminiFlush, geminiErr := service.StreamResponseOpenAI2GeminiWithError(
+				flushThinkTagFrame(visible, reasoning), info)
+			if geminiErr != nil {
+				return geminiErr
+			}
+			if geminiFlush != nil {
+				geminiStr, marshalErr := common.Marshal(geminiFlush)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				c.Render(-1, &common.CustomEvent{Data: "data: " + string(geminiStr)})
+				_ = helper.FlushWriter(c)
+			}
+		}
 		var streamResponse dto.ChatCompletionsStreamResponse
 		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &streamResponse); err != nil {
 			return err
