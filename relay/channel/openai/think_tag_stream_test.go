@@ -536,3 +536,30 @@ func TestUsageOnlyTerminalAfterSingleContentFrameTerminates(t *testing.T) {
 	require.Equal(t, 1, starts, "message_start must appear exactly once")
 	require.Equal(t, 1, stops, "the stream must terminate with a single message_stop")
 }
+
+// An upstream that ends cleanly with EOF but never sends finish_reason
+// (truncated stream: last frame has content, no usage, no finish_reason)
+// must still receive a full termination — the client would otherwise report
+// an incomplete stream.
+func TestTruncatedStreamStillTerminates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	info := claudeThinkTagInfoFresh()
+
+	require.NoError(t, HandleStreamFormat(c, info, `{"id":"t","model":"m","choices":[{"index":0,"delta":{"content":"hello "}}]}`, false, false))
+	require.NoError(t, HandleFinalResponseWithError(c, info, `{"id":"t","model":"m","choices":[{"index":0,"delta":{"content":"world"}}]}`,
+		"t", 0, "m", "", &dto.Usage{PromptTokens: 1}, false))
+
+	stops, deltas := 0, 0
+	for _, ev := range sseEventMaps(t, recorder.Body.String()) {
+		switch ev["type"] {
+		case "message_stop":
+			stops++
+		case "message_delta":
+			deltas++
+		}
+	}
+	require.Equal(t, 1, stops, "truncated stream must terminate with exactly one message_stop")
+	require.Equal(t, 1, deltas, "exactly one message_delta expected")
+}

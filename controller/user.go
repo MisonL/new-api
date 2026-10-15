@@ -1107,7 +1107,14 @@ func EmailBind(c *gin.Context) {
 		return
 	}
 	user.Email = email
-	// no need to check if this email already taken, because we have used verification code to check it
+	// 发码时查过占用，但验证码有效期 10 分钟，期间邮箱可能被他人注册占用
+	// （Register 有自己的占用检查并成功落库）。Email 列非唯一索引，重复
+	// email 落库后 ResetUserPasswordByEmail 会按邮箱更新所有账户并把新
+	// 密码返回给请求者，形成跨账户影响，因此绑定时必须复查。
+	if model.IsEmailAlreadyTaken(email) {
+		common.ApiError(c, errors.New("该邮箱已被其他账户绑定或注册"))
+		return
+	}
 	err = user.Update(false)
 	if err != nil {
 		common.ApiError(c, err)

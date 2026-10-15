@@ -21,11 +21,16 @@ import { useMemo } from 'react';
 
 export const useNavigation = (t, docsLink, headerNavModules) => {
   const mainNavLinks = useMemo(() => {
-    // 默认配置，如果没有传入配置则显示所有模块
+    // 默认配置，如果没有传入配置则显示所有模块。
+    // pricing/rankings 与 parseHeaderNavModules 的对象格式同构：
+    // 存量部署的 HeaderNavModules 选项可能整体未设置（headerNavModules
+    // 为 null）或缺 rankings 键，缺省必须视为开启，否则路由守卫按默认
+    // 放行 /rankings 而顶栏永不渲染入口。
     const defaultModules = {
       home: true,
       console: true,
-      pricing: true,
+      pricing: { enabled: true, requireAuth: false },
+      rankings: { enabled: true, requireAuth: false },
       docs: true,
       about: true,
     };

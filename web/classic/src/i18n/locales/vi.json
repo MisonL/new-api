@@ -5484,6 +5484,7 @@
     "默认测试模型": "Mô hình kiểm tra mặc định",
     "默认用户消息": "Xin chào",
     "默认行为": "Hành vi mặc định",
-    "开启后未登录用户无法访问排行榜": "Khi bật, người dùng chưa đăng nhập không thể truy cập bảng xếp hạng"
+    "开启后未登录用户无法访问排行榜": "Khi bật, người dùng chưa đăng nhập không thể truy cập bảng xếp hạng",
+    "模型使用排行榜，需要登录访问": "Bảng xếp hạng sử dụng mô hình, yêu cầu đăng nhập"
   }
 }

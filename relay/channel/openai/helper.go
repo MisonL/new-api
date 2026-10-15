@@ -374,6 +374,20 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 			return err
 		}
 
+		// 截断流收尾：上游干净 EOF 但从未发 finish_reason（终端帧有内容、
+		// 无 usage、无 finish_reason）时，转换器只消费 delta 不终止，客户端
+		// 收不到 message_delta/message_stop 会按 incomplete stream 报错。
+		// 补 finish_reason 让本次转换走完整终止状态机（恰好一组终止事件）。
+		// 注意 usage==nil 且无累计 usage 时转换器 doneChunk 路径会提前返回
+		// 不终止，但下方 Usage 赋值保证 info.ClaudeConvertInfo.Usage 非空，
+		// 该提前返回不会命中。
+		if !info.ClaudeConvertInfo.Done && !terminalIsUsageOnly &&
+			len(streamResponse.Choices) > 0 &&
+			(streamResponse.Choices[0].FinishReason == nil || *streamResponse.Choices[0].FinishReason == "") {
+			stopReason := "stop"
+			streamResponse.Choices[0].FinishReason = &stopReason
+		}
+
 		info.ClaudeConvertInfo.Usage = usage
 
 		claudeResponses, err := service.StreamResponseOpenAI2ClaudeWithError(&streamResponse, info)

@@ -153,7 +153,7 @@ docker exec new-api-dev-isolated-new-api-1 /new-api --build-info
 cp deploy/env/frontend-readonly.env.example deploy/env/frontend-readonly.env
 docker compose -f deploy/compose/frontend-readonly-proxy.yml --env-file deploy/env/frontend-readonly.env up -d
 cd web/default
-VITE_DEV_PROXY_TARGET=http://127.0.0.1:3300 \
+VITE_REACT_APP_SERVER_URL=http://127.0.0.1:3300 \
 VITE_REACT_APP_READONLY_MODE=true \
 bun run dev --host 0.0.0.0 --port 5173
 ```
@@ -176,12 +176,12 @@ bun run dev --host 0.0.0.0 --port 5173
 - 修改运行状态类文档时，必须写清楚采样时间、命令、结果和边界。服务 `healthy` 与“运行最新代码”必须分开表述。
 - 重要验证和阶段性事实优先放到 `docs/reviews/CR-*.md`。
 - 当前高价值索引：
-  - `docs/reviews/CR-DEV-ISOLATED-VERIFY-2026-05-11.md`
-  - `docs/reviews/CR-UPSTREAM-UI-INTAKE-PHASE-1-2026-05-11.md`
-  - `docs/reviews/CR-DEV-ISOLATED-VERIFY-2026-05-07.md`
-  - `docs/reviews/CR-HEADER-PROFILE-STRATEGY-2026-04-21.md`
-  - `docs/reviews/CR-DESKTOP-OAUTH-HANDOFF-STORE-2026-04-17.md`
-  - `docs/reviews/CR-DEPLOY-BUILD-TRACEABILITY-2026-05-01.md`
+  - `docs/reviews/CR-AUDIT-FIXES-2026-10-11.md`
+  - `docs/reviews/CR-FULL-AUDIT-LATEST-SOURCE-AND-DEV-SERVICE-2026-10-14.md`
+  - `docs/reviews/CR-FULL-AUDIT-LATEST-SOURCE-AND-DEV-SERVICE-2026-10-14-2.md`
+  - `docs/reviews/CR-THINK-TAG-RELAY-CONVERSION-2026-10-09.md`
+  - `docs/reviews/CR-AI-TOOLS-SEARCH-PLAN-2026-10-10.md`
+  - 历史索引（已归档至 `docs/reviews/archive/`）：CR-DEV-ISOLATED-VERIFY-2026-05-11、CR-UPSTREAM-UI-INTAKE-PHASE-1-2026-05-11、CR-HEADER-PROFILE-STRATEGY-2026-04-21、CR-DESKTOP-OAUTH-HANDOFF-STORE-2026-04-17、CR-DEPLOY-BUILD-TRACEABILITY-2026-05-01
   - `docs/architecture/enterprise-auth-three-phase-plan.md`
 
 ## 10. 提交和收尾

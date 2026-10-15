@@ -5448,6 +5448,7 @@
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
     "默认行为": "Comportement par défaut",
-    "开启后未登录用户无法访问排行榜": "Une fois activé, les utilisateurs non connectés ne peuvent pas accéder au classement"
+    "开启后未登录用户无法访问排行榜": "Une fois activé, les utilisateurs non connectés ne peuvent pas accéder au classement",
+    "模型使用排行榜，需要登录访问": "Classement d'utilisation des modèles, connexion requise"
   }
 }

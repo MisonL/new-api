@@ -30,6 +30,7 @@ import {
 import { API, showError, showSuccess } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../context/Status';
+import { parseHeaderNavModules } from '../../../helpers/headerNavModules';
 
 const { Text } = Typography;
 
@@ -39,16 +40,9 @@ export default function SettingsHeaderNavModules(props) {
   const [statusState, statusDispatch] = useContext(StatusContext);
 
   // 顶栏模块管理状态
-  const [headerNavModules, setHeaderNavModules] = useState({
-    home: true,
-    console: true,
-    pricing: {
-      enabled: true,
-      requireAuth: false, // 默认不需要登录鉴权
-    },
-    docs: true,
-    about: true,
-  });
+  const [headerNavModules, setHeaderNavModules] = useState(
+    parseHeaderNavModules(undefined),
+  );
 
   // 处理顶栏模块配置变更
   function handleHeaderNavModuleChange(moduleKey) {
@@ -138,25 +132,9 @@ export default function SettingsHeaderNavModules(props) {
     // 从 props.options 中获取配置
     if (props.options && props.options.HeaderNavModules) {
       try {
-        const modules = JSON.parse(props.options.HeaderNavModules);
-
-        // 处理向后兼容性：如果pricing是boolean，转换为对象格式
-        if (typeof modules.pricing === 'boolean') {
-          modules.pricing = {
-            enabled: modules.pricing,
-            requireAuth: false, // 默认不需要登录鉴权
-          };
-        }
-        if (typeof modules.rankings === 'boolean') {
-          modules.rankings = {
-            enabled: modules.rankings,
-            requireAuth: false,
-          };
-        }
-        if (!modules.rankings) {
-          modules.rankings = { enabled: true, requireAuth: false };
-        }
-
+        const modules = parseHeaderNavModules(
+          JSON.parse(props.options.HeaderNavModules),
+        );
         setHeaderNavModules(modules);
       } catch (error) {
         // 使用默认配置
