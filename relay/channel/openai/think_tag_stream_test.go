@@ -425,3 +425,114 @@ func claudeThinkingText(t *testing.T, body string) string {
 	}
 	return text
 }
+
+// claudeThinkTagInfoFresh mimics a real request: SendResponseCount starts at 0
+// and the first HandleStreamFormat call advances it to 1, matching the main
+// loop (relay-openai.go), unlike claudeThinkTagInfo which pre-sets 1.
+func claudeThinkTagInfoFresh() *relaycommon.RelayInfo {
+	return &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ClaudeConvertInfo: &relaycommon.ClaudeConvertInfo{
+			LastMessagesType: relaycommon.LastMessageTypeNone,
+		},
+	}
+}
+
+func sseEventMaps(t *testing.T, body string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, payload := range sseDataPayloads(t, body) {
+		var m map[string]any
+		if err := common.UnmarshalJsonStr(payload, &m); err != nil {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// A mid-stream empty-choices frame (no usage) is not a terminal frame — the
+// converter ignores it (convert.go only closes the lifecycle for a usage-only
+// frame). Flushing the splitter on it would return an unclosed <think> block's
+// bytes as visible text and reset the splitter, leaking the raw tag.
+func TestMidStreamEmptyChoicesFrameDoesNotFlushSplitter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	info := claudeThinkTagInfoFresh()
+
+	require.NoError(t, HandleStreamFormat(c, info, `{"id":"m","model":"m","choices":[{"index":0,"delta":{"content":"answer `+testThinkOpen+`reasoning part1"}}]}`, false, false))
+	require.NoError(t, HandleStreamFormat(c, info, `{"id":"m","model":"m","choices":[]}`, false, false))
+	require.NoError(t, HandleStreamFormat(c, info, `{"id":"m","model":"m","choices":[{"index":0,"delta":{"content":" part2</think>tail"}}]}`, false, false))
+	require.NoError(t, HandleFinalResponseWithError(c, info, `{"id":"m","model":"m","choices":[]}`,
+		"m", 0, "m", "", &dto.Usage{}, true))
+
+	var thinking, text string
+	for _, ev := range sseEventMaps(t, recorder.Body.String()) {
+		delta, _ := ev["delta"].(map[string]any)
+		if v, ok := delta["thinking"].(string); ok {
+			thinking += v
+		}
+		if v, ok := delta["text"].(string); ok {
+			text += v
+		}
+	}
+	require.Equal(t, "reasoning part1 part2", thinking,
+		"reasoning must reassemble across the mid-stream empty frame")
+	require.Equal(t, "answer tail", text, "visible text must not contain raw tags")
+	require.NotContains(t, text, testThinkOpen, "the raw marker must not leak as content")
+}
+
+// The pre-flush before a finish_reason frame must not emit a second
+// message_start: at SendResponseCount==1 an independent flush frame triggers
+// the converter's message_start branch, and the terminal frame triggers it
+// again. Merging the flush bytes into the terminal frame keeps it to one.
+func TestPreFlushDoesNotDuplicateMessageStart(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	info := claudeThinkTagInfoFresh()
+
+	require.NoError(t, HandleStreamFormat(c, info, `{"id":"d","model":"m","choices":[{"index":0,"delta":{"content":"`+testThinkOpen+`held"},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`, false, false))
+	require.NoError(t, HandleFinalResponseWithError(c, info, `{"id":"d","model":"m","choices":[]}`,
+		"d", 0, "m", "", &dto.Usage{}, true))
+
+	starts := 0
+	var eventTypes []string
+	for _, ev := range sseEventMaps(t, recorder.Body.String()) {
+		typ, _ := ev["type"].(string)
+		eventTypes = append(eventTypes, typ)
+		if typ == "message_start" {
+			starts++
+		}
+	}
+	require.Equal(t, 1, starts, "message_start must appear exactly once: %v", eventTypes)
+}
+
+// A stream whose only content frame is followed by a usage-only terminal must
+// still terminate: the terminal never passes through HandleStreamFormat, so its
+// SendResponseCount must be advanced past the first-response gate, otherwise
+// the usage-only branch is shadowed (no message_stop) and the flush frame
+// re-emits message_start.
+func TestUsageOnlyTerminalAfterSingleContentFrameTerminates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	info := claudeThinkTagInfoFresh()
+
+	require.NoError(t, HandleStreamFormat(c, info, `{"id":"p5","model":"m","choices":[{"index":0,"delta":{"content":"a`+testThinkOpen+`held"}}]}`, false, false))
+	require.NoError(t, HandleFinalResponseWithError(c, info, `{"id":"p5","model":"m","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`,
+		"p5", 0, "m", "", &dto.Usage{PromptTokens: 1, CompletionTokens: 2}, true))
+
+	starts, stops := 0, 0
+	for _, ev := range sseEventMaps(t, recorder.Body.String()) {
+		switch ev["type"] {
+		case "message_start":
+			starts++
+		case "message_stop":
+			stops++
+		}
+	}
+	require.Equal(t, 1, starts, "message_start must appear exactly once")
+	require.Equal(t, 1, stops, "the stream must terminate with a single message_stop")
+}

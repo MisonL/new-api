@@ -57,15 +57,31 @@ func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 		doneChunk := len(streamResponse.Choices) > 0 &&
 			streamResponse.Choices[0].FinishReason != nil &&
 			*streamResponse.Choices[0].FinishReason != ""
-		if doneChunk || len(streamResponse.Choices) == 0 {
+		// 终端判定必须与转换器一致（convert.go：choices 为空且带 usage 才
+		// 走 usage-only 终止分支）。上游会在流中间发空 choices 帧，若仅凭
+		// len==0 就排空缓冲，未闭合 <think> 内的推理字节会按"未闭合规则"
+		// 作为可见文本归还，且 splitter 复位后标签泄入正文。
+		usageOnlyTerminal := len(streamResponse.Choices) == 0 && streamResponse.Usage != nil
+
+		if doneChunk || usageOnlyTerminal {
 			if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
-				flushResponses, flushErr := service.StreamResponseOpenAI2ClaudeWithError(
-					flushThinkTagFrame(visible, reasoning), info)
-				if flushErr != nil {
-					return flushErr
-				}
-				for _, resp := range flushResponses {
-					_ = helper.ClaudeData(c, *resp)
+				if doneChunk {
+					// 字节并入终端帧 delta，单次转换走完终止状态机：恰好一个
+					// message_start（SRC==1 时由终端帧发出）与一组终止事件。
+					// 独立伪帧在 SRC==1 时会额外触发一次 message_start。
+					mergeFlushIntoDelta(&streamResponse.Choices[0].Delta, visible, reasoning)
+				} else {
+					// usage-only 终端帧不消费 delta，字节以无 finish_reason 的
+					// 伪帧在终端帧之前发出。能走到这里说明前面已有内容帧
+					// （否则无缓冲可排空），SRC>=2，伪帧不会触发 message_start。
+					flushResponses, flushErr := service.StreamResponseOpenAI2ClaudeWithError(
+						flushThinkTagFrame(visible, reasoning), info)
+					if flushErr != nil {
+						return flushErr
+					}
+					for _, resp := range flushResponses {
+						_ = helper.ClaudeData(c, *resp)
+					}
 				}
 			}
 		}
@@ -318,6 +334,13 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		// 终端帧自身的 content 也必须过提取：主循环只对非最后一帧调
 		// HandleStreamFormat，最后一帧直达这里，不提取则帧内 <think> 标签
 		// 会原样作为正文发给客户端（并计入输出 token）。
+		//
+		// 终端帧不经 HandleStreamFormat，SendResponseCount 还停在最后一条
+		// 普通帧上。转换器用 SRC==1 判定"发 message_start"，若不推进：
+		// 首个普通帧已让 SRC==1 时，这里的 flush 伪帧与终端帧会被再当作
+		// 首响，各多发一个 message_start；且 usage-only 终止分支被
+		// SRC==1 分支遮蔽，流不终止。推进一次使终端帧按"下一条响应"处理。
+		info.SendResponseCount++
 		lastStreamData = relaycommon.ExtractThinkTagsFromChatChunk(info, lastStreamData)
 		var terminalFrame dto.ChatCompletionsStreamResponse
 		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &terminalFrame); err != nil {

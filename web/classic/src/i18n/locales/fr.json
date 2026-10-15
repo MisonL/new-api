@@ -5447,6 +5447,7 @@
     "默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。": "Par défaut, les requêtes ne sont pas modifiées. Le mode fixe choisit un modèle ; les modes round robin ou aléatoire peuvent choisir plusieurs modèles et les appliquer selon la stratégie.",
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
-    "默认行为": "Comportement par défaut"
+    "默认行为": "Comportement par défaut",
+    "开启后未登录用户无法访问排行榜": "Une fois activé, les utilisateurs non connectés ne peuvent pas accéder au classement"
   }
 }

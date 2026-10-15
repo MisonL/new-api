@@ -217,6 +217,18 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "TelegramBotToken":
+		// 反向守卫：开关启用时拒绝把 token 清空。空 token 会让 HMAC 钥匙
+		// 退化为 sha256("") 这一公开常量，签名可被任意伪造（与启用守卫
+		// 对称；GetOptions 不回显 token，classic 表单的空值提交也依赖
+		// 前端跳过，但服务端必须自守）。
+		if raw, ok := option.Value.(string); ok && strings.TrimSpace(raw) == "" && common.TelegramOAuthEnabled {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Telegram OAuth 已启用，无法清空 Bot Token；请先关闭 Telegram 登录再清空",
+			})
+			return
+		}
 	case "theme.frontend":
 		if option.Value != "default" && option.Value != "classic" {
 			c.JSON(http.StatusOK, gin.H{

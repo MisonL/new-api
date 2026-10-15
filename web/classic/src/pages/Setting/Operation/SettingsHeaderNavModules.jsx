@@ -67,14 +67,16 @@ export default function SettingsHeaderNavModules(props) {
     };
   }
 
-  // 处理模型广场权限控制变更
-  function handlePricingAuthChange(checked) {
-    const newModules = { ...headerNavModules };
-    newModules.pricing = {
-      ...newModules.pricing,
-      requireAuth: checked,
+  // 处理顶栏模块的登录鉴权子开关（pricing/rankings 同构）
+  function handleModuleAuthChange(moduleKey) {
+    return (checked) => {
+      const newModules = { ...headerNavModules };
+      newModules[moduleKey] = {
+        ...newModules[moduleKey],
+        requireAuth: checked,
+      };
+      setHeaderNavModules(newModules);
     };
-    setHeaderNavModules(newModules);
   }
 
   // 重置顶栏模块为默认配置
@@ -268,7 +270,7 @@ export default function SettingsHeaderNavModules(props) {
                   <div style={{ marginLeft: '16px' }}>
                     <Switch
                       checked={
-                        module.key === 'pricing'
+                        module.key === 'pricing' || module.key === 'rankings'
                           ? headerNavModules[module.key]?.enabled
                           : headerNavModules[module.key]
                       }
@@ -280,10 +282,8 @@ export default function SettingsHeaderNavModules(props) {
                 </div>
 
                 {/* 为模型广场添加权限控制子开关 */}
-                {module.key === 'pricing' &&
-                  (module.key === 'pricing'
-                    ? headerNavModules[module.key]?.enabled
-                    : headerNavModules[module.key]) && (
+                {(module.key === 'pricing' || module.key === 'rankings') &&
+                  headerNavModules[module.key]?.enabled && (
                     <div
                       style={{
                         borderTop: '1px solid var(--semi-color-border)',
@@ -319,15 +319,19 @@ export default function SettingsHeaderNavModules(props) {
                               display: 'block',
                             }}
                           >
-                            {t('开启后未登录用户无法访问模型广场')}
+                            {t(
+                              module.key === 'rankings'
+                                ? '开启后未登录用户无法访问排行榜'
+                                : '开启后未登录用户无法访问模型广场',
+                            )}
                           </Text>
                         </div>
                         <div style={{ marginLeft: '16px' }}>
                           <Switch
                             checked={
-                              headerNavModules.pricing?.requireAuth || false
+                              headerNavModules[module.key]?.requireAuth || false
                             }
-                            onChange={handlePricingAuthChange}
+                            onChange={handleModuleAuthChange(module.key)}
                             size='default'
                             id={`pages-setting-operation-settingsheadernavmodules-switch-2-${module.key}`}
                           />

@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useSetTheme, useTheme, useActualTheme } from '../../context/Theme';
+import { parseHeaderNavModules } from '../../helpers/headerNavModules';
 import { API } from '../../helpers/apiCore';
 import { getLogo, getSystemName, showSuccess } from '../../helpers/utils';
 import { postMessageToIframe } from '../../helpers/iframeMessaging';
@@ -59,21 +60,14 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   // 获取顶栏模块配置
   const headerNavModulesConfig = statusState?.status?.HeaderNavModules;
 
-  // 使用useMemo确保headerNavModules正确响应statusState变化
+  // 使用useMemo确保headerNavModules正确响应statusState变化。
+  // 必须经 parseHeaderNavModules 注入默认值：存量部署的 HeaderNavModules
+  // 没有 rankings 键，直接 JSON.parse 会令顶栏永不渲染排行榜入口（路由
+  // 守卫却按默认放行，出现"页面可达但无入口"）。
   const headerNavModules = useMemo(() => {
     if (headerNavModulesConfig) {
       try {
-        const modules = JSON.parse(headerNavModulesConfig);
-
-        // 处理向后兼容性：如果pricing是boolean，转换为对象格式
-        if (typeof modules.pricing === 'boolean') {
-          modules.pricing = {
-            enabled: modules.pricing,
-            requireAuth: false, // 默认不需要登录鉴权
-          };
-        }
-
-        return modules;
+        return parseHeaderNavModules(JSON.parse(headerNavModulesConfig));
       } catch (error) {
         console.error('解析顶栏模块配置失败:', error);
         return null;
@@ -90,6 +84,17 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
         : false; // 默认不需要登录
     }
     return false; // 默认不需要登录
+  }, [headerNavModules]);
+
+  // 排行榜与模型广场同构：requireAuth 时未登录跳登录页
+  const rankingsRequireAuth = useMemo(() => {
+    if (
+      headerNavModules?.rankings &&
+      typeof headerNavModules.rankings === 'object'
+    ) {
+      return headerNavModules.rankings.requireAuth || false;
+    }
+    return false;
   }, [headerNavModules]);
 
   const isConsoleRoute = location.pathname.startsWith('/console');
@@ -228,6 +233,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     drawerOpen,
     headerNavModules,
     pricingRequireAuth,
+    rankingsRequireAuth,
 
     // Actions
     logout,

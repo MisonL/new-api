@@ -24,6 +24,12 @@ import (
 // proxy logs) could be replayed at any later time.
 const telegramMaxAuthAge = 24 * time.Hour
 
+// telegramClockSkew bounds how far into the future a signed auth_date may be.
+// Without it a future timestamp (signable only by the token holder, but still)
+// would stay inside the freshness window for as long as the timestamp lies
+// ahead.
+const telegramClockSkew = 5 * time.Minute
+
 // telegramUsedAuth remembers consumed auth payloads so a valid signature
 // cannot be replayed even within the freshness window. Keyed by the full
 // signed hash; entries expire lazily. Widgets sign per-login data, so the
@@ -133,11 +139,19 @@ func TelegramLogin(c *gin.Context) {
 }
 
 func checkTelegramAuthorization(params map[string][]string, token string) bool {
+	// fail-closed：开关启用而 token 被清空时，HMAC 钥匙退化为 sha256("")
+	// 这一公开常量，任何人可离线伪造合法签名接管绑定账户。宁可拒绝全部
+	// 请求，也不接受可伪造的"验证"。
+	if strings.TrimSpace(token) == "" {
+		return false
+	}
+
 	// Freshness: a signed payload older than telegramMaxAuthAge is rejected
 	// even with a valid HMAC (see telegramMaxAuthAge).
 	if vals, ok := params["auth_date"]; ok && len(vals) > 0 {
 		if ts, err := strconv.ParseInt(strings.TrimSpace(vals[0]), 10, 64); err == nil {
-			if time.Since(time.Unix(ts, 0)) > telegramMaxAuthAge {
+			age := time.Since(time.Unix(ts, 0))
+			if age > telegramMaxAuthAge || age < -telegramClockSkew {
 				return false
 			}
 		} else {

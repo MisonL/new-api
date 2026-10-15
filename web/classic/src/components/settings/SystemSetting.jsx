@@ -653,10 +653,14 @@ const SystemSetting = () => {
   };
 
   const submitTelegramSettings = async () => {
-    const options = [
-      { key: 'TelegramBotToken', value: inputs.TelegramBotToken },
-      { key: 'TelegramBotName', value: inputs.TelegramBotName },
-    ];
+    // Bot Token 不回显（GetOptions 屏蔽敏感键），inputs 里恒为空串；
+    // 无条件提交会把服务端 token 覆写为空，使 HMAC 钥匙退化为公开常量。
+    // 只提交有值/变更的字段，与 web/default 的行为对齐。
+    const options = [];
+    if (inputs.TelegramBotToken) {
+      options.push({ key: 'TelegramBotToken', value: inputs.TelegramBotToken });
+    }
+    options.push({ key: 'TelegramBotName', value: inputs.TelegramBotName });
     await updateOptions(options);
   };
 

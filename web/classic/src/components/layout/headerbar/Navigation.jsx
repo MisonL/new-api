@@ -29,6 +29,7 @@ const Navigation = ({
   isLoading,
   userState,
   pricingRequireAuth,
+  rankingsRequireAuth,
   t,
 }) => {
   // getNavTarget keeps unauthenticated redirects consistent for userState.user and pricingRequireAuth.
@@ -37,6 +38,9 @@ const Navigation = ({
       return '/login';
     }
     if (link.itemKey === 'pricing' && pricingRequireAuth && !userState.user) {
+      return '/login';
+    }
+    if (link.itemKey === 'rankings' && rankingsRequireAuth && !userState.user) {
       return '/login';
     }
     return link.to;

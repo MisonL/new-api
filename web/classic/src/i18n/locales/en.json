@@ -5381,6 +5381,7 @@
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
     "默认行为": "Default behavior",
-    "模型使用排行榜，需要登录访问": "Model usage rankings, requires sign-in"
+    "模型使用排行榜，需要登录访问": "Model usage rankings, requires sign-in",
+    "开启后未登录用户无法访问排行榜": "When enabled, unauthenticated users cannot access the rankings"
   }
 }
