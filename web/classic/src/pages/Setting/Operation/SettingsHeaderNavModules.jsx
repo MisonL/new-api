@@ -30,7 +30,10 @@ import {
 import { API, showError, showSuccess } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../context/Status';
-import { parseHeaderNavModules } from '../../../helpers/headerNavModules';
+import {
+  DEFAULT_HEADER_NAV_MODULES,
+  parseHeaderNavModules,
+} from '../../../helpers/headerNavModules';
 
 const { Text } = Typography;
 
@@ -75,21 +78,7 @@ export default function SettingsHeaderNavModules(props) {
 
   // 重置顶栏模块为默认配置
   function resetHeaderNavModules() {
-    const defaultModules = {
-      home: true,
-      console: true,
-      pricing: {
-        enabled: true,
-        requireAuth: false,
-      },
-      rankings: {
-        enabled: true,
-        requireAuth: false,
-      },
-      docs: true,
-      about: true,
-    };
-    setHeaderNavModules(defaultModules);
+    setHeaderNavModules(structuredClone(DEFAULT_HEADER_NAV_MODULES));
     showSuccess(t('已重置为默认配置'));
   }
 
@@ -137,22 +126,8 @@ export default function SettingsHeaderNavModules(props) {
         );
         setHeaderNavModules(modules);
       } catch (error) {
-        // 使用默认配置
-        const defaultModules = {
-          home: true,
-          console: true,
-          pricing: {
-            enabled: true,
-            requireAuth: false,
-          },
-          rankings: {
-            enabled: true,
-            requireAuth: false,
-          },
-          docs: true,
-          about: true,
-        };
-        setHeaderNavModules(defaultModules);
+        // 使用默认配置（单一来源，见 helpers/headerNavModules）
+        setHeaderNavModules(structuredClone(DEFAULT_HEADER_NAV_MODULES));
       }
     }
   }, [props.options]);

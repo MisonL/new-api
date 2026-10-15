@@ -18,25 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useMemo } from 'react';
+import { DEFAULT_HEADER_NAV_MODULES } from '../../helpers/headerNavModules';
 
 export const useNavigation = (t, docsLink, headerNavModules) => {
   const mainNavLinks = useMemo(() => {
-    // 默认配置，如果没有传入配置则显示所有模块。
-    // pricing/rankings 与 parseHeaderNavModules 的对象格式同构：
-    // 存量部署的 HeaderNavModules 选项可能整体未设置（headerNavModules
-    // 为 null）或缺 rankings 键，缺省必须视为开启，否则路由守卫按默认
-    // 放行 /rankings 而顶栏永不渲染入口。
-    const defaultModules = {
-      home: true,
-      console: true,
-      pricing: { enabled: true, requireAuth: false },
-      rankings: { enabled: true, requireAuth: false },
-      docs: true,
-      about: true,
-    };
-
-    // 使用传入的配置或默认配置
-    const modules = headerNavModules || defaultModules;
+    // 默认配置直接复用 helpers/headerNavModules 的单一来源：存量部署的
+    // HeaderNavModules 选项可能整体未设置（headerNavModules 为 null）或缺
+    // rankings 键，缺省必须视为开启，否则路由守卫按默认放行 /rankings 而
+    // 顶栏永不渲染入口。默认值只保留一份，避免将来加模块键时此处静默漂移。
+    const modules = headerNavModules || DEFAULT_HEADER_NAV_MODULES;
 
     const allLinks = [
       {
