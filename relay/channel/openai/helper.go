@@ -275,8 +275,14 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		// choices 为空，附着会产生一个无 finish_reason 的伪造 choice，转换器
 		// 既不消费字节也不发终止事件，流就此悬挂。
 		if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
+			// 上游最后一个内容帧可能已自带 usage+finish_reason，转换器处理它
+			// 时就终止了 message 生命周期（Done=true）。flush 伪帧必须绕过该
+			// gate 才能把缓冲字节送出；转换后恢复，让终端帧保持被拦截。
+			wasDone := info.ClaudeConvertInfo.Done
+			info.ClaudeConvertInfo.Done = false
 			flushResponses, flushErr := service.StreamResponseOpenAI2ClaudeWithError(
 				flushThinkTagFrame(visible, reasoning), info)
+			info.ClaudeConvertInfo.Done = wasDone
 			if flushErr != nil {
 				return flushErr
 			}

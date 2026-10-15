@@ -329,3 +329,27 @@ func TestHandleFinalResponseFlushesOnUsageOnlyTerminalFrame(t *testing.T) {
 		"the buffered bytes must reach the client")
 	require.True(t, sawMessageStop, "the stream must terminate with message_stop")
 }
+
+// TestHandleFinalResponseFlushesAfterConverterClosedLifecycle covers the case
+// where the upstream's last content frame carries both usage and finish_reason:
+// the converter closes the message lifecycle (Done=true) on that frame, which
+// used to swallow the flush frame and drop the buffered bytes.
+func TestHandleFinalResponseFlushesAfterConverterClosedLifecycle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	info := claudeThinkTagInfo()
+
+	contentFrame := `{"id":"chatcmpl-closed","model":"some-upstream-model","choices":[{"index":0,"delta":{"content":"` + testThinkOpen + `held"},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`
+	require.NoError(t, HandleStreamFormat(c, info, contentFrame, false, false))
+	require.True(t, info.ClaudeConvertInfo.Done, "precondition: the content frame closed the converter lifecycle")
+
+	err := HandleFinalResponseWithError(c, info, `{"id":"chatcmpl-closed","model":"some-upstream-model","choices":[]}`,
+		"chatcmpl-closed", 0, "some-upstream-model", "", &dto.Usage{}, true)
+	require.NoError(t, err)
+
+	body := recorder.Body.String()
+	require.Contains(t, body, "held", "the buffered bytes must reach the client even after the lifecycle closed")
+	require.Contains(t, body, "message_stop", "the stream must remain terminated")
+}
