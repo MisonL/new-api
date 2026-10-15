@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Send } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Dialog,
@@ -8,6 +10,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { telegramBindByParams } from '@/features/auth/api'
+import {
+  TelegramLoginWidget,
+} from '@/features/auth/components/telegram-login-widget'
+import {
+  telegramAuthParams,
+  type TelegramAuthData,
+} from '@/features/auth/components/telegram-auth'
 
 // ============================================================================
 // Telegram Bind Dialog Component
@@ -24,8 +34,29 @@ export function TelegramBindDialog({
   open,
   onOpenChange,
   botName,
+  onSuccess,
 }: TelegramBindDialogProps) {
   const { t } = useTranslation()
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleAuth = async (data: TelegramAuthData) => {
+    setSubmitting(true)
+    try {
+      const res = await telegramBindByParams(telegramAuthParams(data))
+      if (res?.success) {
+        toast.success(t('Binding successful!'))
+        onOpenChange(false)
+        onSuccess()
+        return
+      }
+      toast.error(res?.message || t('Failed to bind Telegram account'))
+    } catch (_error) {
+      toast.error(t('Failed to bind Telegram account'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='sm:max-w-md'>
@@ -63,13 +94,11 @@ export function TelegramBindDialog({
               </p>
             </div>
 
-            {/* Telegram Login Widget will be injected here by react-telegram-login */}
-            <div id='telegram-login-widget' className='flex justify-center'>
-              {/* This would require the react-telegram-login library */}
-              <div className='text-muted-foreground rounded-lg border border-dashed px-6 py-3 text-sm'>
-                {t('Telegram Login Widget')}
-              </div>
-            </div>
+            <TelegramLoginWidget
+              botName={botName}
+              onAuth={handleAuth}
+              className={submitting ? 'pointer-events-none opacity-60' : ''}
+            />
           </div>
 
           <p className='text-muted-foreground text-center text-xs'>

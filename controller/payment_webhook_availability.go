@@ -61,15 +61,11 @@ func isWaffoWebhookEnabled() bool {
 }
 
 func isWaffoPancakeTopUpEnabled() bool {
-	if !setting.WaffoPancakeEnabled {
-		return false
-	}
-
-	return isWaffoPancakeWebhookConfigured() &&
-		strings.TrimSpace(setting.WaffoPancakeMerchantID) != "" &&
-		strings.TrimSpace(setting.WaffoPancakePrivateKey) != "" &&
-		strings.TrimSpace(setting.WaffoPancakeStoreID) != "" &&
-		strings.TrimSpace(setting.WaffoPancakeProductID) != ""
+	// 下单与回调路由（/api/user/waffo-pancake/*、/api/waffo-pancake/webhook）
+	// 目前在 router/api-router.go 中被注释下线；此判定必须与路由注册保持一致，
+	// 否则 topup/info 会上报 enabled=true 而前端支付请求必然 404。恢复路由时
+	// 一并删除下面的短路。
+	return false
 }
 
 func isWaffoPancakeWebhookConfigured() bool {

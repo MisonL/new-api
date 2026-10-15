@@ -37,6 +37,7 @@ import { Turnstile } from '@/components/turnstile'
 import { login, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
+import { TelegramLoginDialog } from '@/features/auth/components/telegram-login-dialog'
 import { loginFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
@@ -56,6 +57,7 @@ export function UserAuthForm({
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
+  const [isTelegramDialogOpen, setIsTelegramDialogOpen] = useState(false)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
   const loginFailedMessage = t('Login failed')
 
@@ -80,6 +82,10 @@ export function UserAuthForm({
     !passkeySupported ||
     (requiresLegalConsent && !agreedToLegal)
   const hasWeChatLogin = Boolean(status?.wechat_login)
+  const hasTelegramLogin = Boolean(status?.telegram_oauth)
+  const telegramBotName = String(
+    status?.telegram_bot_name ?? status?.data?.telegram_bot_name ?? ''
+  )
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -154,6 +160,27 @@ export function UserAuthForm({
     }
 
     setIsWeChatDialogOpen(true)
+  }
+
+  const handleOpenTelegramDialog = () => {
+    if (requiresLegalConsent && !agreedToLegal) {
+      toast.error(legalConsentErrorMessage)
+      return
+    }
+
+    setIsTelegramDialogOpen(true)
+  }
+
+  const handleTelegramLoginSuccess = async (payload: {
+    require_2fa?: boolean
+    id?: number
+  } | null) => {
+    if (payload?.require_2fa) {
+      redirectTo2FA(redirectTo)
+      return
+    }
+    await handleLoginSuccess(payload, redirectTo)
+    toast.success(t('Signed in via Telegram'))
   }
 
   const handleWeChatDialogChange = (open: boolean) => {
@@ -371,8 +398,22 @@ export function UserAuthForm({
           disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
           onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
           isWeChatLoading={isWeChatSubmitting}
+          onTelegramLogin={
+            hasTelegramLogin && telegramBotName
+              ? handleOpenTelegramDialog
+              : undefined
+          }
         />
       </form>
+
+      {hasTelegramLogin && telegramBotName && (
+        <TelegramLoginDialog
+          open={isTelegramDialogOpen}
+          onOpenChange={setIsTelegramDialogOpen}
+          botName={telegramBotName}
+          onSuccess={handleTelegramLoginSuccess}
+        />
+      )}
 
       {hasWeChatLogin && (
         <Dialog

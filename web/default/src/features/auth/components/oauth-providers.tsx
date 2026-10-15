@@ -17,6 +17,7 @@ type OAuthProvidersProps = {
   className?: string
   onWeChatLogin?: () => void
   isWeChatLoading?: boolean
+  onTelegramLogin?: () => void
 }
 
 type ProviderButton = {
@@ -33,6 +34,7 @@ export function OAuthProviders({
   className,
   onWeChatLogin,
   isWeChatLoading = false,
+  onTelegramLogin,
 }: OAuthProvidersProps) {
   const { t } = useTranslation()
   const {
@@ -43,7 +45,6 @@ export function OAuthProviders({
     handleDiscordLogin,
     handleOIDCLogin,
     handleLinuxDOLogin,
-    handleTelegramLogin,
     handleCustomOAuthLogin,
   } = useOAuthLogin(status)
 
@@ -95,11 +96,11 @@ export function OAuthProviders({
     })
   }
 
-  if (status?.telegram_oauth) {
+  if (status?.telegram_oauth && onTelegramLogin) {
     providerButtons.push({
       key: 'telegram',
       label: t('Continue with Telegram'),
-      onClick: handleTelegramLogin,
+      onClick: onTelegramLogin,
     })
   }
 

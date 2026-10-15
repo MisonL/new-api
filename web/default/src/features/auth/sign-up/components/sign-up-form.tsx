@@ -31,6 +31,7 @@ import { Turnstile } from '@/components/turnstile'
 import { register, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
+import { TelegramLoginDialog } from '@/features/auth/components/telegram-login-dialog'
 import { registerFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
@@ -48,6 +49,7 @@ export function SignUpForm({
   const [wechatCode, setWeChatCode] = useState('')
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
+  const [isTelegramDialogOpen, setIsTelegramDialogOpen] = useState(false)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
 
   const { status } = useStatus()
@@ -89,6 +91,10 @@ export function SignUpForm({
     status?.data?.oauth_register_enabled ??
     true
   const hasWeChatLogin = Boolean(status?.wechat_login)
+  const hasTelegramLogin = Boolean(status?.telegram_oauth)
+  const telegramBotName = String(
+    status?.telegram_bot_name ?? status?.data?.telegram_bot_name ?? ''
+  )
 
   const wechatQrCodeUrl = useMemo(() => {
     return (
@@ -165,6 +171,27 @@ export function SignUpForm({
     }
 
     setIsWeChatDialogOpen(true)
+  }
+
+  const handleOpenTelegramDialog = () => {
+    if (requiresLegalConsent && !agreedToLegal) {
+      toast.error(legalConsentErrorMessage)
+      return
+    }
+
+    setIsTelegramDialogOpen(true)
+  }
+
+  const handleTelegramLoginSuccess = async (payload: {
+    require_2fa?: boolean
+    id?: number
+  } | null) => {
+    if (payload?.require_2fa) {
+      redirectTo2FA()
+      return
+    }
+    await handleLoginSuccess(payload)
+    toast.success(t('Signed in via Telegram'))
   }
 
   const handleWeChatDialogChange = (open: boolean) => {
@@ -342,10 +369,24 @@ export function SignUpForm({
             disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
+            onTelegramLogin={
+              hasTelegramLogin && telegramBotName
+                ? handleOpenTelegramDialog
+                : undefined
+            }
             className='pt-2'
           />
         )}
       </form>
+
+      {hasTelegramLogin && telegramBotName && (
+        <TelegramLoginDialog
+          open={isTelegramDialogOpen}
+          onOpenChange={setIsTelegramDialogOpen}
+          botName={telegramBotName}
+          onSuccess={handleTelegramLoginSuccess}
+        />
+      )}
 
       {hasWeChatLogin && (
         <Dialog

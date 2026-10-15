@@ -170,7 +170,9 @@ export function useOAuthLogin(status: SystemStatus | null) {
   }
 
   const handleTelegramLogin = () => {
-    toast.info(t('Telegram login requires widget integration; coming soon'))
+    // 登录页的 Telegram 按钮仅做入口提示：真正的登录在 widget 授权后由
+    // telegramLoginByParams 完成（见 user-auth-form / sign-up-form）。
+    toast.info(t('Please authorize via the Telegram widget'))
   }
 
   const handleCustomOAuthLogin = async (provider: CustomOAuthProviderInfo) => {
