@@ -89,11 +89,15 @@ export async function telegramLoginByParams(
   return res.data
 }
 
-// Telegram bind with widget-signed parameters
+// Telegram bind with widget-signed parameters. Requests JSON so the
+// backend returns a parseable response instead of a 302 redirect.
 export async function telegramBindByParams(
   params: Record<string, string>
 ): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/telegram/bind', { params })
+  const res = await api.get('/api/oauth/telegram/bind', {
+    params,
+    headers: { Accept: 'application/json' },
+  })
   return res.data
 }
 

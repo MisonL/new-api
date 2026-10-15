@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -55,6 +56,16 @@ func TelegramBind(c *gin.Context) {
 		return
 	}
 
+	// XHR 调用（axios 跟随 302 拿到 HTML 无法解析）返回 JSON；浏览器整页
+	// 跳转保持 302 到个人资料页。
+	if strings.Contains(c.GetHeader("Accept"), "application/json") {
+		c.JSON(200, gin.H{
+			"message": "",
+			"success": true,
+			"data":    "bind",
+		})
+		return
+	}
 	c.Redirect(302, "/console/personal")
 }
 
