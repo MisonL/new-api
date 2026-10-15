@@ -49,6 +49,11 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         itemKey: 'pricing',
         to: '/pricing',
       },
+      {
+        text: t('排行榜'),
+        itemKey: 'rankings',
+        to: '/rankings',
+      },
       ...(docsLink
         ? [
             {
@@ -76,6 +81,11 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         return typeof modules.pricing === 'object'
           ? modules.pricing.enabled
           : modules.pricing;
+      }
+      if (link.itemKey === 'rankings') {
+        return typeof modules.rankings === 'object'
+          ? modules.rankings.enabled
+          : modules.rankings;
       }
       return modules[link.itemKey] === true;
     });

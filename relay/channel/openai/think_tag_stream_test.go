@@ -351,5 +351,77 @@ func TestHandleFinalResponseFlushesAfterConverterClosedLifecycle(t *testing.T) {
 
 	body := recorder.Body.String()
 	require.Contains(t, body, "held", "the buffered bytes must reach the client even after the lifecycle closed")
-	require.Contains(t, body, "message_stop", "the stream must remain terminated")
+
+	// 事件序断言：字节必须落在 message_stop 之前（message_stop 是 Anthropic
+	// SSE 的终态，之后的事件会被严格客户端丢弃），且终止事件只出现一次——
+	// 带缓冲的 flush 曾在 message_stop 之后重放内容并追加第二组
+	// message_delta/message_stop（768e1692d 回归）。
+	events := sseEventTypes(t, body)
+	stopCount := 0
+	stopIndex := -1
+	for i, eventType := range events {
+		if eventType == "message_stop" {
+			stopCount++
+			if stopIndex == -1 {
+				stopIndex = i
+			}
+		}
+	}
+	require.Equal(t, 1, stopCount, "the stream must terminate exactly once: %v", events)
+	require.NotEqual(t, -1, stopIndex, "the stream must terminate with message_stop")
+	for i, eventType := range events {
+		if i > stopIndex {
+			require.NotContains(t, eventType, "content_block",
+				"no content event may follow message_stop: %v", events)
+		}
+	}
+	require.Contains(t, claudeThinkingText(t, body)+claudeTextText(t, body), "held",
+		"the held bytes must reach the client (thinking for closed tags, raw text for unterminated ones)")
+}
+
+// claudeTextText concatenates every text delta in an SSE body.
+func claudeTextText(t *testing.T, body string) string {
+	t.Helper()
+	var text string
+	for _, payload := range sseDataPayloads(t, body) {
+		var event dto.ClaudeResponse
+		if err := common.UnmarshalJsonStr(payload, &event); err != nil {
+			continue
+		}
+		if event.Delta != nil && event.Delta.Text != nil {
+			text += *event.Delta.Text
+		}
+	}
+	return text
+}
+
+// sseEventTypes returns the event type of every data payload in an SSE body,
+// in order, so tests can assert on protocol ordering.
+func sseEventTypes(t *testing.T, body string) []string {
+	t.Helper()
+	var types []string
+	for _, payload := range sseDataPayloads(t, body) {
+		var event dto.ClaudeResponse
+		if err := common.UnmarshalJsonStr(payload, &event); err != nil {
+			continue
+		}
+		types = append(types, event.Type)
+	}
+	return types
+}
+
+// claudeThinkingText concatenates every thinking delta in an SSE body.
+func claudeThinkingText(t *testing.T, body string) string {
+	t.Helper()
+	var text string
+	for _, payload := range sseDataPayloads(t, body) {
+		var event dto.ClaudeResponse
+		if err := common.UnmarshalJsonStr(payload, &event); err != nil {
+			continue
+		}
+		if event.Delta != nil && event.Delta.Thinking != nil {
+			text += *event.Delta.Thinking
+		}
+	}
+	return text
 }

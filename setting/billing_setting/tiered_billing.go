@@ -453,11 +453,15 @@ func SmokeTestExpr(exprStr string) error {
 }
 
 func smokeTestExpr(exprStr string) error {
+	// 向量含 c > p 组合：可产出负值的表达式（如 (p-c)*k）在保存时即被拒绝，
+	// 而不是等真实请求 c>p 时结算出负额度（delta<0 会走返还路径）。
 	vectors := []billingexpr.TokenParams{
 		{P: 0, C: 0, Len: 0},
 		{P: 1000, C: 1000, Len: 1000},
 		{P: 100000, C: 100000, Len: 100000},
 		{P: 1000000, C: 1000000, Len: 1000000},
+		{P: 1000000, C: 2000000, Len: 1000000},
+		{P: 0, C: 1000000, Len: 0},
 	}
 	requests := []billingexpr.RequestInput{
 		{},

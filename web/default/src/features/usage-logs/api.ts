@@ -119,7 +119,9 @@ export async function deleteLogsByFilter(
   payload: DeleteLogsFilterPayload,
   isAdmin: boolean
 ): Promise<ApiResponseShape<{ deleted: number }>> {
-  const endpoint = buildApiPath('/api/log/batch_delete', isAdmin)
+  const endpoint = isAdmin
+    ? '/api/log/batch_delete'
+    : '/api/log/self/batch_delete'
   const res = await api.post(endpoint, payload)
   return res.data
 }

@@ -3,16 +3,50 @@ package controller
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
 )
+
+// telegramMaxAuthAge bounds how long a widget-signed auth payload stays
+// acceptable. Without it the signed query string is a permanent login
+// credential for the account: any leak of the callback URL (browser history,
+// proxy logs) could be replayed at any later time.
+const telegramMaxAuthAge = 24 * time.Hour
+
+// telegramUsedAuth remembers consumed auth payloads so a valid signature
+// cannot be replayed even within the freshness window. Keyed by the full
+// signed hash; entries expire lazily. Widgets sign per-login data, so the
+// set stays bounded by real logins.
+var telegramUsedAuth sync.Map // map[string]time.Time (consumed at)
+
+// telegramAuthOnce rejects a signature that was already consumed. A cleanup
+// pass runs opportunistically; correctness does not depend on it, because an
+// expired entry is rejected by the auth_date freshness check anyway.
+func telegramAuthOnce(hash string) bool {
+	now := time.Now()
+	if _, loaded := telegramUsedAuth.LoadOrStore(hash, now); loaded {
+		return false
+	}
+	// Opportunistic sweep: only on store, cheap enough at login frequency.
+	telegramUsedAuth.Range(func(key, value any) bool {
+		if ts, ok := value.(time.Time); ok && now.Sub(ts) > telegramMaxAuthAge {
+			telegramUsedAuth.Delete(key)
+		}
+		return true
+	})
+	return true
+}
 
 func TelegramBind(c *gin.Context) {
 	if !common.TelegramOAuthEnabled {
@@ -99,6 +133,20 @@ func TelegramLogin(c *gin.Context) {
 }
 
 func checkTelegramAuthorization(params map[string][]string, token string) bool {
+	// Freshness: a signed payload older than telegramMaxAuthAge is rejected
+	// even with a valid HMAC (see telegramMaxAuthAge).
+	if vals, ok := params["auth_date"]; ok && len(vals) > 0 {
+		if ts, err := strconv.ParseInt(strings.TrimSpace(vals[0]), 10, 64); err == nil {
+			if time.Since(time.Unix(ts, 0)) > telegramMaxAuthAge {
+				return false
+			}
+		} else {
+			return false
+		}
+	} else {
+		return false
+	}
+
 	strs := []string{}
 	var hash = ""
 	for k, v := range params {
@@ -121,5 +169,9 @@ func checkTelegramAuthorization(params map[string][]string, token string) bool {
 	hmachash := hmac.New(sha256.New, sha256hash.Sum(nil))
 	io.WriteString(hmachash, imploded)
 	ss := hex.EncodeToString(hmachash.Sum(nil))
-	return hash == ss
+	if subtle.ConstantTimeCompare([]byte(hash), []byte(ss)) != 1 {
+		return false
+	}
+	// One-time consumption: a valid signature is spent on first use.
+	return telegramAuthOnce(hash)
 }

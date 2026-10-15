@@ -392,9 +392,12 @@ export function buildRegenerationMessages(
   const history = messages.slice(0, targetIndex).filter(isValidMessage)
 
   if (target.from === MESSAGE_ROLES.USER) {
+    // 原样保留 content（含图片 parts）：getTextContent 会把数组压成纯文本，
+    // 重新生成时图片就丢了。
+    const content = getCurrentVersion(target).content
     return [
       ...history,
-      createUserMessage(getTextContent(getCurrentVersion(target).content)),
+      { ...createUserMessage(''), versions: [{ id: nanoid(), content }] },
       createLoadingAssistantMessage(),
     ]
   }

@@ -39,12 +39,36 @@ func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 	// 放进 content，转换后 Claude 客户端就把原始标记当成正文渲染。
 	// 注意：这里只做逐帧提取，不能同时调 FinishThinkTagStream——该函数会
 	// 把本帧已被 Extract 消费过的字节重喂进 splitter 并提前 flush，破坏
-	// 多帧流的提取（见 06a063ef0 回归）。缓冲字节的释放只在流结束处的
-	// HandleFinalResponseWithError 做一次。
+	// 多帧流的提取（见 06a063ef0 回归）。缓冲字节的常规释放点在流结束处的
+	// HandleFinalResponseWithError。
+	//
+	// 本帧自带 finish_reason（含 usage 的合并型上游）时，转换器处理完本帧
+	// 即终止 message 生命周期。缓冲字节若留到 HandleFinalResponseWithError
+	// 再发，就会落在 message_stop 之后——严格客户端在 message_stop 处结束
+	// 迭代，字节实际丢失。因此转换本帧之前先把缓冲以无 finish_reason 的
+	// 伪帧送出（转换器只开块消费 delta，不终止）。
 	data = relaycommon.ExtractThinkTagsFromChatChunk(info, data)
 	var streamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
 		return err
+	}
+
+	if info.ClaudeConvertInfo != nil && !info.ClaudeConvertInfo.Done {
+		doneChunk := len(streamResponse.Choices) > 0 &&
+			streamResponse.Choices[0].FinishReason != nil &&
+			*streamResponse.Choices[0].FinishReason != ""
+		if doneChunk || len(streamResponse.Choices) == 0 {
+			if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
+				flushResponses, flushErr := service.StreamResponseOpenAI2ClaudeWithError(
+					flushThinkTagFrame(visible, reasoning), info)
+				if flushErr != nil {
+					return flushErr
+				}
+				for _, resp := range flushResponses {
+					_ = helper.ClaudeData(c, *resp)
+				}
+			}
+		}
 	}
 
 	if streamResponse.Usage != nil {
@@ -231,10 +255,9 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 	_ = HandleFinalResponseWithError(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 }
 
-// flushThinkTagFrame builds a chat frame carrying the bytes the think-tag
-// splitter still held at end of stream. The finish_reason is required so the
-// downstream converters treat it as a terminal frame and run their full
-// closing state machine instead of swallowing the bytes.
+// flushThinkTagFrame builds the flush pseudo-frame for usage-only terminals:
+// no finish_reason, so the converter consumes the delta (emitting content
+// blocks) without closing the lifecycle — the terminal frame closes it once.
 func flushThinkTagFrame(visible string, reasoning string) *dto.ChatCompletionsStreamResponse {
 	delta := dto.ChatCompletionsStreamResponseChoiceDelta{}
 	if reasoning != "" {
@@ -243,14 +266,26 @@ func flushThinkTagFrame(visible string, reasoning string) *dto.ChatCompletionsSt
 	if visible != "" {
 		delta.SetContentString(visible)
 	}
-	finishReason := "stop"
 	return &dto.ChatCompletionsStreamResponse{
 		Id:    "chatcmpl-thinktag-flush",
 		Model: "",
 		Choices: []dto.ChatCompletionsStreamResponseChoice{{
-			Delta:        delta,
-			FinishReason: &finishReason,
+			Delta: delta,
 		}},
+	}
+}
+
+// mergeFlushIntoDelta appends the flushed bytes onto a terminal frame's delta
+// so the converter emits them in the same conversion pass that closes the
+// lifecycle.
+func mergeFlushIntoDelta(delta *dto.ChatCompletionsStreamResponseChoiceDelta, visible string, reasoning string) {
+	if reasoning != "" {
+		existing := delta.GetReasoningContent()
+		merged := existing + reasoning
+		delta.ReasoningContent = &merged
+	}
+	if visible != "" {
+		delta.SetContentString(delta.GetContentString() + visible)
 	}
 }
 
@@ -269,25 +304,46 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		return nil
 
 	case types.RelayFormatClaude:
-		// 流结束的一次性 flush：splitter 缓冲的字节（截断在 think 块内、帧尾
-		// 未闭合标记前缀等场景）作为独立伪帧发送，带 finish_reason 保证转换器
-		// 走完整终止状态机。不能附着到终端帧本身：include_usage 时终端帧的
-		// choices 为空，附着会产生一个无 finish_reason 的伪造 choice，转换器
-		// 既不消费字节也不发终止事件，流就此悬挂。
-		if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
-			// 上游最后一个内容帧可能已自带 usage+finish_reason，转换器处理它
-			// 时就终止了 message 生命周期（Done=true）。flush 伪帧必须绕过该
-			// gate 才能把缓冲字节送出；转换后恢复，让终端帧保持被拦截。
-			wasDone := info.ClaudeConvertInfo.Done
-			info.ClaudeConvertInfo.Done = false
-			flushResponses, flushErr := service.StreamResponseOpenAI2ClaudeWithError(
-				flushThinkTagFrame(visible, reasoning), info)
-			info.ClaudeConvertInfo.Done = wasDone
-			if flushErr != nil {
-				return flushErr
-			}
-			for _, resp := range flushResponses {
-				_ = helper.ClaudeData(c, *resp)
+		// 流结束的一次性 flush。常规路径（终端帧带 finish_reason 或
+		// usage-only）的缓冲字节已在 handleClaudeFormat 转换该帧之前送出，
+		// 这里通常已无缓冲。仍可能剩缓冲的场景：上游流被截断、最后内容帧
+		// 不带 finish_reason——此时生命周期未闭合，缓冲并入终端帧 delta 或
+		// 以无 finish_reason 的伪帧发出，随后由终端帧闭合一次。伪帧绝不能
+		// 带 finish_reason：那会额外闭合一次生命周期（重复 message_stop）
+		// 并把 stop_reason 覆盖成 end_turn（tool-use 流回归）。
+		//
+		// 生命周期已闭合（Done=true）时 FlushThinkTagStream 已在帧前排空，
+		// 此处不再产生任何事件，避免 message_stop 之后补发内容。
+		//
+		// 终端帧自身的 content 也必须过提取：主循环只对非最后一帧调
+		// HandleStreamFormat，最后一帧直达这里，不提取则帧内 <think> 标签
+		// 会原样作为正文发给客户端（并计入输出 token）。
+		lastStreamData = relaycommon.ExtractThinkTagsFromChatChunk(info, lastStreamData)
+		var terminalFrame dto.ChatCompletionsStreamResponse
+		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &terminalFrame); err != nil {
+			return err
+		}
+		terminalIsUsageOnly := len(terminalFrame.Choices) == 0
+
+		if !info.ClaudeConvertInfo.Done {
+			if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
+				if terminalIsUsageOnly {
+					flushResponses, flushErr := service.StreamResponseOpenAI2ClaudeWithError(
+						flushThinkTagFrame(visible, reasoning), info)
+					if flushErr != nil {
+						return flushErr
+					}
+					for _, resp := range flushResponses {
+						_ = helper.ClaudeData(c, *resp)
+					}
+				} else {
+					mergeFlushIntoDelta(&terminalFrame.Choices[0].Delta, visible, reasoning)
+					merged, marshalErr := common.Marshal(terminalFrame)
+					if marshalErr != nil {
+						return marshalErr
+					}
+					lastStreamData = string(merged)
+				}
 			}
 		}
 		var streamResponse dto.ChatCompletionsStreamResponse
@@ -308,7 +364,10 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		return nil
 
 	case types.RelayFormatGemini:
-		// 与 Claude 分支同：flush 字节作为独立伪帧（带 finish_reason）发送。
+		// 与 Claude 分支同：flush 字节在终端帧之前送出。伪帧不带
+		// finish_reason，转换器只输出 parts，不发终止；生命周期由终端帧
+		// 闭合一次。终端帧自身 content 同样先过提取（见 Claude 分支说明）。
+		lastStreamData = relaycommon.ExtractThinkTagsFromChatChunk(info, lastStreamData)
 		if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
 			geminiFlush, geminiErr := service.StreamResponseOpenAI2GeminiWithError(
 				flushThinkTagFrame(visible, reasoning), info)

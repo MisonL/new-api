@@ -5380,6 +5380,7 @@
     "默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。": "By default, requests are not changed. Fixed mode selects one template; round robin or random mode can select multiple templates and apply them by strategy.",
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
-    "默认行为": "Default behavior"
+    "默认行为": "Default behavior",
+    "模型使用排行榜，需要登录访问": "Model usage rankings, requires sign-in"
   }
 }

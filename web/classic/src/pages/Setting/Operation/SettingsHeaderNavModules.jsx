@@ -54,8 +54,8 @@ export default function SettingsHeaderNavModules(props) {
   function handleHeaderNavModuleChange(moduleKey) {
     return (checked) => {
       const newModules = { ...headerNavModules };
-      if (moduleKey === 'pricing') {
-        // 对于pricing模块，只更新enabled属性
+      if (moduleKey === 'pricing' || moduleKey === 'rankings') {
+        // 对象格式的模块（含 requireAuth 子配置）只更新 enabled 属性
         newModules[moduleKey] = {
           ...newModules[moduleKey],
           enabled: checked,
@@ -83,6 +83,10 @@ export default function SettingsHeaderNavModules(props) {
       home: true,
       console: true,
       pricing: {
+        enabled: true,
+        requireAuth: false,
+      },
+      rankings: {
         enabled: true,
         requireAuth: false,
       },
@@ -141,6 +145,15 @@ export default function SettingsHeaderNavModules(props) {
             requireAuth: false, // 默认不需要登录鉴权
           };
         }
+        if (typeof modules.rankings === 'boolean') {
+          modules.rankings = {
+            enabled: modules.rankings,
+            requireAuth: false,
+          };
+        }
+        if (!modules.rankings) {
+          modules.rankings = { enabled: true, requireAuth: false };
+        }
 
         setHeaderNavModules(modules);
       } catch (error) {
@@ -149,6 +162,10 @@ export default function SettingsHeaderNavModules(props) {
           home: true,
           console: true,
           pricing: {
+            enabled: true,
+            requireAuth: false,
+          },
+          rankings: {
             enabled: true,
             requireAuth: false,
           },
@@ -177,6 +194,12 @@ export default function SettingsHeaderNavModules(props) {
       title: t('模型广场'),
       description: t('模型定价，需要登录访问'),
       hasSubConfig: true, // 标识该模块有子配置
+    },
+    {
+      key: 'rankings',
+      title: t('排行榜'),
+      description: t('模型使用排行榜，需要登录访问'),
+      hasSubConfig: true,
     },
     {
       key: 'docs',
