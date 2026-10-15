@@ -166,3 +166,36 @@ func TestUpdateOptionGuardsCoverEveryProvider(t *testing.T) {
 		require.NotEmpty(t, msg, "%s must explain why it was refused", key)
 	}
 }
+
+// The Telegram guard has a reverse direction too: while Telegram login is on,
+// clearing the Bot Token must be refused. An empty token degenerates the HMAC
+// key to sha256(""), a public constant, so any attacker could forge the login
+// payload. The guard must fire on empty and whitespace-only writes, must not
+// fire on a real token, and must not fire at all when Telegram login is off
+// (otherwise an operator could never clear a stale token they disabled).
+func TestUpdateOptionTelegramTokenReverseGuard(t *testing.T) {
+	db := setupSetupControllerTestDB(t)
+	restoreBooleanOptionGlobals(t)
+
+	savedToken := common.TelegramBotToken
+	savedEnabled := common.TelegramOAuthEnabled
+	t.Cleanup(func() {
+		common.TelegramBotToken = savedToken
+		common.TelegramOAuthEnabled = savedEnabled
+		db.Exec("DELETE FROM options")
+	})
+
+	common.TelegramOAuthEnabled = true
+	for _, raw := range []string{`""`, `"   "`, `"\t"`} {
+		ok, msg := putOption(t, db, "TelegramBotToken", raw)
+		require.False(t, ok, "raw=%s must not clear the Bot Token while Telegram login is on", raw)
+		require.NotEmpty(t, msg, "raw=%s must explain why it was refused", raw)
+	}
+
+	ok, msg := putOption(t, db, "TelegramBotToken", `"real-token"`)
+	require.True(t, ok, "a non-empty token must be accepted: %s", msg)
+
+	common.TelegramOAuthEnabled = false
+	ok, msg = putOption(t, db, "TelegramBotToken", `""`)
+	require.True(t, ok, "clearing the token must be allowed once Telegram login is off: %s", msg)
+}
