@@ -280,36 +280,6 @@ export const useDeploymentsData = () => {
   };
 
   // Deployment operations
-  const startDeployment = async (deploymentId) => {
-    try {
-      const res = await API.post(`/api/deployments/${deploymentId}/start`);
-      if (res.data.success) {
-        showSuccess(t('部署启动成功'));
-        await refresh();
-      } else {
-        showError(res.data.message);
-      }
-    } catch (error) {
-      console.error(error);
-      showError(t('启动部署失败'));
-    }
-  };
-
-  const restartDeployment = async (deploymentId) => {
-    try {
-      const res = await API.post(`/api/deployments/${deploymentId}/restart`);
-      if (res.data.success) {
-        showSuccess(t('部署重启成功'));
-        await refresh();
-      } else {
-        showError(res.data.message);
-      }
-    } catch (error) {
-      console.error(error);
-      showError(t('重启部署失败'));
-    }
-  };
-
   const deleteDeployment = async (deploymentId) => {
     try {
       const res = await API.delete(`/api/deployments/${deploymentId}`);
@@ -507,8 +477,6 @@ export const useDeploymentsData = () => {
     handleRow,
 
     // Deployment operations
-    startDeployment,
-    restartDeployment,
     deleteDeployment,
     updateDeploymentName,
     syncDeploymentToChannel,

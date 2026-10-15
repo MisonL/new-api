@@ -210,6 +210,82 @@ export async function getUserHeaderProfiles(): Promise<UserHeaderProfilesRespons
 }
 
 /**
+ * Payload for creating or updating a user header profile.
+ * Mirrors controller.userHeaderProfileUpsertRequest.
+ */
+export interface HeaderProfilePayload {
+  name: string
+  category: string
+  headers: Record<string, string>
+  description: string
+}
+
+export async function createUserHeaderProfile(
+  payload: HeaderProfilePayload
+): Promise<UserHeaderProfilesResponse> {
+  const res = await api.post('/api/user/header_profiles', payload)
+  return res.data
+}
+
+export async function updateUserHeaderProfile(
+  id: string,
+  payload: HeaderProfilePayload
+): Promise<UserHeaderProfilesResponse> {
+  const res = await api.put(`/api/user/header_profiles/${encodeURIComponent(id)}`, payload)
+  return res.data
+}
+
+/**
+ * Legacy header_override template. Mirrors controller.buildUserHeaderTemplateResponse.
+ */
+export interface UserHeaderTemplate {
+  id: number
+  name: string
+  content: string
+  created_at: number
+  updated_at: number
+}
+
+export type UserHeaderTemplateResponse = {
+  success: boolean
+  message?: string
+  data?: UserHeaderTemplate
+}
+
+export type UserHeaderTemplateListResponse = {
+  success: boolean
+  message?: string
+  data?: UserHeaderTemplate[]
+}
+
+export async function getUserHeaderTemplates(): Promise<UserHeaderTemplateListResponse> {
+  const res = await api.get('/api/user/header-templates')
+  return res.data
+}
+
+export async function createUserHeaderTemplate(
+  payload: { name: string; content: string }
+): Promise<UserHeaderTemplateResponse> {
+  const res = await api.post('/api/user/header-templates', payload)
+  return res.data
+}
+
+export async function updateUserHeaderTemplate(
+  id: number,
+  payload: { name: string; content: string }
+): Promise<UserHeaderTemplateResponse> {
+  const res = await api.put(`/api/user/header-templates/${encodeURIComponent(String(id))}`, payload)
+  return res.data
+}
+
+export async function deleteUserHeaderTemplate(
+  id: number
+): Promise<{ success: boolean; message?: string }> {
+  const res = await api.delete(`/api/user/header-templates/${encodeURIComponent(String(id))}`)
+  return res.data
+}
+
+/**
  * Create new channel(s)
  * Supports single, batch, and multi-key modes
  */

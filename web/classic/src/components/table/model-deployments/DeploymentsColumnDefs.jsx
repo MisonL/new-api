@@ -274,8 +274,6 @@ const renderInstanceCount = (count, record, t) => {
 export const getDeploymentsColumns = ({
   t,
   COLUMN_KEYS,
-  startDeployment,
-  restartDeployment,
   deleteDeployment,
   setEditingDeployment,
   setShowEdit,
@@ -481,19 +479,19 @@ export const getDeploymentsColumns = ({
             case 'failed':
             case 'error':
               return {
-                icon: <FaPlay className='text-xs' />,
-                text: t('重试'),
-                onClick: () => startDeployment(id),
-                type: 'primary',
-                theme: 'solid',
+                icon: <FaInfoCircle className='text-xs' />,
+                text: t('查看详情'),
+                onClick: () => onViewDetails?.(record),
+                type: 'secondary',
+                theme: 'borderless',
               };
             case 'stopped':
               return {
-                icon: <FaPlay className='text-xs' />,
-                text: t('启动'),
-                onClick: () => startDeployment(id),
-                type: 'primary',
-                theme: 'solid',
+                icon: <FaInfoCircle className='text-xs' />,
+                text: t('查看详情'),
+                onClick: () => onViewDetails?.(record),
+                type: 'secondary',
+                theme: 'borderless',
               };
             case 'deployment requested':
             case 'deploying':
@@ -594,29 +592,6 @@ export const getDeploymentsColumns = ({
             );
           }
         }
-        if (normalizedStatus === 'failed' || normalizedStatus === 'error') {
-          managementItems.push(
-            <Dropdown.Item
-              key='retry'
-              onClick={() => startDeployment(id)}
-              icon={<FaPlay />}
-            >
-              {t('重试')}
-            </Dropdown.Item>,
-          );
-        }
-        if (normalizedStatus === 'stopped') {
-          managementItems.push(
-            <Dropdown.Item
-              key='start'
-              onClick={() => startDeployment(id)}
-              icon={<FaPlay />}
-            >
-              {t('启动')}
-            </Dropdown.Item>,
-          );
-        }
-
         if (managementItems.length > 0) {
           dropdownItems.push(<Dropdown.Divider key='management-divider' />);
           dropdownItems.push(...managementItems);

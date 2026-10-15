@@ -101,8 +101,10 @@ export function getTextContent(content: string | ContentPart[]): string {
   }
 
   if (Array.isArray(content)) {
-    const textPart = content.find((part) => part.type === 'text')
-    return textPart?.text || ''
+    return content
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text || '')
+      .join('')
   }
 
   return ''
@@ -130,7 +132,7 @@ export function isValidMessage(message: Message): boolean {
   if (content === undefined) return false
 
   // Exclude empty assistant messages (loading/streaming placeholders)
-  if (message.from === 'assistant' && !content.trim()) return false
+  if (message.from === 'assistant' && !getTextContent(content).trim()) return false
 
   return true
 }
@@ -246,9 +248,10 @@ export function processStreamingContent(
   contentChunk?: string
 ): Message {
   const currentVersion = getCurrentVersion(message)
+  const previousContent = getTextContent(currentVersion.content)
   const fullContent = contentChunk
-    ? currentVersion.content + contentChunk
-    : currentVersion.content
+    ? previousContent + contentChunk
+    : previousContent
 
   const { reasoning, hasUnclosedTag } = parseThinkTags(fullContent)
 
@@ -273,7 +276,9 @@ export function finalizeMessage(
   apiReasoningContent?: string
 ): Message {
   const currentVersion = getCurrentVersion(message)
-  const { visibleContent, reasoning } = parseThinkTags(currentVersion.content)
+  const { visibleContent, reasoning } = parseThinkTags(
+    getTextContent(currentVersion.content)
+  )
 
   // Priority:
   // 1. API reasoning_content passed as parameter (non-streaming response)
@@ -312,7 +317,7 @@ export function sanitizeMessagesOnLoad(messages: Message[]): Message[] {
   if (targetIndex === -1) return messages
 
   const finalized = finalizeMessage(messages[targetIndex])
-  const hasContent = finalized.versions?.[0]?.content?.trim()
+  const hasContent = getTextContent(finalized.versions?.[0]?.content ?? '').trim()
   const hasReasoning = finalized.reasoning?.content?.trim()
 
   const sanitized: Message =
@@ -334,4 +339,75 @@ export function sanitizeMessagesOnLoad(messages: Message[]): Message[] {
   const result = [...messages]
   result[targetIndex] = sanitized
   return result
+}
+
+/**
+ * Append image URLs to message content as image parts.
+ * Preserves existing text and image parts, skips URLs already present
+ * (compared after trimming) and drops blank URLs.
+ */
+export function appendImageUrls(
+  content: string | ContentPart[],
+  imageUrls: string[]
+): string | ContentPart[] {
+  const parts: ContentPart[] =
+    typeof content === 'string'
+      ? [{ type: 'text', text: content }]
+      : [...content]
+
+  const existingUrls = new Set(
+    parts
+      .filter((part): part is ContentPart & { type: 'image_url' } =>
+        part.type === 'image_url'
+      )
+      .map((part) => part.image_url?.url.trim())
+      .filter((url): url is string => !!url)
+  )
+
+  for (const raw of imageUrls) {
+    const url = raw.trim()
+    if (!url || existingUrls.has(url)) continue
+    existingUrls.add(url)
+    parts.push({ type: 'image_url', image_url: { url } })
+  }
+
+  return parts
+}
+
+/**
+ * Build the message list for a regeneration attempt:
+ * history up to (excluding) the target message, then a fresh user turn
+ * carrying the target's user content (if it was a user message), then a
+ * new loading assistant placeholder. Returns null when the target message
+ * is not found or no preceding user turn exists.
+ */
+export function buildRegenerationMessages(
+  messages: Message[],
+  targetKey: string
+): Message[] | null {
+  const targetIndex = messages.findIndex((message) => message.key === targetKey)
+  if (targetIndex === -1) return null
+
+  const target = messages[targetIndex]
+  const history = messages.slice(0, targetIndex).filter(isValidMessage)
+
+  if (target.from === MESSAGE_ROLES.USER) {
+    return [
+      ...history,
+      createUserMessage(getTextContent(getCurrentVersion(target).content)),
+      createLoadingAssistantMessage(),
+    ]
+  }
+
+  const lastUserIndex = [...history]
+    .reverse()
+    .findIndex((message) => message.from === MESSAGE_ROLES.USER)
+  if (lastUserIndex === -1) return null
+
+  const cutIndex = history.length - 1 - lastUserIndex
+  return [
+    ...history.slice(0, cutIndex),
+    history[cutIndex],
+    createLoadingAssistantMessage(),
+  ]
 }

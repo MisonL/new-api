@@ -91,3 +91,41 @@ export const getAllTaskLogs = (params: GetTaskLogsParams) =>
 
 export const getUserTaskLogs = (params: GetTaskLogsParams) =>
   fetchLogs('/api/task', params, false)
+
+// ============================================================================
+// Log Deletion
+// ============================================================================
+
+/**
+ * Filter payload for batch log deletion. Mirrors controller.BatchDeleteLogsRequest.
+ */
+export interface DeleteLogsFilterPayload {
+  type?: number
+  start_timestamp?: number
+  end_timestamp?: number
+  username?: string
+  token_name?: string
+  model_name?: string
+  channel?: number
+  group?: string
+  request_id?: string
+}
+
+/**
+ * Batch delete logs matching the filter. Admin: POST /api/log/batch_delete;
+ * user: POST /api/log/self/batch_delete.
+ */
+export async function deleteLogsByFilter(
+  payload: DeleteLogsFilterPayload,
+  isAdmin: boolean
+): Promise<ApiResponseShape<{ deleted: number }>> {
+  const endpoint = buildApiPath('/api/log/batch_delete', isAdmin)
+  const res = await api.post(endpoint, payload)
+  return res.data
+}
+
+interface ApiResponseShape<T> {
+  success: boolean
+  message: string
+  data?: T
+}

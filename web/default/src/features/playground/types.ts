@@ -5,7 +5,7 @@ export type MessageStatus = 'loading' | 'streaming' | 'complete' | 'error'
 
 export interface MessageVersion {
   id: string
-  content: string
+  content: string | ContentPart[]
 }
 
 export interface Message {
@@ -99,6 +99,11 @@ export interface PlaygroundConfig {
   presence_penalty: number
   seed: number | null
   stream: boolean
+  imageEnabled: boolean
+  imageUrls: string[]
+  customRequestMode: boolean
+  customRequestBody: string
+  showDebugPanel: boolean
 }
 
 export interface ParameterEnabled {
@@ -108,6 +113,18 @@ export interface ParameterEnabled {
   frequency_penalty: boolean
   presence_penalty: boolean
   seed: boolean
+}
+
+/**
+ * Raw SSE wire data captured for the playground debug panel.
+ */
+export interface PlaygroundDebugData {
+  request: string
+  response: string
+  sseMessages: readonly string[]
+  timestamp: number
+  previewTimestamp: number
+  isStreaming: boolean
 }
 
 // Model and group options

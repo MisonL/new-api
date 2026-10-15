@@ -20,6 +20,11 @@ import type {
   WaffoPaymentResponse,
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
+  GiftCode,
+  CreateGiftCodeRequest,
+  ReceiveGiftCodeRequest,
+  InvitationRecordsFilter,
+  InvitationRecordsResponse,
 } from './types'
 
 // ============================================================================
@@ -213,5 +218,72 @@ export async function completeOrder(
   request: CompleteOrderRequest
 ): Promise<ApiResponse> {
   const res = await api.post('/api/user/topup/complete', request)
+  return res.data
+}
+
+// ============================================================================
+// Gift Codes
+// ============================================================================
+
+/**
+ * List gift codes created by the current user.
+ */
+export async function listGiftCodes(): Promise<ApiResponse<GiftCode[]>> {
+  const res = await api.get('/api/user/gift_codes')
+  return res.data
+}
+
+/**
+ * Create a gift code for the current user.
+ */
+export async function createGiftCode(
+  request: CreateGiftCodeRequest
+): Promise<ApiResponse<GiftCode>> {
+  const res = await api.post('/api/user/gift_codes', request)
+  return res.data
+}
+
+/**
+ * Look up one gift code by its code string.
+ */
+export async function getGiftCode(code: string): Promise<ApiResponse<GiftCode>> {
+  const res = await api.get(`/api/user/gift_codes/${encodeURIComponent(code)}`)
+  return res.data
+}
+
+/**
+ * Receive (redeem) a gift code.
+ */
+export async function receiveGiftCode(
+  code: string,
+  request: ReceiveGiftCodeRequest
+): Promise<ApiResponse<GiftCode>> {
+  const res = await api.post(
+    `/api/user/gift_codes/${encodeURIComponent(code)}/receive`,
+    request
+  )
+  return res.data
+}
+
+// ============================================================================
+// Invitation Records
+// ============================================================================
+
+/**
+ * List the current user's invitation reward/rebate records.
+ */
+export async function getInvitationRecords(
+  page: number,
+  pageSize: number,
+  filter: InvitationRecordsFilter
+): Promise<ApiResponse<InvitationRecordsResponse>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  if (filter.keyword) params.append('keyword', filter.keyword)
+  if (filter.record_type) params.append('record_type', filter.record_type)
+  if (filter.source) params.append('source', filter.source)
+  const res = await api.get(`/api/user/invitation_records?${params.toString()}`)
   return res.data
 }

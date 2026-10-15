@@ -294,6 +294,21 @@ export interface ChannelTestRuntimeConfig {
   upstream_request_path?: string
 }
 
+/**
+ * Test-time runtime switches for model testing. Carried as query params by
+ * buildModelTestRuntimeParams; not persisted on the channel.
+ */
+export interface ModelTestRuntimeConfig {
+  enabled: boolean
+  headerConfig: boolean
+  paramOverride: boolean
+  proxy: boolean
+  modelMapping: boolean
+  responseProtocol: 'native' | 'chat_completions'
+  testPrompt: string
+  maxTokens: number
+}
+
 export interface ChannelBalanceResponse {
   success: boolean
   message?: string

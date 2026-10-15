@@ -1,6 +1,74 @@
-import { STORAGE_KEYS } from '../constants'
-import type { PlaygroundConfig, ParameterEnabled, Message } from '../types'
+import { DEFAULT_CONFIG, STORAGE_KEYS } from '../constants'
+import type {
+  PlaygroundConfig,
+  ParameterEnabled,
+  Message,
+  MessageVersion,
+} from '../types'
 import { sanitizeMessagesOnLoad } from './message-utils'
+
+/**
+ * Normalize an imported or stored config object into a complete
+ * PlaygroundConfig, filling missing fields with defaults.
+ */
+export function normalizePlaygroundConfig(
+  value: unknown
+): PlaygroundConfig | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const source = value as Partial<PlaygroundConfig> &
+    Record<string, unknown>
+  const normalized: PlaygroundConfig = {
+    ...DEFAULT_CONFIG,
+    model:
+      typeof source.model === 'string' && source.model
+        ? source.model
+        : DEFAULT_CONFIG.model,
+    group:
+      typeof source.group === 'string' && source.group
+        ? source.group
+        : DEFAULT_CONFIG.group,
+    temperature:
+      typeof source.temperature === 'number'
+        ? source.temperature
+        : DEFAULT_CONFIG.temperature,
+    top_p: typeof source.top_p === 'number' ? source.top_p : DEFAULT_CONFIG.top_p,
+    max_tokens:
+      typeof source.max_tokens === 'number'
+        ? source.max_tokens
+        : DEFAULT_CONFIG.max_tokens,
+    frequency_penalty:
+      typeof source.frequency_penalty === 'number'
+        ? source.frequency_penalty
+        : DEFAULT_CONFIG.frequency_penalty,
+    presence_penalty:
+      typeof source.presence_penalty === 'number'
+        ? source.presence_penalty
+        : DEFAULT_CONFIG.presence_penalty,
+    seed:
+      typeof source.seed === 'number' ? source.seed : DEFAULT_CONFIG.seed,
+    stream: typeof source.stream === 'boolean' ? source.stream : DEFAULT_CONFIG.stream,
+    imageEnabled:
+      typeof source.imageEnabled === 'boolean'
+        ? source.imageEnabled
+        : DEFAULT_CONFIG.imageEnabled,
+    imageUrls: Array.isArray(source.imageUrls)
+      ? source.imageUrls.filter((url): url is string => typeof url === 'string')
+      : DEFAULT_CONFIG.imageUrls,
+    customRequestMode:
+      typeof source.customRequestMode === 'boolean'
+        ? source.customRequestMode
+        : DEFAULT_CONFIG.customRequestMode,
+    customRequestBody:
+      typeof source.customRequestBody === 'string'
+        ? source.customRequestBody
+        : DEFAULT_CONFIG.customRequestBody,
+    showDebugPanel:
+      typeof source.showDebugPanel === 'boolean'
+        ? source.showDebugPanel
+        : DEFAULT_CONFIG.showDebugPanel,
+  }
+  return normalized
+}
 
 /**
  * Load playground config from localStorage
@@ -113,4 +181,42 @@ export function clearPlaygroundData(): void {
     // eslint-disable-next-line no-console
     console.error('Failed to clear playground data:', error)
   }
+}
+
+const SAFE_SOURCE_PROTOCOLS = new Set(['http:', 'https:'])
+
+/**
+ * Normalize messages restored from storage or import: drop malformed
+ * content parts, filter non-http(s) source hrefs, and finalize assistant
+ * messages stuck in loading/streaming state.
+ */
+export function normalizeStoredMessages(messages: Message[]): Message[] {
+  const sanitized = sanitizeMessagesOnLoad(messages)
+
+  return sanitized.map((message) => {
+    const versions: MessageVersion[] = message.versions.map((version) => {
+      const content = version.content
+      if (!Array.isArray(content)) return version
+      const parts = content.filter(
+        (part) =>
+          !!part &&
+          (part.type === 'text' || part.type === 'image_url') &&
+          (part.type !== 'image_url' || !!part.image_url?.url)
+      )
+      return { ...version, content: parts }
+    })
+
+    let sources = message.sources
+    if (Array.isArray(sources)) {
+      sources = sources.filter((source) => {
+        try {
+          return SAFE_SOURCE_PROTOCOLS.has(new URL(source.href).protocol)
+        } catch {
+          return false
+        }
+      })
+    }
+
+    return { ...message, versions, sources }
+  })
 }

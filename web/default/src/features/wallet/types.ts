@@ -258,3 +258,76 @@ export interface BillingHistoryResponse {
 export interface CompleteOrderRequest {
   trade_no: string
 }
+
+/**
+ * Gift code record. Mirrors model.GiftCode JSON tags.
+ */
+export interface GiftCode {
+  id: number
+  code: string
+  creator_user_id: number
+  creator_username: string
+  receiver_user_id: number
+  receiver_bind_type: string
+  receiver_bind_value: string
+  received_user_id: number
+  received_username: string
+  status: number
+  quota: number
+  message: string
+  thank_message: string
+  created_time: number
+  expired_time: number
+  received_time: number
+}
+
+export interface CreateGiftCodeRequest {
+  quota: number
+  receiver_bind_type: string
+  receiver_bind_value: string
+  expired_time: number
+  message: string
+}
+
+export interface ReceiveGiftCodeRequest {
+  thank_message: string
+}
+
+/**
+ * Invitation reward/rebate record. Mirrors model.InvitationRecord JSON tags.
+ */
+export interface InvitationRecord {
+  id: number
+  inviter_id: number
+  invitee_id: number
+  invitee_username: string
+  record_type: string
+  source: string
+  source_ref: string
+  topup_quota: number
+  reward_quota: number
+  rebate_rate: number
+  created_time: number
+}
+
+export interface InvitationRecordsFilter {
+  keyword: string
+  record_type: string
+  source: string
+}
+
+export interface InvitationRecordsResponse {
+  items: InvitationRecord[]
+  page: number
+  page_size: number
+  total: number
+  invitee_stats: unknown[]
+}
+
+export interface InviteeStat {
+  invitee_id: number
+  invitee_username: string
+  reward_quota: number
+  topup_quota: number
+  register_count: number
+}

@@ -32,7 +32,7 @@ import {
 } from '@/components/ai-elements/sources'
 import { MESSAGE_ROLES } from '../constants'
 import { getMessageContentStyles } from '../lib/message-styles'
-import { parseThinkTags } from '../lib/message-utils'
+import { getTextContent, parseThinkTags } from '../lib/message-utils'
 import type { Message as MessageType } from '../types'
 import { MessageActions } from './message-actions'
 import { MessageError } from './message-error'
@@ -68,7 +68,7 @@ export function PlaygroundChat({
   useEffect(() => {
     if (!editingKey) return
     const message = messages.find((m) => m.key === editingKey)
-    const content = message?.versions?.[0]?.content || ''
+    const content = getTextContent(message?.versions?.[0]?.content ?? '')
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEditText(content)
 
@@ -159,8 +159,10 @@ export function PlaygroundChat({
 
                               // Extract visible content (remove <think> tags for assistant messages)
                               const displayContent = isAssistant
-                                ? parseThinkTags(version.content).visibleContent
-                                : version.content
+                                ? parseThinkTags(
+                                    getTextContent(version.content)
+                                  ).visibleContent
+                                : getTextContent(version.content)
 
                               const actions = (
                                 <MessageActions

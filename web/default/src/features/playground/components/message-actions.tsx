@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { MESSAGE_ACTION_LABELS } from '../constants'
+import { getTextContent } from '../lib/message-utils'
 import { useMessageActionGuard } from '../hooks/use-message-action-guard'
 import type { Message } from '../types'
 import { MessageActionButton } from './message-action-button'
@@ -35,7 +36,7 @@ export function MessageActions({
   const hasContent = message.versions.some((v) => v.content)
   const isLoading =
     message.status === 'loading' || message.status === 'streaming'
-  const content = message.versions[0]?.content || ''
+  const content = getTextContent(message.versions[0]?.content ?? '')
   const isCopied = copiedText === content
 
   const handleCopy = () => {

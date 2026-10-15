@@ -17,7 +17,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function flattenValues<T extends FieldValues>(
+export function flattenValues<T extends FieldValues>(
   values: T,
   parentKey?: string,
   result: Record<string, unknown> = {}
@@ -48,7 +48,7 @@ function flattenValues<T extends FieldValues>(
   return result
 }
 
-function collectDirtyValues<TFieldValues extends FieldValues>(
+export function collectDirtyValues<TFieldValues extends FieldValues>(
   dirtyFields: Partial<FieldNamesMarkedBoolean<TFieldValues>> | boolean,
   values: unknown,
   parentKey?: string,
@@ -116,7 +116,7 @@ function setDeepValue(
   })
 }
 
-function expandDotPaths<T extends FieldValues>(
+export function expandDotPaths<T extends FieldValues>(
   values: T | undefined
 ): T | undefined {
   if (!values || !isPlainObject(values)) {

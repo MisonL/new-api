@@ -35,6 +35,11 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   presence_penalty: 0,
   seed: null,
   stream: true,
+  imageEnabled: false,
+  imageUrls: [],
+  customRequestMode: false,
+  customRequestBody: '',
+  showDebugPanel: false,
 }
 
 export const DEFAULT_PARAMETER_ENABLED: ParameterEnabled = {

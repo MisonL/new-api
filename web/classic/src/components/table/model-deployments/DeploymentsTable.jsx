@@ -50,8 +50,6 @@ const DeploymentsTable = (deploymentsData) => {
     t,
     COLUMN_KEYS,
     // Column functions and data
-    startDeployment,
-    restartDeployment,
     deleteDeployment,
     syncDeploymentToChannel,
     setEditingDeployment,
@@ -115,8 +113,6 @@ const DeploymentsTable = (deploymentsData) => {
     return getDeploymentsColumns({
       t,
       COLUMN_KEYS,
-      startDeployment,
-      restartDeployment,
       deleteDeployment,
       setEditingDeployment,
       setShowEdit,
@@ -133,8 +129,6 @@ const DeploymentsTable = (deploymentsData) => {
   }, [
     t,
     COLUMN_KEYS,
-    startDeployment,
-    restartDeployment,
     deleteDeployment,
     syncDeploymentToChannel,
     setEditingDeployment,
