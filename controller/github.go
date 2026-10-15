@@ -137,7 +137,7 @@ func GitHubOAuth(c *gin.Context) {
 			} else {
 				user.DisplayName = "GitHub User"
 			}
-			user.Email = githubUser.Email
+			user.Email = resolveOAuthRegistrationEmail(githubUser.Email)
 			user.Role = common.RoleCommonUser
 			user.Status = common.UserStatusEnabled
 			affCode := session.Get("aff")

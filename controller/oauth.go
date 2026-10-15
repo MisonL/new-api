@@ -475,7 +475,7 @@ func findOrCreateOAuthUserWithOptions(c *gin.Context, provider oauth.Provider, o
 		user.DisplayName = provider.GetName() + " User"
 	}
 	if oauthUser.Email != "" {
-		user.Email = oauthUser.Email
+		user.Email = resolveOAuthRegistrationEmail(oauthUser.Email)
 	}
 	user.Role = normalizeOAuthInitialRole(options.InitialRole)
 	if strings.TrimSpace(options.InitialGroup) != "" {
@@ -899,6 +899,28 @@ func safeOAuthAuditValue(value string) string {
 		return "(empty)"
 	}
 	return value
+}
+
+// resolveOAuthRegistrationEmail decides which email a newly auto-registered
+// OAuth user may claim. The IdP asserts the address; the local email column is
+// not unique, so writing it unconditionally lets two accounts share an address.
+// ResetUserPasswordByEmail rewrites the password of every row matching an
+// address and returns the new plaintext to the caller, so a shared address is a
+// cross-account takeover. When the asserted address is already held the new
+// account is created without an email (the same skip-and-record rule the
+// SyncEmailOnLogin path already applies); the user can bind it later.
+func resolveOAuthRegistrationEmail(email string) string {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return ""
+	}
+	if len(email) > oauthSyncEmailMaxLength {
+		return ""
+	}
+	if model.IsEmailAlreadyTaken(email) {
+		return ""
+	}
+	return email
 }
 
 // Error types for OAuth
