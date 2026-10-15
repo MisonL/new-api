@@ -941,23 +941,30 @@ func streamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 		//claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
 		//	Type: "ping",
 		//})
-		// 判断首个响应是否存在内容（非标准的 OpenAI 响应）
+		// 首帧为空 choices（usage-only）时不能就此返回：那样只发出 message_start，
+		// 客户端永远等不到终止事件。让控制流落到下面的 usage-only 终止分支，
+		// 由它补 message_delta/message_stop。
 		if len(openAIResponse.Choices) > 0 {
 			delta := openAIResponse.Choices[0].Delta
 			appendReasoningDelta(delta.GetReasoningContent())
 			appendTextDelta(delta.GetContentString())
 			appendToolCalls(delta.ToolCalls)
-		}
 
-		// 如果首块就带 finish_reason，需要立即发送停止块
-		if len(openAIResponse.Choices) > 0 && openAIResponse.Choices[0].FinishReason != nil && *openAIResponse.Choices[0].FinishReason != "" {
-			info.FinishReason = *openAIResponse.Choices[0].FinishReason
-			stopOpenBlocks()
-			oaiUsage := openAIResponse.Usage
-			if oaiUsage == nil {
-				oaiUsage = info.ClaudeConvertInfo.Usage
-			}
-			if oaiUsage != nil {
+			// 首块就带 finish_reason：需要立即发送停止块。但部分上游把
+			// finish_reason 放在内容帧、usage 放到随后的 usage-only 帧
+			// （OpenAI include_usage 的常见形态）；此时立即终止会让 usage
+			// 再无机会上报。与下方非首帧分支同规则：usage 尚不可知时不闭合
+			// 生命周期，交给终端帧补 message_delta。
+			if openAIResponse.Choices[0].FinishReason != nil && *openAIResponse.Choices[0].FinishReason != "" {
+				info.FinishReason = *openAIResponse.Choices[0].FinishReason
+				oaiUsage := openAIResponse.Usage
+				if oaiUsage == nil {
+					oaiUsage = info.ClaudeConvertInfo.Usage
+				}
+				if oaiUsage == nil {
+					return claudeResponses
+				}
+				stopOpenBlocks()
 				claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
 					Type:  "message_delta",
 					Usage: buildClaudeUsageFromOpenAIUsage(oaiUsage),
@@ -965,13 +972,13 @@ func streamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 						StopReason: common.GetPointer[string](stopReasonOpenAI2Claude(info.FinishReason)),
 					},
 				})
+				claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
+					Type: "message_stop",
+				})
+				info.ClaudeConvertInfo.Done = true
 			}
-			claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
-				Type: "message_stop",
-			})
-			info.ClaudeConvertInfo.Done = true
+			return claudeResponses
 		}
-		return claudeResponses
 	}
 
 	if len(openAIResponse.Choices) == 0 {

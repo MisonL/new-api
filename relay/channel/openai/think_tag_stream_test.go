@@ -563,3 +563,56 @@ func TestTruncatedStreamStillTerminates(t *testing.T) {
 	require.Equal(t, 1, stops, "truncated stream must terminate with exactly one message_stop")
 	require.Equal(t, 1, deltas, "exactly one message_delta expected")
 }
+
+// 首帧即 usage-only（choices 为空）时，转换器必须仍然闭合消息生命周期。
+// 曾经 SRC==1 分支在发出 message_start 后直接返回，empty-choices 的终止
+// 分支被遮蔽：客户端收到 message_start 后再无事件，按 incomplete stream
+// 报错或一直挂起。
+func TestUsageOnlyFirstFrameTerminates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	info := claudeThinkTagInfoFresh()
+
+	require.NoError(t, HandleFinalResponseWithError(c, info,
+		`{"id":"u","model":"m","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":0,"total_tokens":10}}`,
+		"u", 0, "m", "", &dto.Usage{PromptTokens: 10, TotalTokens: 10}, true))
+
+	require.Equal(t,
+		[]string{"message_start", "message_delta", "message_stop"},
+		sseEventTypes(t, recorder.Body.String()),
+		"a usage-only first frame must still terminate the message")
+}
+
+// 上游把 finish_reason 放在内容帧、usage 放在随后的 usage-only 帧（OpenAI
+// include_usage 的常见形态）时，首帧不能立即闭合生命周期，否则 usage 永远
+// 到不了客户端。终止事件必须恰好一组，且 usage 必须随 message_delta 下发。
+func TestFirstFinishFrameDefersUsageToTerminalFrame(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	info := claudeThinkTagInfoFresh()
+
+	require.NoError(t, HandleStreamFormat(c, info,
+		`{"id":"d","model":"m","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}]}`,
+		false, false))
+	require.NoError(t, HandleFinalResponseWithError(c, info,
+		`{"id":"d","model":"m","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+		"d", 0, "m", "", &dto.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}, true))
+
+	body := recorder.Body.String()
+	require.Equal(t,
+		[]string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"},
+		sseEventTypes(t, body),
+		"exactly one termination group, emitted after the content block")
+
+	sawUsage := false
+	for _, payload := range sseDataPayloads(t, body) {
+		var event dto.ClaudeResponse
+		require.NoError(t, common.UnmarshalJsonStr(payload, &event))
+		if event.Type == "message_delta" && event.Usage != nil && event.Usage.OutputTokens == 5 {
+			sawUsage = true
+		}
+	}
+	require.True(t, sawUsage, "the terminal usage must reach the client")
+}
