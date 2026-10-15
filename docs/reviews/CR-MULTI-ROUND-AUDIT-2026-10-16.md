@@ -202,9 +202,9 @@
 
 | 项 | 值 |
 | --- | --- |
-| `git rev-parse HEAD` | `69cc8dfa2b42213f0dc936c38ae3be9f4aec7db3` |
-| `--build-info` commit | `69cc8dfa2b42213f0dc936c38ae3be9f4aec7db3-dirty` |
-| `--build-info` date | 2026-10-15T20:35:41Z |
+| `git rev-parse HEAD` | `7f488a8c90e4a7f058b71ef0d844723c49761ffa` |
+| `--build-info` commit | `7f488a8c90e4a7f058b71ef0d844723c49761ffa-dirty` |
+| `--build-info` date | 2026-10-15T21:33:20Z |
 | 二进制符号 `resolveOAuthRegistrationEmail` | 命中 |
 | `/api/status` | HTTP 200 |
 | 容器状态 | healthy |
