@@ -17,6 +17,8 @@
 | `aba8f570e` | 第八轮：usage-only 首帧悬挂与 usage 丢失 |
 | `c4256e491` | 第八轮：OAuth 自动注册不再认领已占用邮箱 |
 | `69cc8dfa2` | 第八轮：补齐安全修复回归测试、修正只读联调示例 |
+| `7e349e004` | 第八轮：本 CR 文档沉淀 |
+| `6416e8589` | 第八轮：classic 顶栏默认值收敛到单一来源 |
 
 ## 1. relay think-tag / Claude SSE 转换（反复重构的核心面）
 
@@ -155,9 +157,9 @@
 运行时终验（匿名，未登录）：开发库 `HeaderNavModules` 为"对象 pricing 缺 rankings"形态，顶栏渲染出
 排行榜入口，`/rankings` 未被重定向。
 
-已知边界（第八轮记录）：`useNavigation.js` 内联复制了一份 `defaultModules` 字面量，全仓共 4 处默认
-值副本，将来加模块键会静默漂移；`HeaderNavModules` 被存成双重编码 JSON 字符串时，顶栏链与守卫链
-解析分叉（需人为写入才触发）。
+已知边界（第八轮记录）：`HeaderNavModules` 被存成双重编码 JSON 字符串时，顶栏链与守卫链
+解析分叉（需人为写入才触发）。默认值重复定义已在 `6416e8589` 收敛为单一来源
+`DEFAULT_HEADER_NAV_MODULES`（原 `useNavigation` 与设置面板重置/catch 三处各自内联一份）。
 
 ### 3.2 其他
 
