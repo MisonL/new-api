@@ -61,7 +61,12 @@ func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 		// 走 usage-only 终止分支）。上游会在流中间发空 choices 帧，若仅凭
 		// len==0 就排空缓冲，未闭合 <think> 内的推理字节会按"未闭合规则"
 		// 作为可见文本归还，且 splitter 复位后标签泄入正文。
-		usageOnlyTerminal := len(streamResponse.Choices) == 0 && streamResponse.Usage != nil
+		// 累积 usage 也必须计入判定：转换器对空 choices 帧回退到
+		// ClaudeConvertInfo.Usage（流中任何一帧带过 usage 即非 nil），所以
+		// "空 choices + 本帧无 usage 但流中出现过 usage" 的帧在转换器眼里
+		// 同样是终端。helper 若不一起排空缓冲，扣留字节会永久丢失。
+		usageOnlyTerminal := len(streamResponse.Choices) == 0 &&
+			(streamResponse.Usage != nil || info.ClaudeConvertInfo.Usage != nil)
 
 		if doneChunk || usageOnlyTerminal {
 			if visible, reasoning := relaycommon.FlushThinkTagStream(info); visible != "" || reasoning != "" {
@@ -240,11 +245,11 @@ func processCompletions(streamResp string, streamItems []string, responseTextBui
 func handleLastResponse(lastStreamData string, responseId *string, createAt *int64,
 	systemFingerprint *string, model *string, usage **dto.Usage,
 	containStreamUsage *bool, info *relaycommon.RelayInfo,
-	shouldSendLastResp *bool) error {
+	shouldSendLastResp *bool) (string, error) {
 
 	var lastStreamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &lastStreamResponse); err != nil {
-		return err
+		return lastStreamData, err
 	}
 
 	*responseId = lastStreamResponse.Id
@@ -255,14 +260,23 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	if service.ValidUsage(lastStreamResponse.Usage) {
 		*containStreamUsage = true
 		*usage = lastStreamResponse.Usage
-		if !info.ShouldIncludeUsage {
+		if !info.ShouldIncludeUsage && info.RelayFormat == types.RelayFormatOpenAI {
+			// 客户端显式退出 usage：终端帧仍可能携带 finish_reason 等终止
+			// 语义（合并型上游把 finish_reason 与 usage 放在同一帧），整帧
+			// 丢弃会把 finish_reason 一并丢掉。剥离 usage 后照常下发。
+			stripped := lastStreamResponse
+			stripped.Usage = nil
+			if out, marshalErr := common.Marshal(stripped); marshalErr == nil {
+				lastStreamData = string(out)
+			}
 			*shouldSendLastResp = lo.SomeBy(lastStreamResponse.Choices, func(choice dto.ChatCompletionsStreamResponseChoice) bool {
-				return choice.Delta.GetContentString() != "" || choice.Delta.GetReasoningContent() != ""
+				return choice.Delta.GetContentString() != "" || choice.Delta.GetReasoningContent() != "" ||
+					(choice.FinishReason != nil && *choice.FinishReason != "")
 			})
 		}
 	}
 
-	return nil
+	return lastStreamData, nil
 }
 
 func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStreamData string,
@@ -429,6 +443,15 @@ func HandleFinalResponseWithError(c *gin.Context, info *relaycommon.RelayInfo, l
 		// 因此相比较于 google 官方的流响应，由 openai 转换而来会多一个 parts 为空，finishReason 为 STOP 的响应
 		// 而包含最后一段文本输出的响应（倒数第二个）的 finishReason 为 null
 		// 暂不知是否有程序会不兼容。
+
+		// 截断流收尾（与 Claude 分支对称）：上游干净 EOF、终端帧没有
+		// finish_reason 时，Gemini 客户端拿不到唯一的终止标记（Gemini 流
+		// 没有 [DONE]）。补 "stop" 让转换器输出 STOP。
+		if len(streamResponse.Choices) > 0 &&
+			(streamResponse.Choices[0].FinishReason == nil || *streamResponse.Choices[0].FinishReason == "") {
+			stopReason := "stop"
+			streamResponse.Choices[0].FinishReason = &stopReason
+		}
 
 		geminiResponse, err := service.StreamResponseOpenAI2GeminiWithError(&streamResponse, info)
 		if err != nil {
