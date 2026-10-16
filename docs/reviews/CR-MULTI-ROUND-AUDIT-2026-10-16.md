@@ -351,3 +351,59 @@
   状态支撑，属产品部署形态决策，暂以文档记录。
 - **`/api/status` 版本指纹、`/api/setup` 匿名窗口、WS `CheckOrigin=true`（鉴权前不可达已实测）、
   `/api/user/groups` 匿名可读**：维持第八轮结论，均为低风险或需产品决策，不在本轮范围。
+
+## 7. 第十轮全维度审查与修复（2026-10-16/17）
+
+六个 agent 分维度审查（开发服务运行态、部署/桌面、后端安全、relay 协议、计费与数据一致性、
+前端一致性），共 34 条编号发现；每条由主会话独立复现（overlay 探针重跑、git 考古、路由与
+调用点 grep），结果：已验证 30 条、推断 3 条、证伪 1 条。
+
+### 7.1 证伪（不修）
+
+- **ManageUser disable 墓碑行复活零值缓存（原 P2）**：探针显示 `manage(enable)` 写入的缓存是
+  从 DB 重读的真实值而非 5 字段零值，随后的 `manage(disable)` 走 `InvalidateUserCache`，
+  TokenAuth 对失效缓存返回 500 而非放行。不成立。
+
+### 7.2 修复（8 个提交）
+
+- **`d9db30fbb` 结算列不再随陈旧快照回写**：`User.Update` 排除
+  `Quota/UsedQuota/RequestCount/AffQuota/AffCount/AffHistoryQuota`，其余字段保留"零值不写"
+  语义（多处调用方持有部分结构体走 Update，全量白名单会写坏数据）。回归测试含并发扣减覆盖
+  与"仍写调用方列"的反向断言。
+- **`cda760577` 硬删清理 OAuth 绑定**：`DeleteUserOAuthBindingsByUserId` 从零调用点接入硬删
+  路径，孤儿绑定不再让该身份在"已占用"与"用户不存在"之间永久卡死。
+- **`af29d6fc3` 非流式错误体判定统一**：收敛到 `types.OpenAIError.HasContent`，三条路径同口径。
+- **`73c2c8185` 流式四类修复**：thinking_to_content 同帧正文保全 + 纯推理流闭合标签；
+  Claude 空 choices 判定与转换器对齐（计入累积 usage 并先排空扣留字节，反向守卫防心跳帧
+  提前闭合）；include_usage=false 时剥离 usage 后仍下发终帧；Gemini 截断流补 finish_reason。
+- **`a07b2dd8b` 按条件删除补齐 upstream_request_id**：前后端同口径，删除范围不再超出列表所见。
+- **`dc61b2597` 性能指标开关贯通**：读接口在开关关闭时 404，`/api/status` 暴露
+  `perf_metrics_enabled`，前端两个查询按开关短路。
+- **`344a4cb2b` 日志路径换行中和 + 404 禁长缓存**：`sanitizeAccessLogPath` 折叠 `\r\n`；
+  `RelayNotFound` 显式 `no-store`。
+- **`3ae21aca4` 前端两项**：通用 Markdown 叠加 `rehype-sanitize`；playground 调试面板两条发送
+  路径都在发请求前清空回复累加器。
+
+### 7.3 第十轮明确不修（与理由）
+
+- **`DecreaseUserQuota` 相对扣减无余额守卫**（对照 aff 转移有 `aff_quota >= ?`）：预扣费链路
+  已有余额校验，加守卫会让"预扣后补扣"在边界上失败，改动风险大于收益；现有行为不造成进一步
+  损失（余额不足会拒绝后续请求）。
+- **realtime/audio 结算混用运行期倍率与请求期冻结倍率**：与 text 路径口径差异存在，但修正需
+  在 `PriceData` 上冻结更多倍率字段并覆盖 realtime/audio 两条链路，属独立改造。
+- **Waffo Pancake 冻结调用（default wallet）与 classic 批量删部署幽灵端点**：两者都被固定
+  开关断路、fail-closed，删除脚手架会让将来恢复成本更高，保留并记录。
+- **Dockerfile 无 `USER`（root 运行）**：改为非 root 需要部署侧同步调整数据目录属主，单侧改动
+  会让现有绑定挂载写失败，需与部署一起做。
+- **`dtolnay/rust-toolchain@stable` 未钉 SHA**：该 action 的用法本身不支持 SHA 钉版，维持现状。
+- **`/api/pricing` 匿名可见分组名、`/api/status` 字段暴露**：维持既有结论，属产品决策。
+
+### 7.4 第十轮验证记录
+
+- 后端：`go test ./controller ./model ./relay/... ./service ./middleware ./types -count=1` 全绿；
+  AGENTS.md 最小集 `go test ./controller ./model ./relay/common ./relay/helper ./service` 全绿。
+- 前端：`bun run typecheck`、`bun run lint`、`bun run build` 均通过（含 Safari 兼容重写检查）。
+- 探针：全部在内存 SQLite / miniredis / `/tmp` overlay 上运行，仓库内零残留，未触碰生产容器
+  与开发库数据；工作区仅余另一并发会话的 `EditChannelModal.jsx`。
+- 未覆盖：真实 MySQL/PG 实跑（route scope RowsAffected 与三库语义）、真实上游中间 usage 帧
+  频率、带登录态浏览器点击。
