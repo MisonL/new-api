@@ -19,6 +19,16 @@
 | `69cc8dfa2` | 第八轮：补齐安全修复回归测试、修正只读联调示例 |
 | `7e349e004` | 第八轮：本 CR 文档沉淀 |
 | `6416e8589` | 第八轮：classic 顶栏默认值收敛到单一来源 |
+| `4782d20b1` | 第九轮：删除未被引用的 `RelayPanicRecover` |
+| `6d081bb71` | 第九轮：批量接口加上限、补齐 Ollama 拉取流缓冲头 |
+| `040bf82b0` | 第九轮：Telegram 缺 id 参数时显式拒绝 |
+| `4a74c8603` | 第九轮：身份占用检查改为计数判定，补 Unscoped 读取 |
+| `7b4d13e0f` | 第九轮：硬删已注销用户、邮箱绑定排除自己那一行 |
+| `e71808425` | 第九轮：classic 已注销用户彻底删除入口 |
+| `0772c2dfa` | 第九轮：default 已注销用户彻底删除入口 |
+| `827753aa5` | 第九轮：default 日志页接入按条件删除 |
+| `e4d816669` | 第九轮：default 接线 playground 设置面板与调试面板 |
+| `223a653d2` | 第九轮：think-tag 流用例补事件序断言 |
 
 ## 1. relay think-tag / Claude SSE 转换（反复重构的核心面）
 
@@ -76,13 +86,13 @@
 反向验证：用 `94727e102` 的 `service/convert.go` 覆盖后两条均转红，失败信息分别为
 "a usage-only first frame must still terminate the message" 与 "exactly one termination group"。
 
-### 1.4 断言空洞（第八轮发现，已随 1.3 收窄）
+### 1.4 断言空洞（第八轮发现，已在第九轮收窄）
 
 变异实验显示：把 usage-only 终端帧的 flush 转换结果挪到终止事件之后（Claude 与 Gemini 各一例），
 整个 `./relay/channel/openai/` 包测试套件仍然全绿——`TestHandleFinalResponseFlushesOnUsageOnlyTerminalFrame`
 与 Gemini 对称用例只断言 body 含字节和出现过 `message_stop`，不检查顺序。探针实测该变异产出
-`... msg_stop text(<think>reason never closed)`，正是 `b47c444fd` 修复的缺陷类别。本轮未直接补
-该两条的顺序断言（属独立测试改进项），在此记录为已知覆盖缺口。
+`... msg_stop text(<think>reason never closed)`，正是 `b47c444fd` 修复的缺陷类别。已在第九轮补齐
+顺序断言，见 6.2。
 
 ## 2. 安全修复
 
@@ -170,23 +180,75 @@
 - 修正 `deploy/env/frontend-readonly.env.example` 的代理键为 `VITE_REACT_APP_SERVER_URL`
   （`web/default` 已迁 rsbuild）。
 
-### 3.3 web/default 未挂载组件（第八轮发现，未修）
+### 3.3 web/default 未挂载组件（第八轮发现，第九轮已接线）
 
-`520c691eb` 引入的一批组件无任何引用（import 路径 + 符号双向扫描确认）。其中两类有功能后果，
-但**部署当前加载 classic 主题**（`/api/status` 实测 `theme=classic`），用户可见面未受影响：
+`520c691eb` 引入的一批组件无任何引用（import 路径 + 符号双向扫描确认）。两类有功能后果，
+且部署当前加载 classic 主题（`/api/status` 实测 `theme=classic`），用户可见面在第九轮之前未受影响：
 
 - `features/usage-logs/components/log-delete-controls.tsx`：其调用的 `deleteLogsByFilter` 与后端
   两个端点均在，但 `usage-logs-primary-buttons.tsx` 无删除入口——default 日志页整体缺"按条件删除"
   能力（classic 侧 `useUsageLogsData.jsx` 该功能正常）。
 - `features/playground/components/playground-settings-panel.tsx`：其自身零引用，连带
-  `playground-sse-viewer.tsx`、`playground-code-viewer.tsx`；温度/top_p/max_tokens/seed/流式/
-  图片/自定义请求体在 default 的 playground UI 上不可达。
+  `playground-sse-viewer.tsx`、`playground-code-viewer.tsx`（经 `playground-debug-panel.tsx`）；
+  温度/top_p/max_tokens/seed/流式/图片/自定义请求体在 default 的 playground UI 上不可达。
 
 `520c691eb` 提交信息称"悬空组件接线后全部通过 typecheck/lint/build"——typecheck 通过不能证明接线，
-该表述未兑现。处置建议：单独一个"接线或整体下线"提交，同时清理仅这些死文件引用的 i18n 键与 API 面，
-避免半删状态。
+该表述未兑现。第九轮选择接线而非下线，见 6.3；接线时发现设置面板承诺的"自定义请求体原样发送"
+在发送路径上从未实现，一并补齐。
 
 ## 4. 验证记录
+
+### 4.1 第九轮（2026-10-16）
+
+命令与结果（本轮实际运行）：
+
+| 命令 | 结果 |
+| --- | --- |
+| `go build ./...` | 退出码 0 |
+| `go test ./model ./controller ./service ./relay/channel/openai -count=1` | 零 FAIL |
+| `gofmt -l`（改动文件） | 无差异 |
+| `bun run lint`（web/default） | 退出码 0 |
+| `bun run typecheck`（web/default） | 退出码 0 |
+| `bun run build`（web/default） | 退出码 0，产物 18809.5 kB |
+| `bun run lint`（web/classic） | 退出码 0 |
+| `bun test src/features/playground/lib`（web/default） | 13 pass / 0 fail |
+| `bun run i18n:sync` + `node scripts/i18nLintGate.mjs` | 未发现超出基线的新问题 |
+| 反向验证探针（`go test -overlay`，9 组） | 各组仅目标用例转红 |
+
+反向验证明细：
+
+| 变异 | 目标用例 | 结果 |
+| --- | --- | --- |
+| `identityInUse` 改回 `RowsAffected == 1` | `TestIdentityInUseFailsClosedWhenCountFails` | 转红 |
+| `identityInUse` 改用切片目的地 + `== 1` | `TestIdentityInUseTreatsDuplicateRowsAsTaken` | 转红 |
+| `identityInUse` 计数失败时返回 false | `TestIdentityInUseFailsClosedWhenCountFails` | 转红 |
+| `EmailBind` 改回 `IsEmailAlreadyTaken` | `TestEmailBindAllowsRebindingOwnEmail` | 转红 |
+| Gemini flush 改到终止帧之后发送 | `TestHandleStreamFormatFlushesSplitterOnTerminalFrame/gemini` | 转红 |
+| Claude 终止事件重复下发 | `TestHandleStreamFormatFlushesSplitterOnTerminalFrame/claude` | 转红 |
+| Claude flush 发出后不闭合生命周期 | `TestHandleFinalResponseFlushesOnUsageOnlyTerminalFrame` | 转红 |
+
+开发隔离环境（`new-api-dev-isolated-new-api-1`，重建于 2026-10-16T09:04:01Z）：
+
+| 项 | 值 |
+| --- | --- |
+| `git rev-parse HEAD` | `223a653d2e30413eef9c24a7de369c1675f2391b` |
+| `--build-info` commit | `223a653d2e30413eef9c24a7de369c1675f2391b-dirty` |
+| `--build-info` date | 2026-10-16T09:04:01Z |
+| 二进制符号 `model.identityInUse` | 命中 |
+| 二进制符号 `model.GetUserByIdUnscoped` | 命中 |
+| 二进制符号 `model.IsEmailTakenByOther` | 命中 |
+| 二进制符号 `controller.telegramParamID` | 命中 |
+| 二进制字符串 `X-Accel-Buffering` | 命中 |
+| 二进制字符串 `common.batch_too_many` | 命中 |
+| `/api/status` | HTTP 200 |
+| 容器状态 | healthy |
+| 服务主题 | classic |
+
+`-dirty` 来自工作区其他并发会话的未提交文件（`web/classic/.../EditChannelModal.jsx`），非本次改动。
+容器 `healthy` 只证明服务健康，与"运行最新代码"分开表述：本表的 commit 比对与符号命中才是运行
+最新代码的依据。
+
+### 4.2 第八轮（2026-10-15）
 
 命令与结果（本轮实际运行）：
 
@@ -217,9 +279,75 @@
 ## 5. 未覆盖边界
 
 - 未做带管理员登录的运行态点击验证（开发库用户均非本会话可登录账户）：classic 设置面板开关的
-  三方一致性、Telegram BotName 提交路径为代码级推演 + helper 探针。
+  三方一致性、Telegram BotName 提交路径为代码级推演 + helper 探针；第九轮的已注销用户
+  「彻底删除」按钮、default 日志页删除按钮与 playground 面板为 typecheck/lint/build + 逻辑
+  走查，未做浏览器实点。
 - 依赖真实数据库列类型与三库差异的逻辑只用 SQLite 内存库覆盖语义，未在 MySQL 实测。
+  `identityInUse` 的计数语义三库一致（COUNT），风险低，但未实测。
 - `go test -shuffle=on ./service/` 有既有跨运行测试泄漏（"sql: database is closed"），非本轮引入，
   未修。
-- 第八轮前端代理的 i18n 死键统计、dist 新鲜度为只读记录，未逐一复算。
+- 第九轮前端的 dist 新鲜度以 `bun run build` 退出码 0 为准，未做产物哈希比对。
 - 生产环境未做任何变更；生产运行的 commit 早于上述全部修复。
+- 生产库 `users` 表是否存在重复邮箱仍未查询（需生产侧人工执行
+  `SELECT email, COUNT(*) FROM users WHERE deleted_at IS NULL GROUP BY email HAVING COUNT(*) > 1;`），
+  结论依赖该查询后才能给出。
+
+## 6. 第九轮修复明细（2026-10-16）
+
+第八轮报告后用户指示「全部优化好」，本轮按项收口，每一项独立提交并反向验证。
+
+### 6.1 后端
+
+- **死代码（`4782d20b1`）**：`middleware/recover.go` 的 `RelayPanicRecover` 全仓库零引用，且它把
+  panic 值原样回显给客户端，与 `main.go` 的 `CustomRecovery`（只回传 `request_id`）冲突。删除。
+- **批量接口上限（`6d081bb71`）**：`DeleteChannelBatch`、`BatchSetChannelTag`、`DeleteTokenBatch`
+  此前只受 `/api` 组 128MB 入口兜底，可触发开事务逐条语句或巨型 IN 子句。分别加上限 1000/1000/100
+  （沿用管理界面分页量级），超限返回 `common.batch_too_many`。同提交补齐
+  `OllamaPullModelStream` 的 `X-Accel-Buffering: no`，与主 relay 路径的
+  `SetEventStreamHeaders` 对齐，避免 nginx 缓冲进度流。
+- **Telegram 缺 id 参数（`040bf82b0`）**：HMAC 校验只保证签名覆盖的键集合一致，不保证其中含
+  `id`；`TelegramBind`/`TelegramLogin` 直接读 `params["id"][0]`，签名正确但去掉 `id` 的载荷
+  会 panic。改为 `telegramParamID` 取值，缺失或空时返回"无效的请求"。回归测试
+  `TestTelegramParamIDHandlesMissingID` 用去掉 id 的签名载荷覆盖。
+- **身份占用检查（`4a74c8603`）**：六处 `Is*AlreadyTaken` 都写 `Find(&User{}).RowsAffected == 1`，
+  把"是否被占用"绑定在"恰好命中一行"上——目的地换成切片即翻转判定。改为 `identityInUse`
+  计数 `> 0`，计数失败保守判占用（与 `IsLinuxDOIdAlreadyTaken` 既有语义一致）。新增
+  `model/user_identity_in_use_test.go` 四条不变量（重复行判占用、未占用判空闲、作用域由调用方
+  决定、计数失败判占用），三条变异反向验证转红。同提交新增 `GetUserByIdUnscoped` 与
+  `IsEmailTakenByOther` 供下一条使用。
+- **硬删墓碑行 + 邮箱绑定幂等（`7b4d13e0f`）**：`DeleteUser` 原用 scoped 查询读目标，读不到
+  软删行，而身份检查刻意包含软删行——被注销账号的邮箱 / OAuth 绑定永久锁死（本人无法重新绑定，
+  管理员无清理入口）。改经 `GetUserByIdUnscoped` 读取。`EmailBind` 复查改用
+  `IsEmailTakenByOther(email, user.Id)`：OAuth 登录会先把 IdP 邮箱同步到本地账户，用户随后
+  走一次绑定确认属幂等操作，原检查会把自己判成占用者。三条新用例反向验证。
+
+### 6.2 测试加固（`223a653d2`）
+
+1.4 记录的断言空洞收口：Claude 侧断言恰好一组 `message_delta`/`message_stop` 且
+`message_stop` 是最后事件；Gemini 侧断言承载 flush 字节的帧恰好一个且排在带 `finishReason`
+的终止帧之前。反向验证两组变异各自转红。
+
+### 6.3 前端接线
+
+- **classic 已注销用户入口（`e71808425`）**：`UsersColumnDefs` 操作列对墓碑行返回空，改为只留
+  「彻底删除」；`DeleteUserModal` 区分墓碑行（`DELETE /api/user/:id`）与普通注销
+  （`manageUser('delete')`），文案分别说明后果；`useUsersData` 新增 `hardDeleteUser`。
+- **default 已注销用户入口（`0772c2dfa`）**：`data-table-row-actions.tsx` 对墓碑行返回 null，
+  改为只留「Delete permanently」菜单项，复用既有 `UsersDeleteDialog`；弹窗文案区分两种目标。
+  新增四条文案，六个 locale 同步翻译。
+- **default 日志页按条件删除（`827753aa5`）**：`LogDeleteControls` 挂进
+  `UsageLogsPrimaryButtons` 并挂到 `SectionPageLayout.Actions`；删除范围复用列表的
+  `buildApiParams` 保证删看到的即删掉的；只对 common 日志开放（绘图/任务日志无对应端点）。
+- **default playground 面板（`e4d816669`）**：设置面板与调试面板（连同 code/sse viewer）挂到
+  页面右上角图标切换，桌面端右侧栏、移动端上下堆叠。接线时发现两处"面板承诺但发送路径未实现"
+  的缺口并补齐：`customRequestMode` 下请求体现在真的原样发送（`parseCustomRequestBody`，
+  解析失败显式报错而非静默回落）；调试面板所需的原始 SSE 帧经 `use-stream-request` 新回调采集，
+  且仅在 `showDebugPanel` 打开时采集。playground 错误文案改经 `t()`，参数标签登记
+  `static-keys`，六个 locale 同步。
+
+### 6.4 第九轮明确不修（与理由）
+
+- **`telegramUsedAuth` 仅进程内一次性**：多实例部署下同一签名可在另一实例重放。需要 Redis 共享
+  状态支撑，属产品部署形态决策，暂以文档记录。
+- **`/api/status` 版本指纹、`/api/setup` 匿名窗口、WS `CheckOrigin=true`（鉴权前不可达已实测）、
+  `/api/user/groups` 匿名可读**：维持第八轮结论，均为低风险或需产品决策，不在本轮范围。
