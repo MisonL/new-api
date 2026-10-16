@@ -230,8 +230,20 @@ const renderOperations = (
     t,
   },
 ) => {
+  // 已注销（软删除）用户保留其邮箱 / OAuth 绑定占用，硬删除是唯一释放这些
+  // 身份的路径。此前这里直接返回空，管理员无从触发硬删，该身份就永久锁死
+  // （本人无法重新绑定，也没有任何清理入口）。这里只保留「彻底删除」一项，
+  // 其余操作对墓碑行没有意义。
   if (record.DeletedAt !== null) {
-    return <></>;
+    return (
+      <Button
+        type='danger'
+        size='small'
+        onClick={() => showDeleteModal(record)}
+      >
+        {t('彻底删除')}
+      </Button>
+    );
   }
 
   const moreMenu = [

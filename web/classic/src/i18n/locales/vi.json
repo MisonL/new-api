@@ -1999,6 +1999,7 @@
     "将把当前编辑中的模型 {{name}} 的价格配置，批量应用到已勾选的 {{count}} 个模型。_other": "Cấu hình giá của mô hình {{name}} đang chỉnh sửa sẽ được áp dụng hàng loạt cho {{count}} mô hình đã chọn.",
     "将按已保存策略永久删除日志或清空请求响应内容。": "Nhật ký sẽ bị xóa vĩnh viễn hoặc nội dung yêu cầu/phản hồi bị xóa theo chính sách đã lưu.",
     "将按当前筛选条件批量删除日志，至少包含当前时间范围。此操作不可恢复。": "Nhật ký sẽ bị xóa hàng loạt theo điều kiện lọc hiện tại, ít nhất bao gồm khoảng thời gian hiện tại. Thao tác này không thể hoàn tác.",
+    "将永久删除该用户记录并释放其邮箱与第三方绑定，此操作不可恢复": "Thao tác này xóa vĩnh viễn bản ghi người dùng và giải phóng email cùng các liên kết bên thứ ba. Không thể hoàn tác.",
     "将清除所有保存的配置并恢复默认设置，此操作不可撤销。是否继续？": "Thao tác này sẽ xóa tất cả các cấu hình đã lưu và khôi phục cài đặt mặc định, thao tác này không thể hoàn tác. Tiếp tục?",
     "将清除选定时间之前的所有日志": "Thao tác này sẽ xóa tất cả nhật ký trước thời gian đã chọn",
     "将追加 2 条规则到现有规则列表。": "2 quy tắc sẽ được thêm vào danh sách quy tắc hiện có.",
@@ -2245,6 +2246,7 @@
     "开启后，违规请求将额外扣费。": "Khi bật, các yêu cầu vi phạm sẽ bị tính phí bổ sung.",
     "开启后不限制：必须设置模型倍率": "Sau khi bật, không giới hạn: phải đặt tỷ lệ mô hình",
     "开启后创建令牌默认选择auto分组，初始令牌也将设为auto": "When enabled, new tokens default to auto group, initial tokens are also set to auto",
+    "开启后未登录用户无法访问排行榜": "Khi bật, người dùng chưa đăng nhập không thể truy cập bảng xếp hạng",
     "开启后未登录用户无法访问模型广场": "Khi bật, người dùng chưa xác thực không thể truy cập thị trường mô hình",
     "开启后检测到新增模型会自动加入当前渠道模型列表": "Sau khi bật, mô hình mới phát hiện sẽ tự động được thêm vào danh sách mô hình của kênh hiện tại",
     "开启后由后端定时任务检测该渠道上游模型变化": "Sau khi bật, tác vụ định kỳ của backend sẽ kiểm tra thay đổi mô hình thượng nguồn của kênh này",
@@ -2348,6 +2350,7 @@
     "当模型没有设置价格时仍接受调用，仅当您信任该网站时使用，可能会产生高额费用": "Chấp nhận cuộc gọi ngay cả khi mô hình không có cài đặt giá, chỉ sử dụng khi bạn tin tưởng trang web, điều này có thể phát sinh chi phí cao",
     "当运行通道全部测试时，超过此时间将自动禁用通道": "Khi chạy tất cả các kiểm tra kênh, kênh sẽ tự động bị vô hiệu hóa khi vượt quá thời gian này",
     "当钱包或订阅剩余额度低于此数值时，系统将通过选择的方式发送通知": "Khi hạn ngạch còn lại của ví hoặc gói thuê bao thấp hơn giá trị này, hệ thống sẽ gửi thông báo theo phương thức đã chọn",
+    "彻底删除": "Xóa vĩnh viễn",
     "待使用收益": "Tiền thu được để sử dụng",
     "待接收": "Chờ nhận",
     "待支付": "Chờ thanh toán",
@@ -3168,6 +3171,7 @@
     "模型价格：{{symbol}}{{price}} * {{ratioType}}：{{ratio}} = {{symbol}}{{total}}": "Giá mô hình: {{symbol}}{{price}} * {{ratioType}}: {{ratio}} = {{symbol}}{{total}}",
     "模型价格：{{symbol}}{{price}} / 次": "Giá mô hình: {{symbol}}{{price}} / lượt gọi",
     "模型价格未配置": "Giá mô hình chưa được cấu hình",
+    "模型使用排行榜，需要登录访问": "Bảng xếp hạng sử dụng mô hình, yêu cầu đăng nhập",
     "模型倍率": "Tỷ lệ mô hình",
     "模型倍率 {{modelRatio}}": "Model ratio {{modelRatio}}",
     "模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}": "Tỷ lệ mô hình {{modelRatio}}, tỷ lệ bộ nhớ đệm {{cacheRatio}}, tỷ lệ hoàn thành {{completionRatio}}, {{ratioType}} {{ratio}}",
@@ -3742,6 +3746,7 @@
     "确定删除": "Xác nhận xóa",
     "确定删除此组？": "Xác nhận xóa nhóm này?",
     "确定导入": "Xác nhận nhập",
+    "确定彻底删除此用户？": "Xóa vĩnh viễn người dùng này?",
     "确定是否要修复数据库一致性？": "Bạn có chắc chắn muốn sửa chữa tính nhất quán của cơ sở dữ liệu không?",
     "确定是否要删除所选通道？": "Bạn có chắc chắn muốn xóa các kênh đã chọn không?",
     "确定是否要删除此令牌？": "Bạn có chắc chắn muốn xóa mã thông báo này không?",
@@ -5483,8 +5488,6 @@
     "默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。": "Mặc định không thay đổi request. Chế độ cố định chọn một mẫu; chế độ luân phiên hoặc ngẫu nhiên có thể chọn nhiều mẫu và áp dụng theo chiến lược.",
     "默认测试模型": "Mô hình kiểm tra mặc định",
     "默认用户消息": "Xin chào",
-    "默认行为": "Hành vi mặc định",
-    "开启后未登录用户无法访问排行榜": "Khi bật, người dùng chưa đăng nhập không thể truy cập bảng xếp hạng",
-    "模型使用排行榜，需要登录访问": "Bảng xếp hạng sử dụng mô hình, yêu cầu đăng nhập"
+    "默认行为": "Hành vi mặc định"
   }
 }

@@ -2065,6 +2065,7 @@
     "将把当前编辑中的模型 {{name}} 的价格配置，批量应用到已勾选的 {{count}} 个模型。_other": "La configuration de prix du modèle {{name}} en cours d'édition sera appliquée par lot aux {{count}} modèles cochés.",
     "将按已保存策略永久删除日志或清空请求响应内容。": "Les journaux seront définitivement supprimés, ou le contenu des requêtes/réponses effacé, selon la politique enregistrée.",
     "将按当前筛选条件批量删除日志，至少包含当前时间范围。此操作不可恢复。": "Les journaux seront supprimés par lot selon les conditions de filtre actuelles, couvrant au moins la plage de temps actuelle. Cette opération est irréversible.",
+    "将永久删除该用户记录并释放其邮箱与第三方绑定，此操作不可恢复": "Cela supprime définitivement l'enregistrement de l'utilisateur et libère son e-mail et ses liaisons tierces. Action irréversible.",
     "将清除所有保存的配置并恢复默认设置，此操作不可撤销。是否继续？": "Effacera toutes les configurations enregistrées et rétablira les paramètres par défaut. Cette opération ne peut pas être annulée. Continuer ?",
     "将清除选定时间之前的所有日志": "Effacera tous les journaux avant l'heure sélectionnée",
     "将追加 2 条规则到现有规则列表。": "2 règles seront ajoutées à la liste de règles existante.",
@@ -2352,6 +2353,7 @@
     "开启后，违规请求将额外扣费。": "Lorsqu'il est activé, les requêtes en violation entraîneront des frais supplémentaires.",
     "开启后不限制：必须设置模型倍率": "Après l'activation, aucune limite : le ratio de modèle doit être défini",
     "开启后创建令牌默认选择auto分组，初始令牌也将设为auto": "When enabled, new tokens default to auto group, initial tokens are also set to auto",
+    "开启后未登录用户无法访问排行榜": "Une fois activé, les utilisateurs non connectés ne peuvent pas accéder au classement",
     "开启后未登录用户无法访问模型广场": "Lorsqu'il est activé, les utilisateurs non authentifiés ne peuvent pas accéder à la place du marché des modèles",
     "开启后检测到新增模型会自动加入当前渠道模型列表": "Une fois activé, les nouveaux modèles détectés sont ajoutés automatiquement à la liste des modèles du canal actuel",
     "开启后由后端定时任务检测该渠道上游模型变化": "Une fois activé, une tâche planifiée côté backend vérifie les changements de modèles amont pour ce canal",
@@ -2455,6 +2457,7 @@
     "当模型没有设置价格时仍接受调用，仅当您信任该网站时使用，可能会产生高额费用": "Acceptez les appels même si le modèle n'a pas de prix défini, utilisez uniquement lorsque vous faites confiance au site Web, ce qui peut entraîner des coûts élevés",
     "当运行通道全部测试时，超过此时间将自动禁用通道": "Lors de l'exécution de tous les tests de canaux, le canal sera automatiquement désactivé lorsque ce temps sera dépassé",
     "当钱包或订阅剩余额度低于此数值时，系统将通过选择的方式发送通知": "Lorsque le quota restant du portefeuille ou de l'abonnement est inférieur à cette valeur, le système enverra une notification via la méthode sélectionnée",
+    "彻底删除": "Supprimer définitivement",
     "待使用收益": "Produits à utiliser",
     "待接收": "En attente",
     "待支付": "En attente de paiement",
@@ -3283,6 +3286,7 @@
     "模型价格：{{symbol}}{{price}} * {{ratioType}}：{{ratio}} = {{symbol}}{{total}}": "Prix du modèle : {{symbol}}{{price}} * {{ratioType}} : {{ratio}} = {{symbol}}{{total}}",
     "模型价格：{{symbol}}{{price}} / 次": "Prix du modèle : {{symbol}}{{price}} / requête",
     "模型价格未配置": "Prix du modèle non configuré",
+    "模型使用排行榜，需要登录访问": "Classement d'utilisation des modèles, connexion requise",
     "模型倍率": "Ratio",
     "模型倍率 {{modelRatio}}": "Ratio du modèle {{modelRatio}}",
     "模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}": "Ratio du modèle {{modelRatio}}, ratio de cache {{cacheRatio}}, ratio de complétion {{completionRatio}}, {{ratioType}} {{ratio}}",
@@ -3801,6 +3805,7 @@
     "确定？": "Sûr ?",
     "确定删除此组？": "Confirmer la suppression de ce groupe ?",
     "确定导入": "Confirmer l'importation",
+    "确定彻底删除此用户？": "Supprimer définitivement cet utilisateur ?",
     "确定是否要修复数据库一致性？": "Êtes-vous sûr de vouloir réparer la cohérence de la base de données ?",
     "确定是否要删除所选通道？": "Êtes-vous sûr de vouloir supprimer les canaux sélectionnés ?",
     "确定是否要删除此令牌？": "Êtes-vous sûr de vouloir supprimer ce jeton ?",
@@ -5447,8 +5452,6 @@
     "默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。": "Par défaut, les requêtes ne sont pas modifiées. Le mode fixe choisit un modèle ; les modes round robin ou aléatoire peuvent choisir plusieurs modèles et les appliquer selon la stratégie.",
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
-    "默认行为": "Comportement par défaut",
-    "开启后未登录用户无法访问排行榜": "Une fois activé, les utilisateurs non connectés ne peuvent pas accéder au classement",
-    "模型使用排行榜，需要登录访问": "Classement d'utilisation des modèles, connexion requise"
+    "默认行为": "Comportement par défaut"
   }
 }

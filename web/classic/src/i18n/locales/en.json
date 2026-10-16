@@ -2030,6 +2030,7 @@
     "将把当前编辑中的模型 {{name}} 的价格配置，批量应用到已勾选的 {{count}} 个模型。_other": "The price configuration of the model {{name}} being edited will be batch-applied to the {{count}} checked models.",
     "将按已保存策略永久删除日志或清空请求响应内容。": "Logs will be permanently deleted, or request/response content cleared, according to the saved policy.",
     "将按当前筛选条件批量删除日志，至少包含当前时间范围。此操作不可恢复。": "Logs will be batch-deleted by the current filter conditions, at least covering the current time range. This operation cannot be undone.",
+    "将永久删除该用户记录并释放其邮箱与第三方绑定，此操作不可恢复": "This permanently deletes the user record and releases its email and third-party bindings. This cannot be undone.",
     "将清除所有保存的配置并恢复默认设置，此操作不可撤销。是否继续？": "This will clear all saved configurations and restore default settings, this operation cannot be undone. Continue?",
     "将清除选定时间之前的所有日志": "This will clear all logs before the selected time",
     "将追加 2 条规则到现有规则列表。": "2 rules will be appended to the existing rule list.",
@@ -2295,6 +2296,7 @@
     "开启后，违规请求将额外扣费。": "When enabled, violation requests will incur additional charges.",
     "开启后不限制：必须设置模型倍率": "After enabling, no limit: must set model ratio",
     "开启后创建令牌默认选择auto分组，初始令牌也将设为auto": "When enabled, new tokens default to the auto group, and initial tokens are also set to auto",
+    "开启后未登录用户无法访问排行榜": "When enabled, unauthenticated users cannot access the rankings",
     "开启后未登录用户无法访问模型广场": "When enabled, unauthenticated users cannot access the model marketplace",
     "开启后检测到新增模型会自动加入当前渠道模型列表": "When enabled, newly detected upstream models are automatically added to the channel model list",
     "开启后由后端定时任务检测该渠道上游模型变化": "When enabled, the backend scheduled task checks upstream model changes for this channel",
@@ -2398,6 +2400,7 @@
     "当模型没有设置价格时仍接受调用，仅当您信任该网站时使用，可能会产生高额费用": "Accept calls even if the model has no price settings, use only when you trust the website, which may incur high costs",
     "当运行通道全部测试时，超过此时间将自动禁用通道": "When running all channel tests, the channel will be automatically disabled when this time is exceeded",
     "当钱包或订阅剩余额度低于此数值时，系统将通过选择的方式发送通知": "When wallet or subscription remaining quota falls below this value, the system will send a notification through the selected method",
+    "彻底删除": "Delete permanently",
     "待使用收益": "Proceeds to be used",
     "待接收": "Pending",
     "待支付": "Awaiting payment",
@@ -3222,6 +3225,7 @@
     "模型价格：{{symbol}}{{price}} * {{ratioType}}：{{ratio}} = {{symbol}}{{total}}": "Model price: {{symbol}}{{price}} * {{ratioType}}: {{ratio}} = {{symbol}}{{total}}",
     "模型价格：{{symbol}}{{price}} / 次": "Model price: {{symbol}}{{price}} / request",
     "模型价格未配置": "Model Price Not Configured",
+    "模型使用排行榜，需要登录访问": "Model usage rankings, requires sign-in",
     "模型倍率": "Model ratio",
     "模型倍率 {{modelRatio}}": "Model ratio {{modelRatio}}",
     "模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}": "Model ratio {{modelRatio}}, cache ratio {{cacheRatio}}, completion ratio {{completionRatio}}, {{ratioType}} {{ratio}}",
@@ -3740,6 +3744,7 @@
     "确定？": "Sure?",
     "确定删除此组？": "Confirm delete this group?",
     "确定导入": "Confirm import",
+    "确定彻底删除此用户？": "Permanently delete this user?",
     "确定是否要修复数据库一致性？": "Are you sure you want to repair database consistency?",
     "确定是否要删除所选通道？": "Are you sure you want to delete the selected channels?",
     "确定是否要删除此令牌？": "Are you sure you want to delete this token?",
@@ -5380,8 +5385,6 @@
     "默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。": "By default, requests are not changed. Fixed mode selects one template; round robin or random mode can select multiple templates and apply them by strategy.",
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
-    "默认行为": "Default behavior",
-    "模型使用排行榜，需要登录访问": "Model usage rankings, requires sign-in",
-    "开启后未登录用户无法访问排行榜": "When enabled, unauthenticated users cannot access the rankings"
+    "默认行为": "Default behavior"
   }
 }

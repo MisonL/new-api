@@ -193,6 +193,29 @@ export const useUsersData = () => {
     }
   };
 
+  // 彻底删除已注销用户。软删行仍占用邮箱 / OAuth 绑定（Is*AlreadyTaken 刻意
+  // 不排除软删行），硬删是唯一释放这些身份的路径；manageUser('delete') 只会
+  // 再软删一次，对墓碑行无效，必须走 DELETE /api/user/:id。
+  const hardDeleteUser = async (user) => {
+    if (!user) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await API.delete(`/api/user/${user.id}`);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('操作成功完成！'));
+        setUsers((prev) => prev.filter((u) => u.id !== user.id));
+      } else {
+        showError(message || t('操作失败，请重试'));
+      }
+    } catch (error) {
+      showError(t('操作失败，请重试'));
+    }
+    setLoading(false);
+  };
+
   // Handle page change
   const handlePageChange = (page) => {
     setActivePage(page);
@@ -306,6 +329,7 @@ export const useUsersData = () => {
     loadUsers,
     searchUsers,
     manageUser,
+    hardDeleteUser,
     resetUserPasskey,
     resetUserTwoFA,
     handlePageChange,
