@@ -311,6 +311,23 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	return &user, err
 }
 
+// GetUserByIdUnscoped returns a user row including soft-deleted ones. The
+// identity checks (IsEmailAlreadyTaken and friends) are deliberately unscoped
+// so a deleted account's identity cannot be silently reclaimed, which also
+// means a soft-deleted row keeps its email / OAuth id reserved. Admin hard
+// delete is the only path that releases those values, so it must be able to
+// see the tombstone row that a scoped read hides.
+func GetUserByIdUnscoped(id int) (*User, error) {
+	if id == 0 {
+		return nil, errors.New("id 为空！")
+	}
+	user := User{Id: id}
+	if err := DB.Unscoped().Omit("password").First(&user, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func GetUserIdentityById(id int) (*User, error) {
 	if id == 0 {
 		return nil, errors.New("id 为空！")
@@ -706,28 +723,55 @@ func (user *User) FillUserByTelegramId() error {
 	return nil
 }
 
+// identityInUse 报告身份列是否已被占用。身份检查刻意包含软删行
+// （Unscoped，见 IsEmailAlreadyTaken 等调用点），所以它必须只回答"有没有"，
+// 而不是精确比对行数：原实现写成 `Find(&User{}).RowsAffected == 1`，一旦目的
+// 地从结构体换成切片（真实匹配 2 行就报 2），判定会立刻从"已占用"翻转为
+// "空闲"，把重复身份当成可用身份放行。这里改成计数的 `> 0`，语义就是
+// "是否被占用"，不再依赖 RowsAffected 的计数行为。
+//
+// 计数失败时判为已占用，与 IsLinuxDOIdAlreadyTaken 的既有写法一致
+// （`First` 返回非 NotFound 错误即视为已占用），不是这里新引入的约定。
+func identityInUse(query *gorm.DB) bool {
+	var count int64
+	if err := query.Model(&User{}).Count(&count).Error; err != nil {
+		// 统计失败时保守判定为已占用：身份检查是安全边界，宁可拒绝注册也不能
+		// 在数据库异常时把已占用身份放行。
+		return true
+	}
+	return count > 0
+}
+
 func IsEmailAlreadyTaken(email string) bool {
-	return DB.Unscoped().Where("email = ?", email).Find(&User{}).RowsAffected == 1
+	return identityInUse(DB.Unscoped().Where("email = ?", email))
+}
+
+// IsEmailTakenByOther 报告邮箱是否已被除 excludeUserId 之外的账户占用。
+// 绑定邮箱时必须排除调用者自己那一行：账户已经持有该地址时（例如 OAuth 登录
+// 同步写入后再走一次绑定确认），IsEmailAlreadyTaken 会把自己算成占用者，
+// 把幂等的重复绑定判成冲突。
+func IsEmailTakenByOther(email string, excludeUserId int) bool {
+	return identityInUse(DB.Unscoped().Where("email = ? AND id <> ?", email, excludeUserId))
 }
 
 func IsWeChatIdAlreadyTaken(wechatId string) bool {
-	return DB.Unscoped().Where("wechat_id = ?", wechatId).Find(&User{}).RowsAffected == 1
+	return identityInUse(DB.Unscoped().Where("wechat_id = ?", wechatId))
 }
 
 func IsGitHubIdAlreadyTaken(githubId string) bool {
-	return DB.Unscoped().Where("github_id = ?", githubId).Find(&User{}).RowsAffected == 1
+	return identityInUse(DB.Unscoped().Where("github_id = ?", githubId))
 }
 
 func IsDiscordIdAlreadyTaken(discordId string) bool {
-	return DB.Unscoped().Where("discord_id = ?", discordId).Find(&User{}).RowsAffected == 1
+	return identityInUse(DB.Unscoped().Where("discord_id = ?", discordId))
 }
 
 func IsOidcIdAlreadyTaken(oidcId string) bool {
-	return DB.Where("oidc_id = ?", oidcId).Find(&User{}).RowsAffected == 1
+	return identityInUse(DB.Where("oidc_id = ?", oidcId))
 }
 
 func IsTelegramIdAlreadyTaken(telegramId string) bool {
-	return DB.Unscoped().Where("telegram_id = ?", telegramId).Find(&User{}).RowsAffected == 1
+	return identityInUse(DB.Unscoped().Where("telegram_id = ?", telegramId))
 }
 
 func ResetUserPasswordByEmail(email string, password string) error {
