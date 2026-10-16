@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
@@ -1106,6 +1107,14 @@ type ChannelBatch struct {
 	Tag *string `json:"tag"`
 }
 
+// maxChannelBatchIds bounds a batch id list. The /api group only has the
+// 128MB ingress backstop, which is far too large for an int array: an
+// unbounded list makes BatchDeleteChannels open a transaction and issue
+// thousands of chunked statements, and BatchSetChannelTag build one
+// unbounded IN clause. The admin UI selects ids from a paginated table, so
+// this ceiling is far above any real selection.
+const maxChannelBatchIds = 1000
+
 func DeleteChannelBatch(c *gin.Context) {
 	channelBatch := ChannelBatch{}
 	err := c.ShouldBindJSON(&channelBatch)
@@ -1114,6 +1123,10 @@ func DeleteChannelBatch(c *gin.Context) {
 			"success": false,
 			"message": "参数错误",
 		})
+		return
+	}
+	if len(channelBatch.Ids) > maxChannelBatchIds {
+		common.ApiErrorI18n(c, i18n.MsgBatchTooMany, map[string]any{"Max": maxChannelBatchIds})
 		return
 	}
 	err = model.BatchDeleteChannels(channelBatch.Ids)
@@ -1841,6 +1854,10 @@ func BatchSetChannelTag(c *gin.Context) {
 			"success": false,
 			"message": "参数错误",
 		})
+		return
+	}
+	if len(channelBatch.Ids) > maxChannelBatchIds {
+		common.ApiErrorI18n(c, i18n.MsgBatchTooMany, map[string]any{"Max": maxChannelBatchIds})
 		return
 	}
 	err = model.BatchSetChannelTag(channelBatch.Ids, channelBatch.Tag)
@@ -2571,10 +2588,14 @@ func OllamaPullModelStream(c *gin.Context) {
 		return
 	}
 
-	// 设置 SSE 头部
+	// 设置 SSE 头部。X-Accel-Buffering 必须显式关闭，否则反代（nginx）会
+	// 缓冲进度流，前端看不到实时进度；主 relay 路径由
+	// relay/helper/common.go 的 SetEventStreamHeaders 统一设置，此处的
+	// 手写头需与其对齐。
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
 	c.Header("Access-Control-Allow-Origin", "*")
 
 	// 创建进度回调函数
