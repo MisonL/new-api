@@ -4917,6 +4917,10 @@
     "{{count}} random candidates": "{{count}} random candidates",
     "{{count}} records": "{{count}} records",
     "{{count}} templates, used in order": "{{count}} templates, used in order",
-    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}"
+    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}",
+    "Delete permanently": "彻底删除",
+    "Permanently delete this account?": "确定彻底删除此账户？",
+    "This will permanently delete the account record": "将永久删除该账户记录",
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". 同时释放该账户仍占用的邮箱地址与第三方绑定。此操作不可恢复。"
   }
 }

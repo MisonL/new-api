@@ -4917,6 +4917,10 @@
     "{{count}} random candidates": "{{count}} random candidates",
     "{{count}} records": "{{count}} records",
     "{{count}} templates, used in order": "{{count}} templates, used in order",
-    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}"
+    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}",
+    "Delete permanently": "Supprimer définitivement",
+    "Permanently delete this account?": "Supprimer définitivement ce compte ?",
+    "This will permanently delete the account record": "Cela supprimera définitivement l'enregistrement du compte",
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Cela libère aussi l'adresse e-mail et les liaisons tierces que ce compte détient encore. Cette action est irréversible."
   }
 }

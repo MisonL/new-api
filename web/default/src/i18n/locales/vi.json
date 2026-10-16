@@ -4917,6 +4917,10 @@
     "{{count}} random candidates": "{{count}} random candidates",
     "{{count}} records": "{{count}} records",
     "{{count}} templates, used in order": "{{count}} templates, used in order",
-    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}"
+    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}",
+    "Delete permanently": "Xóa vĩnh viễn",
+    "Permanently delete this account?": "Xóa vĩnh viễn tài khoản này?",
+    "This will permanently delete the account record": "Thao tác này sẽ xóa vĩnh viễn bản ghi tài khoản",
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Nó cũng giải phóng địa chỉ email và các liên kết bên thứ ba mà tài khoản này vẫn giữ. Thao tác này không thể hoàn tác."
   }
 }

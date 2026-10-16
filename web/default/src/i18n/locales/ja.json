@@ -4917,6 +4917,10 @@
     "{{count}} random candidates": "{{count}} random candidates",
     "{{count}} records": "{{count}} records",
     "{{count}} templates, used in order": "{{count}} templates, used in order",
-    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}"
+    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}",
+    "Delete permanently": "完全に削除",
+    "Permanently delete this account?": "このアカウントを完全に削除しますか？",
+    "This will permanently delete the account record": "アカウントの記録が完全に削除されます",
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". このアカウントが保持しているメールアドレスとサードパーティ連携も解放されます。この操作は取り消せません。"
   }
 }

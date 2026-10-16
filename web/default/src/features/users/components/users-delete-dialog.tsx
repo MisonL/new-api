@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { deleteUser } from '../api'
-import { ERROR_MESSAGES } from '../constants'
+import { ERROR_MESSAGES, isUserDeleted } from '../constants'
 import { getUserActionMessage } from '../lib'
 import { useUsers } from './users-provider'
 
@@ -41,6 +41,21 @@ export function UsersDeleteDialog() {
     }
   }
 
+  // 软删行（墓碑）仍占用邮箱 / OAuth 绑定，这里必须明确告诉管理员硬删会释放它们，
+  // 否则容易被当成又一次普通注销。
+  const isDeleted = currentRow != null && isUserDeleted(currentRow)
+  const title = isDeleted
+    ? t('Permanently delete this account?')
+    : t('Are you sure?')
+  const leading = isDeleted
+    ? t('This will permanently delete the account record')
+    : t('This will permanently delete user')
+  const trailing = isDeleted
+    ? t(
+        '. It also releases the email address and third-party bindings this account still holds. This action cannot be undone.'
+      )
+    : t('. This action cannot be undone.')
+
   return (
     <AlertDialog
       open={open === 'delete'}
@@ -48,11 +63,11 @@ export function UsersDeleteDialog() {
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t('Are you sure?')}</AlertDialogTitle>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t('This will permanently delete user')}{' '}
+            {leading}{' '}
             <span className='font-semibold'>{currentRow?.username}</span>
-            {t('. This action cannot be undone.')}
+            {trailing}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

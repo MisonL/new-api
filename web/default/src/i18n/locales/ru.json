@@ -4917,6 +4917,10 @@
     "{{count}} random candidates": "{{count}} random candidates",
     "{{count}} records": "{{count}} records",
     "{{count}} templates, used in order": "{{count}} templates, used in order",
-    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}"
+    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}",
+    "Delete permanently": "Удалить навсегда",
+    "Permanently delete this account?": "Удалить эту учётную запись навсегда?",
+    "This will permanently delete the account record": "Запись учётной записи будет удалена безвозвратно",
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Также освобождаются адрес электронной почты и привязки сторонних сервисов, которые ещё числятся за этой учётной записью. Это действие необратимо."
   }
 }

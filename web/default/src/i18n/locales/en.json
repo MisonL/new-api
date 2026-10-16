@@ -4917,6 +4917,10 @@
     "{{count}} random candidates": "{{count}} random candidates",
     "{{count}} records": "{{count}} records",
     "{{count}} templates, used in order": "{{count}} templates, used in order",
-    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}"
+    "{{source}}, refreshed {{time}}": "{{source}}, refreshed {{time}}",
+    "Delete permanently": "Delete permanently",
+    "Permanently delete this account?": "Permanently delete this account?",
+    "This will permanently delete the account record": "This will permanently delete the account record",
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone."
   }
 }

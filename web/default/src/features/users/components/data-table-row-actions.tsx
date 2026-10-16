@@ -114,8 +114,36 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const isAdmin = user.role >= USER_ROLE.ADMIN
   const isRoot = user.role === USER_ROLE.ROOT
 
+  // 已注销（软删除）用户是墓碑行，仍占用邮箱与第三方绑定：Is*AlreadyTaken 刻意
+  // 把软删行算作已占用，所以这些身份只有硬删除才能释放。此前这里直接返回 null，
+  // 管理员在 default 界面没有任何入口触发硬删，被锁死的身份就永远无人能清理。
+  // 墓碑行上其余操作都没有意义，这里只保留「彻底删除」。
   if (isUserDeleted(user)) {
-    return null
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant='ghost'
+            className='data-[state=open]:bg-muted flex h-8 w-8 p-0'
+          >
+            <MoreHorizontal className='h-4 w-4' />
+            <span className='sr-only'>{t('Open menu')}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='end' className='w-[180px]'>
+          <DropdownMenuItem
+            onClick={handleDelete}
+            className='text-destructive focus:text-destructive'
+            disabled={isRoot}
+          >
+            {t('Delete permanently')}
+            <DropdownMenuShortcut>
+              <Trash2 size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
   }
 
   return (
