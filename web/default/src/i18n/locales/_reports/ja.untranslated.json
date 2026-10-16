@@ -259,5 +259,6 @@
   "npm version load failed, using built-in versions": "npm version load failed, using built-in versions",
   "persisted record": "persisted record",
   "retained selection": "retained selection",
-  "unknown source": "unknown source"
+  "unknown source": "unknown source",
+  "Temperature": "Temperature"
 }

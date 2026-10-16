@@ -4921,6 +4921,19 @@
     "Delete permanently": "Delete permanently",
     "Permanently delete this account?": "Permanently delete this account?",
     "This will permanently delete the account record": "This will permanently delete the account record",
-    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone."
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.",
+    "Request error occurred": "Request error occurred",
+    "Network connection failed or server not responding": "Network connection failed or server not responding",
+    "Error parsing response data": "Error parsing response data",
+    "Error establishing connection": "Error establishing connection",
+    "Connection closed": "Connection closed",
+    "Generation was interrupted": "Generation was interrupted",
+    "Custom request body must be a JSON object before it can be sent": "Custom request body must be a JSON object before it can be sent",
+    "Temperature": "Temperature",
+    "Top P": "Top P",
+    "Frequency penalty": "Frequency penalty",
+    "Presence penalty": "Presence penalty",
+    "Max tokens": "Max tokens",
+    "Seed": "Seed"
   }
 }

@@ -4921,6 +4921,19 @@
     "Delete permanently": "完全に削除",
     "Permanently delete this account?": "このアカウントを完全に削除しますか？",
     "This will permanently delete the account record": "アカウントの記録が完全に削除されます",
-    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". このアカウントが保持しているメールアドレスとサードパーティ連携も解放されます。この操作は取り消せません。"
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". このアカウントが保持しているメールアドレスとサードパーティ連携も解放されます。この操作は取り消せません。",
+    "Request error occurred": "リクエストでエラーが発生しました",
+    "Network connection failed or server not responding": "ネットワーク接続に失敗したか、サーバーが応答していません",
+    "Error parsing response data": "応答データの解析中にエラーが発生しました",
+    "Error establishing connection": "接続の確立でエラーが発生しました",
+    "Connection closed": "接続が閉じられました",
+    "Generation was interrupted": "生成が中断されました",
+    "Custom request body must be a JSON object before it can be sent": "送信するにはカスタムリクエストボディが JSON オブジェクトである必要があります",
+    "Temperature": "Temperature",
+    "Top P": "Top P",
+    "Frequency penalty": "頻度ペナルティ",
+    "Presence penalty": "存在ペナルティ",
+    "Max tokens": "最大トークン数",
+    "Seed": "シード"
   }
 }

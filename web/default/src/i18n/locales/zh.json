@@ -4921,6 +4921,19 @@
     "Delete permanently": "彻底删除",
     "Permanently delete this account?": "确定彻底删除此账户？",
     "This will permanently delete the account record": "将永久删除该账户记录",
-    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". 同时释放该账户仍占用的邮箱地址与第三方绑定。此操作不可恢复。"
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". 同时释放该账户仍占用的邮箱地址与第三方绑定。此操作不可恢复。",
+    "Request error occurred": "请求发生错误",
+    "Network connection failed or server not responding": "网络连接失败或服务器无响应",
+    "Error parsing response data": "解析响应数据出错",
+    "Error establishing connection": "建立连接出错",
+    "Connection closed": "连接已关闭",
+    "Generation was interrupted": "生成已被中断",
+    "Custom request body must be a JSON object before it can be sent": "自定义请求体必须是 JSON 对象才能发送",
+    "Temperature": "温度",
+    "Top P": "Top P",
+    "Frequency penalty": "频率惩罚",
+    "Presence penalty": "存在惩罚",
+    "Max tokens": "输出 Token 上限",
+    "Seed": "随机种子"
   }
 }

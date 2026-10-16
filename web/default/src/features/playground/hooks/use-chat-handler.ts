@@ -1,22 +1,36 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { sendChatCompletion } from '../api'
 import { MESSAGE_STATUS, ERROR_MESSAGES } from '../constants'
 import {
   buildChatCompletionPayload,
+  parseCustomRequestBody,
   updateAssistantMessageWithError,
   updateLastAssistantMessage,
   processStreamingContent,
   finalizeMessage,
 } from '../lib'
-import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
+import type {
+  ChatCompletionRequest,
+  Message,
+  PlaygroundConfig,
+  ParameterEnabled,
+} from '../types'
 import { useStreamRequest } from './use-stream-request'
 
 interface UseChatHandlerOptions {
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
   onMessageUpdate: (updater: (prev: Message[]) => Message[]) => void
+  onDebugEvent?: (event: PlaygroundDebugEvent) => void
 }
+
+/** One step of a request/response exchange, as shown by the debug panel. */
+export type PlaygroundDebugEvent =
+  | { kind: 'request'; payload: string }
+  | { kind: 'sse'; data: string }
+  | { kind: 'reply'; text: string }
 
 /**
  * Hook for handling chat message sending and receiving
@@ -25,12 +39,51 @@ export function useChatHandler({
   config,
   parameterEnabled,
   onMessageUpdate,
+  onDebugEvent,
 }: UseChatHandlerOptions) {
+  const { t } = useTranslation()
   const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
+
+  // Capturing every frame is only worth its re-renders while the panel is open,
+  // so the debug callbacks stay silent otherwise.
+  const debugEnabled = config.showDebugPanel
+  const emitDebug = useCallback(
+    (event: PlaygroundDebugEvent) => {
+      if (!debugEnabled) return
+      onDebugEvent?.(event)
+    },
+    [debugEnabled, onDebugEvent]
+  )
+
+  /**
+   * Build the payload for the next request. Custom request mode sends the
+   * textarea verbatim, and an unusable body is refused with a visible error
+   * instead of silently sending the generated payload.
+   */
+  const resolveRequestPayload = useCallback(
+    (messages: Message[]): ChatCompletionRequest | null => {
+      if (!config.customRequestMode) {
+        return buildChatCompletionPayload(messages, config, parameterEnabled)
+      }
+      const customBody = parseCustomRequestBody(config.customRequestBody)
+      if (!customBody) {
+        toast.error(t(ERROR_MESSAGES.INVALID_CUSTOM_REQUEST_BODY))
+        return null
+      }
+      return customBody as unknown as ChatCompletionRequest
+    },
+    [config, parameterEnabled, t]
+  )
+
+  const debugReplyRef = useRef('')
 
   // Handle stream update
   const handleStreamUpdate = useCallback(
     (type: 'reasoning' | 'content', chunk: string) => {
+      if (debugEnabled) {
+        debugReplyRef.current += chunk
+        emitDebug({ kind: 'reply', text: debugReplyRef.current })
+      }
       onMessageUpdate((prev) =>
         updateLastAssistantMessage(prev, (message) => {
           if (message.status === MESSAGE_STATUS.ERROR) return message
@@ -56,7 +109,7 @@ export function useChatHandler({
         })
       )
     },
-    [onMessageUpdate]
+    [onMessageUpdate, debugEnabled, emitDebug]
   )
 
   // Handle stream complete
@@ -85,21 +138,21 @@ export function useChatHandler({
   // Send streaming chat request
   const sendStreamingChat = useCallback(
     (messages: Message[]) => {
-      const payload = buildChatCompletionPayload(
-        messages,
-        config,
-        parameterEnabled
-      )
+      const payload = resolveRequestPayload(messages)
+      if (!payload) return
+      debugReplyRef.current = ''
+      emitDebug({ kind: 'request', payload: JSON.stringify(payload, null, 2) })
       sendStreamRequest(
         payload,
         handleStreamUpdate,
         handleStreamComplete,
-        handleStreamError
+        handleStreamError,
+        (data) => emitDebug({ kind: 'sse', data })
       )
     },
     [
-      config,
-      parameterEnabled,
+      resolveRequestPayload,
+      emitDebug,
       sendStreamRequest,
       handleStreamUpdate,
       handleStreamComplete,
@@ -110,16 +163,18 @@ export function useChatHandler({
   // Send non-streaming chat request
   const sendNonStreamingChat = useCallback(
     async (messages: Message[]) => {
-      const payload = buildChatCompletionPayload(
-        messages,
-        config,
-        parameterEnabled
-      )
+      const payload = resolveRequestPayload(messages)
+      if (!payload) return
+      emitDebug({ kind: 'request', payload: JSON.stringify(payload, null, 2) })
 
       try {
         const response = await sendChatCompletion(payload)
         const choice = response.choices?.[0]
         if (!choice) return
+        emitDebug({
+          kind: 'reply',
+          text: JSON.stringify(choice.message ?? {}, null, 2),
+        })
 
         onMessageUpdate((prev) =>
           updateLastAssistantMessage(prev, (message) => ({
@@ -153,7 +208,7 @@ export function useChatHandler({
         )
       }
     },
-    [config, parameterEnabled, onMessageUpdate, handleStreamError]
+    [resolveRequestPayload, emitDebug, onMessageUpdate, handleStreamError]
   )
 
   // Send chat request (stream or non-stream based on config)

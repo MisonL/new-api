@@ -16,7 +16,8 @@ export function useStreamRequest() {
       payload: ChatCompletionRequest,
       onUpdate: (type: 'reasoning' | 'content', chunk: string) => void,
       onComplete: () => void,
-      onError: (error: string, errorCode?: string) => void
+      onError: (error: string, errorCode?: string) => void,
+      onRawEvent?: (data: string) => void
     ) => {
       const source = new SSE(API_ENDPOINTS.CHAT_COMPLETIONS, {
         headers: getCommonHeaders(),
@@ -40,6 +41,11 @@ export function useStreamRequest() {
       }
 
       source.addEventListener('message', (e: MessageEvent) => {
+        // The debug panel's SSE tab shows the frames as they arrived; the
+        // caller gates this callback on the panel being open.
+        if (typeof e.data === 'string') {
+          onRawEvent?.(e.data)
+        }
         if (e.data === '[DONE]') {
           isStreamCompleteRef.current = true
           closeSource()

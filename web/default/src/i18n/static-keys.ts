@@ -597,6 +597,23 @@ export const STATIC_I18N_KEYS = [
   'Batch detection failed',
   'Batch detection complete: {{channels}} channels, {{add}} to add, {{remove}} to remove, {{fails}} failed',
 
+  // Playground status and error messages passed through t() at runtime
+  'Request error occurred',
+  'Network connection failed or server not responding',
+  'Error parsing response data',
+  'Error establishing connection',
+  'Connection closed',
+  'Generation was interrupted',
+  'Custom request body must be a JSON object before it can be sent',
+
+  // Playground request parameter labels
+  'Temperature',
+  'Top P',
+  'Frequency penalty',
+  'Presence penalty',
+  'Max tokens',
+  'Seed',
+
   // Misc
   'Cancel',
   'Status',

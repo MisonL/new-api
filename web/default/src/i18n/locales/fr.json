@@ -4921,6 +4921,19 @@
     "Delete permanently": "Supprimer définitivement",
     "Permanently delete this account?": "Supprimer définitivement ce compte ?",
     "This will permanently delete the account record": "Cela supprimera définitivement l'enregistrement du compte",
-    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Cela libère aussi l'adresse e-mail et les liaisons tierces que ce compte détient encore. Cette action est irréversible."
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Cela libère aussi l'adresse e-mail et les liaisons tierces que ce compte détient encore. Cette action est irréversible.",
+    "Request error occurred": "Une erreur de requête est survenue",
+    "Network connection failed or server not responding": "Échec de la connexion réseau ou le serveur ne répond pas",
+    "Error parsing response data": "Erreur lors de l’analyse des données de réponse",
+    "Error establishing connection": "Erreur lors de l’établissement de la connexion",
+    "Connection closed": "Connexion fermée",
+    "Generation was interrupted": "La génération a été interrompue",
+    "Custom request body must be a JSON object before it can be sent": "Le corps de requête personnalisé doit être un objet JSON pour pouvoir être envoyé",
+    "Temperature": "Température",
+    "Top P": "Top P",
+    "Frequency penalty": "Pénalité de fréquence",
+    "Presence penalty": "Pénalité de présence",
+    "Max tokens": "Nombre maximal de tokens",
+    "Seed": "Graine"
   }
 }

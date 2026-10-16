@@ -4921,6 +4921,19 @@
     "Delete permanently": "Xóa vĩnh viễn",
     "Permanently delete this account?": "Xóa vĩnh viễn tài khoản này?",
     "This will permanently delete the account record": "Thao tác này sẽ xóa vĩnh viễn bản ghi tài khoản",
-    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Nó cũng giải phóng địa chỉ email và các liên kết bên thứ ba mà tài khoản này vẫn giữ. Thao tác này không thể hoàn tác."
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Nó cũng giải phóng địa chỉ email và các liên kết bên thứ ba mà tài khoản này vẫn giữ. Thao tác này không thể hoàn tác.",
+    "Request error occurred": "Đã xảy ra lỗi yêu cầu",
+    "Network connection failed or server not responding": "Kết nối mạng thất bại hoặc máy chủ không phản hồi",
+    "Error parsing response data": "Lỗi khi phân tích dữ liệu phản hồi",
+    "Error establishing connection": "Lỗi khi thiết lập kết nối",
+    "Connection closed": "Kết nối đã bị đóng",
+    "Generation was interrupted": "Quá trình tạo đã bị gián đoạn",
+    "Custom request body must be a JSON object before it can be sent": "Nội dung yêu cầu tùy chỉnh phải là một đối tượng JSON thì mới gửi được",
+    "Temperature": "Temperature",
+    "Top P": "Top P",
+    "Frequency penalty": "Hình phạt tần suất",
+    "Presence penalty": "Hình phạt hiện diện",
+    "Max tokens": "Số token tối đa",
+    "Seed": "Seed"
   }
 }

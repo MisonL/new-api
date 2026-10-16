@@ -4921,6 +4921,19 @@
     "Delete permanently": "Удалить навсегда",
     "Permanently delete this account?": "Удалить эту учётную запись навсегда?",
     "This will permanently delete the account record": "Запись учётной записи будет удалена безвозвратно",
-    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Также освобождаются адрес электронной почты и привязки сторонних сервисов, которые ещё числятся за этой учётной записью. Это действие необратимо."
+    ". It also releases the email address and third-party bindings this account still holds. This action cannot be undone.": ". Также освобождаются адрес электронной почты и привязки сторонних сервисов, которые ещё числятся за этой учётной записью. Это действие необратимо.",
+    "Request error occurred": "Произошла ошибка запроса",
+    "Network connection failed or server not responding": "Не удалось подключиться к сети или сервер не отвечает",
+    "Error parsing response data": "Ошибка при разборе данных ответа",
+    "Error establishing connection": "Ошибка при установке соединения",
+    "Connection closed": "Соединение закрыто",
+    "Generation was interrupted": "Генерация была прервана",
+    "Custom request body must be a JSON object before it can be sent": "Пользовательское тело запроса должно быть объектом JSON, иначе его нельзя отправить",
+    "Temperature": "Температура",
+    "Top P": "Top P",
+    "Frequency penalty": "Штраф за частоту",
+    "Presence penalty": "Штраф за присутствие",
+    "Max tokens": "Максимум токенов",
+    "Seed": "Seed"
   }
 }

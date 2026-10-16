@@ -66,6 +66,8 @@ export const ERROR_MESSAGES = {
   STREAM_START_ERROR: 'Error establishing connection',
   CONNECTION_CLOSED: 'Connection closed',
   INTERRUPTED: 'Generation was interrupted',
+  INVALID_CUSTOM_REQUEST_BODY:
+    'Custom request body must be a JSON object before it can be sent',
 } as const
 
 // Message action button styles
