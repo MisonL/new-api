@@ -165,6 +165,7 @@ export function useChatHandler({
     async (messages: Message[]) => {
       const payload = resolveRequestPayload(messages)
       if (!payload) return
+      debugReplyRef.current = ''
       emitDebug({ kind: 'request', payload: JSON.stringify(payload, null, 2) })
 
       try {

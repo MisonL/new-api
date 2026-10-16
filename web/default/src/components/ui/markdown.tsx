@@ -1,11 +1,31 @@
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
 
 interface MarkdownProps {
   children: string
   className?: string
+}
+
+// rehypeRaw 会把内容里的原始 HTML 解构进 React 树；不叠加净化时，
+// <img onerror> 之类的属性事件向量会随管理员配置的富文本（首页、公告、
+// 关于、法律条款）进入页面。白名单在 GitHub 风格默认 schema 上补齐
+// style/img 数据属性，其余脚本类内容一律剥除。
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'style'],
+  attributes: {
+    ...defaultSchema.attributes,
+    '*': [...(defaultSchema.attributes?.['*'] ?? []), 'style', 'class'],
+    img: [...(defaultSchema.attributes?.img ?? []), 'src', 'srcSet', 'sizes'],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    href: ['http', 'https', 'mailto', 'tel'],
+    src: ['http', 'https', 'data'],
+  },
 }
 
 export function Markdown({ children, className }: MarkdownProps) {
@@ -31,7 +51,7 @@ export function Markdown({ children, className }: MarkdownProps) {
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
         components={{
           // 自定义组件渲染（可选）
           a: ({ node, ...props }) => (
