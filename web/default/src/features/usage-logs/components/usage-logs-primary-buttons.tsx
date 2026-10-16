@@ -53,6 +53,7 @@ export function UsageLogsPrimaryButtons({
             channel: params.channel,
             group: params.group,
             request_id: params.request_id,
+            upstream_request_id: params.upstream_request_id,
           }}
           isAdmin={isAdmin}
         />

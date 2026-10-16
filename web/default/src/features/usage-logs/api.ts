@@ -109,6 +109,7 @@ export interface DeleteLogsFilterPayload {
   channel?: number
   group?: string
   request_id?: string
+  upstream_request_id?: string
 }
 
 /**

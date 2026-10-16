@@ -218,15 +218,16 @@ func DeleteHistoryLogs(c *gin.Context) {
 }
 
 type BatchDeleteLogsRequest struct {
-	LogType        int    `json:"type"`
-	StartTimestamp int64  `json:"start_timestamp"`
-	EndTimestamp   int64  `json:"end_timestamp"`
-	Username       string `json:"username,omitempty"`
-	TokenName      string `json:"token_name,omitempty"`
-	ModelName      string `json:"model_name,omitempty"`
-	Channel        int    `json:"channel,omitempty"`
-	Group          string `json:"group,omitempty"`
-	RequestID      string `json:"request_id,omitempty"`
+	LogType           int    `json:"type"`
+	StartTimestamp    int64  `json:"start_timestamp"`
+	EndTimestamp      int64  `json:"end_timestamp"`
+	Username          string `json:"username,omitempty"`
+	TokenName         string `json:"token_name,omitempty"`
+	ModelName         string `json:"model_name,omitempty"`
+	Channel           int    `json:"channel,omitempty"`
+	Group             string `json:"group,omitempty"`
+	RequestID         string `json:"request_id,omitempty"`
+	UpstreamRequestID string `json:"upstream_request_id,omitempty"`
 }
 
 type ClearLogPayloadRequest struct {
@@ -280,15 +281,16 @@ func BatchDeleteLogs(c *gin.Context) {
 		return
 	}
 	count, err := model.DeleteLogsByFilter(c.Request.Context(), model.LogFilter{
-		LogType:        req.LogType,
-		StartTimestamp: req.StartTimestamp,
-		EndTimestamp:   req.EndTimestamp,
-		ModelName:      req.ModelName,
-		Username:       req.Username,
-		TokenName:      req.TokenName,
-		Channel:        req.Channel,
-		Group:          req.Group,
-		RequestId:      req.RequestID,
+		LogType:           req.LogType,
+		StartTimestamp:    req.StartTimestamp,
+		EndTimestamp:      req.EndTimestamp,
+		ModelName:         req.ModelName,
+		Username:          req.Username,
+		TokenName:         req.TokenName,
+		Channel:           req.Channel,
+		Group:             req.Group,
+		RequestId:         req.RequestID,
+		UpstreamRequestId: req.UpstreamRequestID,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -308,15 +310,16 @@ func BatchDeleteUserLogs(c *gin.Context) {
 		return
 	}
 	count, err := model.DeleteLogsByFilter(c.Request.Context(), model.LogFilter{
-		UserId:         c.GetInt("id"),
-		LogType:        req.LogType,
-		StartTimestamp: req.StartTimestamp,
-		EndTimestamp:   req.EndTimestamp,
-		ModelName:      req.ModelName,
-		TokenName:      req.TokenName,
-		Channel:        req.Channel,
-		Group:          req.Group,
-		RequestId:      req.RequestID,
+		UserId:            c.GetInt("id"),
+		LogType:           req.LogType,
+		StartTimestamp:    req.StartTimestamp,
+		EndTimestamp:      req.EndTimestamp,
+		ModelName:         req.ModelName,
+		TokenName:         req.TokenName,
+		Channel:           req.Channel,
+		Group:             req.Group,
+		RequestId:         req.RequestID,
+		UpstreamRequestId: req.UpstreamRequestID,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -354,5 +357,6 @@ func hasScopedLogFilter(req BatchDeleteLogsRequest) bool {
 		req.Channel != 0 ||
 		req.Group != "" ||
 		req.RequestID != "" ||
+		req.UpstreamRequestID != "" ||
 		req.LogType != 0
 }
