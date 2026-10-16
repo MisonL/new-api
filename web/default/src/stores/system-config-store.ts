@@ -25,6 +25,8 @@ export interface SystemConfig {
   footerHtml?: string
   demoSiteEnabled?: boolean
   displayTokenStatEnabled?: boolean
+  /** Admin toggle for the model performance metrics panel (perf_metrics_setting.enabled) */
+  perfMetricsEnabled?: boolean
   currency: CurrencyConfig
 }
 

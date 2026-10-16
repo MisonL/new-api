@@ -6,13 +6,28 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 )
 
+func perfMetricsDisabled(c *gin.Context) bool {
+	if perf_metrics_setting.GetSetting().Enabled {
+		return false
+	}
+	c.JSON(http.StatusNotFound, gin.H{
+		"success": false,
+		"message": "perf metrics disabled",
+	})
+	return true
+}
+
 func GetPerfMetricsSummary(c *gin.Context) {
+	if perfMetricsDisabled(c) {
+		return
+	}
 	hours := 24
 	if rawHours := c.Query("hours"); rawHours != "" {
 		if parsed, err := strconv.Atoi(rawHours); err == nil {
@@ -48,6 +63,9 @@ func filterActiveGroups(groups []perfmetrics.GroupResult) []perfmetrics.GroupRes
 }
 
 func GetPerfMetrics(c *gin.Context) {
+	if perfMetricsDisabled(c) {
+		return
+	}
 	modelName := c.Query("model")
 	if modelName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{

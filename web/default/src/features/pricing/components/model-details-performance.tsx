@@ -7,6 +7,7 @@ import {
   Timer,
   TrendingUp,
 } from 'lucide-react'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -185,9 +186,14 @@ function SectionHeader(props: {
 
 export function ModelDetailsPerformance(props: { model: PricingModel }) {
   const { t } = useTranslation()
+  const perfMetricsEnabled = useSystemConfigStore(
+    (state) => state.config.perfMetricsEnabled
+  )
   const metricsQuery = useQuery({
     queryKey: ['perf-metrics', props.model.model_name],
     queryFn: () => getPerfMetrics(props.model.model_name, 24),
+    // 管理端关闭性能指标时后端直接 404，前端不再发请求。
+    enabled: perfMetricsEnabled !== false,
     staleTime: 60 * 1000,
   })
   const groups = useMemo(

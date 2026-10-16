@@ -9,6 +9,7 @@ import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelCard } from './model-card'
 import type { ModelPerfBadgeData } from './model-perf-badge'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 export interface ModelCardGridProps {
   models: PricingModel[]
@@ -26,9 +27,14 @@ export function ModelCardGrid(props: ModelCardGridProps) {
   const tokenUnit = props.tokenUnit ?? DEFAULT_TOKEN_UNIT
   const totalPages = Math.max(1, Math.ceil(props.models.length / pageSize))
   const safePage = Math.min(page, totalPages)
+  const perfMetricsEnabled = useSystemConfigStore(
+    (state) => state.config.perfMetricsEnabled
+  )
   const perfQuery = useQuery({
     queryKey: ['perf-metrics-summary'],
     queryFn: () => getPerfMetricsSummary(24),
+    // 管理端关闭性能指标时后端直接 404，前端不再发请求。
+    enabled: perfMetricsEnabled !== false,
     retry: false,
     staleTime: 60 * 1000,
   })
