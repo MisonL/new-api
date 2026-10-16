@@ -19,6 +19,19 @@ type OpenAIError struct {
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
+// HasContent reports whether the error object carries real failure
+// information. GetOpenAIError is non-nil for any present `error` key, so a
+// content check is required: placeholder frames such as `{"error":{}}` or
+// `{"error":{"message":""}}` must not abort a healthy stream, while a
+// code-only or message-only frame is a failure. Every entry point (non-stream
+// OpenaiHandler, the streaming guard, the Responses guards) checks this same
+// predicate so one upstream shape is never a failure in one path and success
+// in another.
+func (e *OpenAIError) HasContent() bool {
+	return e != nil &&
+		(e.Type != "" || e.Message != "" || e.Param != "" || e.Code != nil)
+}
+
 func IsOpenAIRequestParameterError(openAIError *OpenAIError) bool {
 	if openAIError == nil {
 		return false

@@ -10,8 +10,7 @@ import (
 )
 
 func responsesOpenAIErrorHasContent(openAIError *types.OpenAIError) bool {
-	return openAIError != nil &&
-		(openAIError.Type != "" || openAIError.Message != "" || openAIError.Param != "" || openAIError.Code != nil)
+	return openAIError.HasContent()
 }
 
 func responsesOpenAIErrorHasMessage(openAIError *types.OpenAIError) bool {

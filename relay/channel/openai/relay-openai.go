@@ -42,6 +42,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 
 	hasThinkingContent := false
 	hasContent := false
+	hasFinishReason := false
 	var thinkingContent strings.Builder
 	for _, choice := range lastStreamResponse.Choices {
 		if len(choice.Delta.GetReasoningContent()) > 0 {
@@ -51,59 +52,72 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 		if len(choice.Delta.GetContentString()) > 0 {
 			hasContent = true
 		}
-	}
-
-	// Handle think to content conversion
-	if info.ThinkingContentInfo.IsFirstThinkingContent {
-		if hasThinkingContent {
-			response := lastStreamResponse.Copy()
-			for i := range response.Choices {
-				// send `think` tag with thinking content
-				response.Choices[i].Delta.SetContentString("<think>\n" + thinkingContent.String())
-				response.Choices[i].Delta.ReasoningContent = nil
-				response.Choices[i].Delta.ThinkingContent = nil
-				response.Choices[i].Delta.Reasoning = nil
-			}
-			info.ThinkingContentInfo.IsFirstThinkingContent = false
-			info.ThinkingContentInfo.HasSentThinkingContent = true
-			return helper.ObjectData(c, response)
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			hasFinishReason = true
 		}
 	}
 
+	thinkingInfo := &info.ThinkingContentInfo
+
 	if lastStreamResponse.Choices == nil || len(lastStreamResponse.Choices) == 0 {
+		// 空 choices 帧（usage-only / 心跳）：没有正文与终止语义，原样透传。
 		return helper.ObjectData(c, lastStreamResponse)
 	}
 
-	// Process each choice
-	for i, choice := range lastStreamResponse.Choices {
-		// Handle transition from thinking to content
-		// only send `</think>` tag when previous thinking content has been sent
-		if hasContent && !info.ThinkingContentInfo.SendLastThinkingContent && info.ThinkingContentInfo.HasSentThinkingContent {
-			response := lastStreamResponse.Copy()
-			for j := range response.Choices {
-				response.Choices[j].Delta.SetContentString("\n</think>\n")
-				response.Choices[j].Delta.ReasoningContent = nil
-				response.Choices[j].Delta.ThinkingContent = nil
-				response.Choices[j].Delta.Reasoning = nil
-			}
-			info.ThinkingContentInfo.SendLastThinkingContent = true
-			helper.ObjectData(c, response)
+	// Handle think to content conversion。
+	//
+	// 一帧可能同时携带 reasoning 与可见 content，交付顺序固定为：
+	// 推理帧（进入/继续 think 块）→ 闭合帧（正文或终止词到来时）→ 主帧
+	// （正文 + finish_reason）。闭合标签绝不落在一帧正文之后，正文也绝不
+	// 被推理覆盖（第十轮修复：此前同帧正文被 SetContentString 丢弃，纯
+	// 推理流的 think 块永不闭合）。
+	if hasThinkingContent {
+		thinkFrame := lastStreamResponse.Copy()
+		prefix := ""
+		if thinkingInfo.IsFirstThinkingContent {
+			prefix = "<think>\n"
+			thinkingInfo.IsFirstThinkingContent = false
 		}
-
-		// Convert reasoning content to regular content if any
-		if len(choice.Delta.GetReasoningContent()) > 0 {
-			lastStreamResponse.Choices[i].Delta.SetContentString(choice.Delta.GetReasoningContent())
-			lastStreamResponse.Choices[i].Delta.ReasoningContent = nil
-			lastStreamResponse.Choices[i].Delta.ThinkingContent = nil
-			lastStreamResponse.Choices[i].Delta.Reasoning = nil
-		} else if !hasThinkingContent && !hasContent {
-			// flush thinking content
-			lastStreamResponse.Choices[i].Delta.ReasoningContent = nil
-			lastStreamResponse.Choices[i].Delta.ThinkingContent = nil
-			lastStreamResponse.Choices[i].Delta.Reasoning = nil
+		thinkingInfo.HasSentThinkingContent = true
+		for i := range thinkFrame.Choices {
+			thinkFrame.Choices[i].Delta.SetContentString(prefix + thinkingContent.String())
+			thinkFrame.Choices[i].Delta.ReasoningContent = nil
+			thinkFrame.Choices[i].Delta.ThinkingContent = nil
+			thinkFrame.Choices[i].Delta.Reasoning = nil
+			thinkFrame.Choices[i].FinishReason = nil
+		}
+		if err := helper.ObjectData(c, thinkFrame); err != nil {
+			return err
 		}
 	}
 
+	if thinkingInfo.HasSentThinkingContent && !thinkingInfo.SendLastThinkingContent &&
+		(hasContent || hasFinishReason) {
+		closeFrame := lastStreamResponse.Copy()
+		for i := range closeFrame.Choices {
+			closeFrame.Choices[i].Delta.SetContentString("\n</think>\n")
+			closeFrame.Choices[i].Delta.ReasoningContent = nil
+			closeFrame.Choices[i].Delta.ThinkingContent = nil
+			closeFrame.Choices[i].Delta.Reasoning = nil
+			closeFrame.Choices[i].FinishReason = nil
+		}
+		thinkingInfo.SendLastThinkingContent = true
+		if err := helper.ObjectData(c, closeFrame); err != nil {
+			return err
+		}
+	}
+
+	// 推理-only 帧（无正文、无 finish_reason）的内容已由推理帧交付，
+	// 不再补发空帧。
+	if hasThinkingContent && !hasContent && !hasFinishReason {
+		return nil
+	}
+
+	for i := range lastStreamResponse.Choices {
+		lastStreamResponse.Choices[i].Delta.ReasoningContent = nil
+		lastStreamResponse.Choices[i].Delta.ThinkingContent = nil
+		lastStreamResponse.Choices[i].Delta.Reasoning = nil
+	}
 	return helper.ObjectData(c, lastStreamResponse)
 }
 
@@ -193,10 +207,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	// 处理最后的响应
 	shouldSendLastResp := true
-	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
-		&containStreamUsage, info, &shouldSendLastResp); err != nil {
+	processedLastStreamData, err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
+		&containStreamUsage, info, &shouldSendLastResp)
+	if err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
 	}
+	lastStreamData = processedLastStreamData
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
 		if shouldSendLastResp {
@@ -241,7 +257,7 @@ func streamErrorFrameWithContent(data string) *types.OpenAIError {
 	if frame.Error == nil {
 		return nil
 	}
-	if frame.Error.Type == "" && frame.Error.Message == "" && frame.Error.Param == "" && frame.Error.Code == nil {
+	if !frame.Error.HasContent() {
 		return nil
 	}
 	return frame.Error
@@ -322,7 +338,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
-	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
+	if oaiError := simpleResponse.GetOpenAIError(); oaiError.HasContent() {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
