@@ -13,6 +13,7 @@ import {
   useUsageLogsContext,
 } from './components/usage-logs-provider'
 import { UsageLogsTable } from './components/usage-logs-table'
+import { UsageLogsPrimaryButtons } from './components/usage-logs-primary-buttons'
 import {
   isUsageLogsSectionId,
   USAGE_LOGS_DEFAULT_SECTION,
@@ -106,6 +107,9 @@ function UsageLogsContent() {
         <SectionPageLayout.Description>
           {t(pageMeta.descriptionKey)}
         </SectionPageLayout.Description>
+        <SectionPageLayout.Actions>
+          <UsageLogsPrimaryButtons logCategory={activeCategory} />
+        </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='space-y-4'>
             {showTaskSwitcher && (
