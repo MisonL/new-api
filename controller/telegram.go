@@ -70,7 +70,14 @@ func TelegramBind(c *gin.Context) {
 		})
 		return
 	}
-	telegramId := params["id"][0]
+	telegramId := telegramParamID(params)
+	if telegramId == "" {
+		c.JSON(200, gin.H{
+			"message": "无效的请求",
+			"success": false,
+		})
+		return
+	}
 	if model.IsTelegramIdAlreadyTaken(telegramId) {
 		c.JSON(200, gin.H{
 			"message": "该 Telegram 账户已被绑定",
@@ -126,7 +133,14 @@ func TelegramLogin(c *gin.Context) {
 		return
 	}
 
-	telegramId := params["id"][0]
+	telegramId := telegramParamID(params)
+	if telegramId == "" {
+		c.JSON(200, gin.H{
+			"message": "无效的请求",
+			"success": false,
+		})
+		return
+	}
 	user := model.User{TelegramId: telegramId}
 	if err := user.FillUserByTelegramId(); err != nil {
 		c.JSON(200, gin.H{
@@ -188,4 +202,16 @@ func checkTelegramAuthorization(params map[string][]string, token string) bool {
 	}
 	// One-time consumption: a valid signature is spent on first use.
 	return telegramAuthOnce(hash)
+}
+
+// telegramParamID extracts the widget-signed "id" parameter. The verifier
+// requires its presence implicitly (a missing id changes the signed payload),
+// but callers index params["id"][0] directly; a crafted-but-valid signature
+// without an id would panic on the index. Empty means "absent or empty".
+func telegramParamID(params map[string][]string) string {
+	vals, ok := params["id"]
+	if !ok || len(vals) == 0 {
+		return ""
+	}
+	return vals[0]
 }

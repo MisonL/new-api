@@ -148,3 +148,24 @@ func TestCheckTelegramAuthorizationRejectsTamperedSignature(t *testing.T) {
 	require.False(t, checkTelegramAuthorization(tampered, token),
 		"mutating a signed field must invalidate the signature")
 }
+
+// A signed payload without "id" used to panic at params["id"][0]. The verifier
+// accepts any signed key set, so the only thing standing between a malformed
+// payload and a 500 was the index. telegramParamID must return empty instead,
+// and both handlers must treat empty as "invalid request".
+func TestTelegramParamIDHandlesMissingID(t *testing.T) {
+	token := "probe-bot-token"
+	missing := map[string][]string{
+		"first_name": {"NoId"},
+		"auth_date":  {strconv.FormatInt(time.Now().Unix(), 10)},
+	}
+	missing["hash"] = []string{telegramAuthHashFromMap(missing, token)}
+
+	require.True(t, checkTelegramAuthorization(missing, token),
+		"a correctly signed payload without id passes the HMAC check")
+	require.Equal(t, "", telegramParamID(missing),
+		"a missing id must yield the empty string, not panic on the index")
+	require.Equal(t, "", telegramParamID(map[string][]string{}))
+	require.Equal(t, "", telegramParamID(map[string][]string{"id": {}}))
+	require.Equal(t, "123", telegramParamID(map[string][]string{"id": {"123"}}))
+}
