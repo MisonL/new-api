@@ -533,6 +533,17 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 	}
 }
 
+// billingColumns are the columns the settlement and affiliate paths maintain
+// with SQL-level relative updates (quota = quota - ?). A caller's stale User
+// snapshot must never write them back wholesale: within the window between
+// the snapshot read and the write, a concurrent settle would have the
+// relative decrement silently reverted (and the cache refreshed with the
+// reverted value). User.Update omits them; these columns only change through
+// IncreaseUserQuota / DecreaseUserQuota / DeltaUpdateUserQuota and friends.
+var billingColumns = []string{
+	"Quota", "UsedQuota", "RequestCount", "AffQuota", "AffCount", "AffHistoryQuota",
+}
+
 func (user *User) Update(updatePassword bool) error {
 	var err error
 	if updatePassword {
@@ -543,7 +554,7 @@ func (user *User) Update(updatePassword bool) error {
 	}
 	newUser := *user
 	DB.First(&user, user.Id)
-	if err = DB.Model(user).Updates(newUser).Error; err != nil {
+	if err = DB.Omit(billingColumns...).Model(user).Updates(newUser).Error; err != nil {
 		return err
 	}
 
