@@ -847,6 +847,13 @@ func DeleteUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// 硬删必须同时清掉 user_oauth_bindings：身份检查 IsProviderUserIdTaken
+	// 统计全量绑定行，孤儿绑定会让该 OAuth 身份在"已占用"与"用户不存在"之间
+	// 永久卡死——登录流程既不注册也不合并（controller/oauth.go:399-402），
+	// 而解绑接口只对仍存在的用户开放。与上方删除保持同一释放语义。
+	if err := model.DeleteUserOAuthBindingsByUserId(id); err != nil {
+		common.SysLog(fmt.Sprintf("failed to delete oauth bindings for user %d: %s", id, err.Error()))
+	}
 	// 硬删除后必须清理缓存：TokenAuth 只读 userCache.Status（middleware/auth.go:442），
 	// 缓存不失效则被删用户的令牌在 TTL 内仍可用。DisableUser 已因同一原因清理两者，
 	// 删除路径同样需要。日志按 DisableUser 的既有方式记录，不阻断主流程。
