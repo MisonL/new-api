@@ -3562,6 +3562,10 @@ func RelayNotFound(c *gin.Context) {
 		Param:   "",
 		Code:    "",
 	}
+	// API/relay 404 必须显式禁缓存：全局 Cache 中间件给非根路径打的是
+	// max-age=604800（一周），客户端或中间缓存会把"路由不存在"这个答案缓存
+	// 一周，路由上线后仍拿旧 404（第十轮运行态发现）。
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private, max-age=0")
 	c.JSON(http.StatusNotFound, gin.H{
 		"error": err,
 	})

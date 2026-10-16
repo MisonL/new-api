@@ -13,7 +13,15 @@ const RouteTagKey = "route_tag"
 
 const accessLogRedactedValue = "REDACTED"
 
+// sanitizeAccessLogPath makes an arbitrary request path safe for a line-based
+// access log. Two threats: query values may carry credentials (redacted) and
+// the path itself may carry percent-encoded control characters — gin's
+// param.Path is already percent-decoded, so "%0A" arrives as a real newline
+// and splits the log line into forged entries. Newlines and carriage returns
+// are folded to their escaped form so one request stays exactly one line.
 func sanitizeAccessLogPath(path string) string {
+	path = strings.ReplaceAll(path, "\r", "\\r")
+	path = strings.ReplaceAll(path, "\n", "\\n")
 	queryIndex := strings.IndexByte(path, '?')
 	if queryIndex < 0 {
 		return path
