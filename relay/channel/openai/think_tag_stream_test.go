@@ -209,6 +209,38 @@ func TestHandleStreamFormatFlushesSplitterOnTerminalFrame(t *testing.T) {
 		// 原始字节二者必有一处承载被缓冲的文本。
 		require.Contains(t, recovered, "\ntruncated reasoning",
 			"bytes buffered by the splitter must reach the client, not be dropped")
+
+		// 仅断言 Contains 会让"内容排到终止帧之后"和"内容重复下发"两类回归
+		// 漏过：严格客户端丢弃终态之后的事件，重复下发则会让同一段推理
+		// 出现两次。这里按帧序断言：承载 flush 字节的帧恰好一个，且它在
+		// 终止帧之前。
+		if relayFormat == types.RelayFormatGemini {
+			frames := geminiFrameTexts(t, recorder.Body.String())
+			require.Equal(t, 1, countFramesContaining(frames, "\ntruncated reasoning"),
+				"the flushed bytes must be emitted exactly once: %v", frames)
+			flushIndex, terminalIndex := -1, -1
+			for i, frame := range frames {
+				if strings.Contains(frame.text, "\ntruncated reasoning") {
+					flushIndex = i
+				}
+				if frame.finishReason != "" {
+					terminalIndex = i
+				}
+			}
+			require.NotEqual(t, -1, terminalIndex, "the stream must carry a finishReason")
+			require.Less(t, flushIndex, terminalIndex,
+				"flushed bytes must precede the terminal frame: %v", frames)
+			return
+		}
+
+		events := sseEventTypes(t, recorder.Body.String())
+		require.Equal(t, 1, countEventType(events, "message_stop"),
+			"the stream must terminate exactly once: %v", events)
+		require.Equal(t, 1, countEventType(events, "message_delta"),
+			"message_delta must appear exactly once: %v", events)
+		require.NotEmpty(t, events, "the stream must emit events")
+		require.Equal(t, "message_stop", events[len(events)-1],
+			"message_stop is the terminal event; nothing may follow it: %v", events)
 	}
 
 	t.Run("claude", func(t *testing.T) { run(t, types.RelayFormatClaude) })
@@ -306,15 +338,11 @@ func TestHandleFinalResponseFlushesOnUsageOnlyTerminalFrame(t *testing.T) {
 	require.NoError(t, HandleFinalResponseWithError(c, info, usageFrame,
 		"chatcmpl-usage-terminal", 0, "some-upstream-model", "", &dto.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}, true))
 
-	var sawMessageStop bool
 	var recovered string
 	for _, payload := range sseDataPayloads(t, recorder.Body.String()) {
 		var event dto.ClaudeResponse
 		if err := common.UnmarshalJsonStr(payload, &event); err != nil {
 			continue
-		}
-		if event.Type == "message_stop" {
-			sawMessageStop = true
 		}
 		if event.Delta != nil && event.Delta.Thinking != nil {
 			recovered += *event.Delta.Thinking
@@ -327,7 +355,24 @@ func TestHandleFinalResponseFlushesOnUsageOnlyTerminalFrame(t *testing.T) {
 	// 语义），所以这里断言字节不丢而不是断言进 thinking 块。
 	require.Contains(t, recovered, "\ntruncated reasoning",
 		"the buffered bytes must reach the client")
-	require.True(t, sawMessageStop, "the stream must terminate with message_stop")
+
+	// 只断言"出现过 message_stop"会漏掉两类回归：终止事件重复（flush 伪帧
+	// 与终端帧各闭合一次），以及字节被排在 message_stop 之后（严格客户端
+	// 会丢弃终态之后的所有事件）。这里按事件序断言恰好一组终止、且终态在
+	// 最后。
+	events := sseEventTypes(t, recorder.Body.String())
+	// 本用例的终端帧 choices 为空（usage-only），不经过 HandleStreamFormat，
+	// SendResponseCount 停在普通帧序列的终值上；usage-only 终止分支在
+	// SRC>1 时不会补发 message_start，所以这里只断言"恰好终止一次且终态在最后"，
+	// 不断言 message_start 次数。首帧即 usage-only 且必须补 message_start 的场景由
+	// TestUsageOnlyFirstFrameTerminates 覆盖。
+	require.Equal(t, 1, countEventType(events, "message_delta"),
+		"message_delta must appear exactly once: %v", events)
+	require.Equal(t, 1, countEventType(events, "message_stop"),
+		"the stream must terminate exactly once: %v", events)
+	require.NotEmpty(t, events, "the stream must emit events")
+	require.Equal(t, "message_stop", events[len(events)-1],
+		"message_stop is the terminal event; nothing may follow it: %v", events)
 }
 
 // TestHandleFinalResponseFlushesAfterConverterClosedLifecycle covers the case
@@ -408,6 +453,62 @@ func sseEventTypes(t *testing.T, body string) []string {
 		types = append(types, event.Type)
 	}
 	return types
+}
+
+// countEventType returns how many events in the ordered list carry the given
+// Anthropic SSE event type.
+func countEventType(events []string, want string) int {
+	count := 0
+	for _, eventType := range events {
+		if eventType == want {
+			count++
+		}
+	}
+	return count
+}
+
+// geminiFrame is one Gemini SSE data frame reduced to the fields these tests
+// assert on: the concatenated text of every part, and the candidate's
+// finishReason.
+type geminiFrame struct {
+	text         string
+	finishReason string
+}
+
+// geminiFrameTexts parses a Gemini SSE body into ordered frames so tests can
+// assert on frame ordering (Gemini has no message_stop terminator; the frame
+// carrying finishReason is the terminal one).
+func geminiFrameTexts(t *testing.T, body string) []geminiFrame {
+	t.Helper()
+	var frames []geminiFrame
+	for _, payload := range sseDataPayloads(t, body) {
+		var gemini dto.GeminiChatResponse
+		if err := common.UnmarshalJsonStr(payload, &gemini); err != nil {
+			continue
+		}
+		frame := geminiFrame{}
+		for _, candidate := range gemini.Candidates {
+			if candidate.FinishReason != nil && *candidate.FinishReason != "" {
+				frame.finishReason = *candidate.FinishReason
+			}
+			for _, part := range candidate.Content.Parts {
+				frame.text += part.Text
+			}
+		}
+		frames = append(frames, frame)
+	}
+	return frames
+}
+
+// countFramesContaining returns how many Gemini frames carry the given text.
+func countFramesContaining(frames []geminiFrame, want string) int {
+	count := 0
+	for _, frame := range frames {
+		if strings.Contains(frame.text, want) {
+			count++
+		}
+	}
+	return count
 }
 
 // claudeThinkingText concatenates every thinking delta in an SSE body.
