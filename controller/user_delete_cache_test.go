@@ -127,3 +127,52 @@ func TestDeleteUserRefusesEqualRoleTarget(t *testing.T) {
 	_, err := model.GetUserById(33, false)
 	require.NoError(t, err, "目标用户必须仍在")
 }
+
+// A soft-deleted row keeps its email / OAuth identity reserved, because the
+// Is*AlreadyTaken checks are deliberately unscoped. Admin hard delete is the
+// only path that releases those values, but it read the target through the
+// scoped GetUserById, which hides soft-deleted rows -- so the tombstone could
+// never be removed and the identity stayed locked forever (the owner could not
+// rebind it and no admin could clear it). DeleteUser must see the tombstone.
+func TestDeleteUserHardDeletesSoftDeletedRow(t *testing.T) {
+	setupUserDeleteCacheTest(t)
+
+	target := &model.User{
+		Id:         41,
+		Username:   "tombstone-41",
+		Password:   "password123",
+		Email:      "tombstone@example.com",
+		TelegramId: "tg-tombstone-41",
+		Role:       common.RoleCommonUser,
+		Status:     common.UserStatusEnabled,
+		Group:      "default",
+		AffCode:    "aff-41",
+	}
+	require.NoError(t, model.DB.Create(target).Error)
+	require.NoError(t, model.DB.Delete(&model.User{}, target.Id).Error)
+
+	// Preconditions: the identity is reserved while the tombstone exists.
+	require.True(t, model.IsEmailAlreadyTaken("tombstone@example.com"),
+		"前置条件：软删行的邮箱仍应视为占用")
+	require.True(t, model.IsTelegramIdAlreadyTaken("tg-tombstone-41"),
+		"前置条件：软删行的 Telegram id 仍应视为占用")
+
+	recorder := callDeleteUser(t, common.RoleAdminUser, target.Id)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var response struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, "硬删已注销用户必须成功：%s", recorder.Body.String())
+
+	// The decisive assertion: the tombstone is gone, so the identity is free.
+	var remaining int64
+	require.NoError(t, model.DB.Unscoped().Model(&model.User{}).
+		Where("id = ?", target.Id).Count(&remaining).Error)
+	require.EqualValues(t, 0, remaining, "硬删后不应残留墓碑行")
+	require.False(t, model.IsEmailAlreadyTaken("tombstone@example.com"),
+		"硬删后邮箱必须可被重新绑定")
+	require.False(t, model.IsTelegramIdAlreadyTaken("tg-tombstone-41"),
+		"硬删后 Telegram id 必须可被重新绑定")
+}

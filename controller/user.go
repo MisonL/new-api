@@ -828,7 +828,11 @@ func DeleteUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	originUser, err := model.GetUserById(id, false)
+	// 用 Unscoped 读取：身份检查（IsEmailAlreadyTaken 等）刻意包含软删行，
+	// 被注销账号的邮箱 / OAuth id 因此保持占用；硬删是唯一释放这些值的
+	// 路径，若这里用 scoped 查询，软删行会读不到、管理员永远删不掉它，
+	// 该身份就永久无法释放（既不能重新绑定，也无人能清理）。
+	originUser, err := model.GetUserByIdUnscoped(id)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1111,7 +1115,10 @@ func EmailBind(c *gin.Context) {
 	// （Register 有自己的占用检查并成功落库）。Email 列非唯一索引，重复
 	// email 落库后 ResetUserPasswordByEmail 会按邮箱更新所有账户并把新
 	// 密码返回给请求者，形成跨账户影响，因此绑定时必须复查。
-	if model.IsEmailAlreadyTaken(email) {
+	// 复查要排除调用者自己那一行：OAuth 登录会先把 IdP 的邮箱同步到本地账户，
+	// 用户随后走一次"绑定"确认属于幂等操作，用 IsEmailAlreadyTaken 会把自己
+	// 判成占用者而报冲突。
+	if model.IsEmailTakenByOther(email, user.Id) {
 		common.ApiError(c, errors.New("该邮箱已被其他账户绑定或注册"))
 		return
 	}

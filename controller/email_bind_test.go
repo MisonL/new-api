@@ -141,3 +141,69 @@ func TestEmailBindAcceptsUnclaimedEmail(t *testing.T) {
 	require.NoError(t, model.DB.First(&reloaded, binder.Id).Error)
 	require.Equal(t, "fresh@example.com", reloaded.Email)
 }
+
+// 账户已经持有该地址时再次绑定同一地址是幂等确认，不能判成冲突。OAuth 登录
+// 会把 IdP 的邮箱同步到本地账户，用户随后走一次绑定确认就会命中这条路径：
+// 不排除调用者自己那一行的占用检查会把自己判成占用者，报"该邮箱已被其他账户
+// 绑定或注册"，而那个"其他账户"就是请求者本人。
+func TestEmailBindAllowsRebindingOwnEmail(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	router := newEmailBindTestRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	const ownEmail = "self@example.com"
+	binder := createEmailBindTestUser(t, 4301, "selfbinder", ownEmail)
+
+	client := newTestHTTPClient(t)
+	resp, err := client.Get(server.URL + "/test/login-as/4301")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	code := "112233"
+	common.RegisterVerificationCodeWithKey(ownEmail, code, common.EmailVerificationPurpose)
+	t.Cleanup(func() {
+		common.DeleteKey(ownEmail, common.EmailVerificationPurpose)
+	})
+
+	result := performEmailBindRequest(t, client, server.URL, ownEmail, code)
+	require.True(t, result.Success,
+		"rebinding the caller's own address must not be reported as a conflict: %s", result.Message)
+
+	var reloaded model.User
+	require.NoError(t, model.DB.First(&reloaded, binder.Id).Error)
+	require.Equal(t, ownEmail, reloaded.Email)
+}
+
+// 排除自己那一行不能顺手把"别人占用"也放过：同一地址被第三个账户持有时，
+// 绑定仍必须失败。
+func TestEmailBindStillRejectsAddressHeldByAnotherAccount(t *testing.T) {
+	setupCustomOAuthJWTControllerTestDB(t)
+	router := newEmailBindTestRouter(t)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	const shared = "shared@example.com"
+	createEmailBindTestUser(t, 4401, "firstowner", shared)
+	binder := createEmailBindTestUser(t, 4402, "latcomer", "")
+
+	client := newTestHTTPClient(t)
+	resp, err := client.Get(server.URL + "/test/login-as/4402")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	code := "445566"
+	common.RegisterVerificationCodeWithKey(shared, code, common.EmailVerificationPurpose)
+	t.Cleanup(func() {
+		common.DeleteKey(shared, common.EmailVerificationPurpose)
+	})
+
+	result := performEmailBindRequest(t, client, server.URL, shared, code)
+	require.False(t, result.Success, "an address held by another account must still be rejected")
+
+	var reloaded model.User
+	require.NoError(t, model.DB.First(&reloaded, binder.Id).Error)
+	require.Empty(t, reloaded.Email, "the rejected bind must not persist the address")
+}
