@@ -4,8 +4,11 @@ services:
   readonly-proxy:
     image: nginx:1.29-alpine
     restart: always
+    # 只读代理只服务本机前端开发（VITE_REACT_APP_SERVER_URL 指向 127.0.0.1），
+    # 端口默认只绑 loopback；需要 LAN 访问时显式覆盖 READONLY_PROXY_BIND。
+    init: true
     ports:
-      - "${READONLY_PROXY_PORT:-3300}:80"
+      - "${READONLY_PROXY_BIND:-127.0.0.1}:${READONLY_PROXY_PORT:-3300}:80"
     environment:
       - READONLY_UPSTREAM=${READONLY_UPSTREAM:-http://host.docker.internal:3000}
     command:
