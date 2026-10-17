@@ -756,16 +756,22 @@ func updateRouteScopeAbility(tx *gorm.DB, ability Ability, priority int64, weigh
 		"route_weight_bps":            weight,
 		"route_weight_bps_configured": true,
 	}
-	result := tx.Model(&Ability{}).
+	// 存在性检查与更新解耦：MySQL 默认报 changed rows，二次保存值未变时
+	// RowsAffected 为 0，靠它判"行不存在"会把合法的幂等保存误判成错误并
+	// 整笔回滚（第十轮 P2，channel_route_scope_rowsaffected_test.go 的 MySQL
+	// 用例就是为守住这个语义而加）。先 COUNT 判存在，再无条件 UPDATE。
+	var exists int64
+	if err := tx.Model(&Ability{}).
 		Where(commonGroupCol+" = ? AND model = ? AND channel_id = ?", ability.Group, ability.Model, ability.ChannelId).
-		Updates(values)
-	if result.Error != nil {
-		return result.Error
+		Count(&exists).Error; err != nil {
+		return err
 	}
-	if result.RowsAffected == 0 {
+	if exists == 0 {
 		return fmt.Errorf("route scope ability not found: group=%s model=%s channel_id=%d", ability.Group, ability.Model, ability.ChannelId)
 	}
-	return nil
+	return tx.Model(&Ability{}).
+		Where(commonGroupCol+" = ? AND model = ? AND channel_id = ?", ability.Group, ability.Model, ability.ChannelId).
+		Updates(values).Error
 }
 
 func updateRouteScopeItem(tx *gorm.DB, group string, item ChannelRouteScopeItem, priority int64, weight uint) error {
