@@ -21,7 +21,7 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
       - name: Check out alpha branch
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 1
           ref: alpha
@@ -56,7 +56,7 @@ jobs:
       id-token: write
     steps:
       - name: Check out (shallow)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 1
           ref: ${{ needs.resolve_alpha_source.outputs.source_sha }}
