@@ -588,7 +588,51 @@ override 生效后没有被清理。dist 是在这堆陈旧 node_modules 上构�
   处理器名，不是库）。
 - 教训：依赖漏洞的"已修复"判定必须看**产物里实际打包的版本**，不能只看
   audit 读 lockfile 的结果。CI 的 `bun audit --production` 只能证明 lockfile
-  干净，构建产物的版本需要另外核对（当前靠本地构建后 grep 版本标记）。
+  干净，构建产物的版本需要另外核对。
+
+**已落为 CI 门禁（2026-10-17 晚）**：新增 `scripts/frontend-bundle-versions.mjs`，
+在 `repo-gates.yml` 的 `frontend-checks` 中于两个前端构建之后执行。检查方式：
+
+- 每个包配哨兵字符串（katex 用 `katex-mathml`，只出现在库源码，宿主代码无此
+  字面量）；产物中无哨兵即判定"未打包"并跳过，有哨兵则要求**每一个**含哨兵的
+  文件里都出现 `node_modules` 解析出的版本字面量。
+- 判据修正：初版写成"任一含哨兵的文件匹配即通过"，实测漏掉了 classic 的
+  `dist/vendor/mermaid`。该目录由 `vite.config.js` 的 `copyMermaidVendor` 从
+  `mermaid/dist` 手工 copy，不走 Rollup，内含 mermaid 预构建的 katex 副本。
+  Rollup 打包的 `markdown-core` 是 0.18.11，vendor 里却是 0.16.45，
+  "任一匹配"直接放行。改成逐文件后门禁立即失败，暴露了真实问题。
+- 三档行为均已用夹具验证（`scripts/frontend-bundle-versions.test.mjs`，8 个
+  用例）：正常通过 exit 0；产物版本与安装版本不一致 exit 1；多份副本其中一份
+  过期 exit 1；哨兵存在但依赖缺失 exit 1；dist 缺失 exit 1；参数错误 exit 2；
+  CSS 里的同名类名不算已打包。
+- 同时补上了 `web/classic` 的构建步骤——此前 `frontend-checks` 只构建
+  `web/default`，而这次事故恰好发生在 classic 的产物里，不构建就无从检查。
+- 边界：该检查验证"产物版本 == 本地/CI 解析版本"，不验证该版本是否无漏洞；
+  漏洞判定仍由 `bun audit --production` 负责。哨兵只扫 `.js/.mjs/.cjs`，避免
+  CSS 类名误报。
+
+### 11.2 vendor 目录里的 katex 0.16.45（2026-10-17 晚，紧随 11.1）
+
+门禁收紧后立刻在真实产物上失败，暴露出 11.1 没有覆盖的第二条路径：
+
+- 现象：`web/classic/dist/vendor/mermaid/chunks/mermaid.esm.min/katex-*.mjs`
+  内联 katex **0.16.45**，而 `bun audit --production` 报 0 漏洞。
+- 根因：mermaid 11.16.1 依赖 `katex ^0.16.45`，其预构建产物把 katex 内联进
+  chunk；`vite.config.js` 手工 copy 这些 chunk 到 `dist/vendor/mermaid`，并用
+  `import(/* @vite-ignore */ '/vendor/mermaid/mermaid.esm.min.mjs')` 动态加载。
+  该路径完全绕过打包器，`overrides` 也改不了已发布的预构建内容。
+- 影响：GHSA-238p-pmpm-9mq7（katex < 0.18.2）是原型污染绕过 trust 限制的
+  读侧 gadget；项目用 `securityLevel: 'strict'` 且渲染前有 sanitize 链，实际
+  可达性低，但产物确实带受影响版本，不能按"低风险"放过。
+- 处置：`mermaid` 升到 `^12.2.0`（该版本依赖 `katex ^0.18.0`，预构建 chunk
+  内联 0.18.11）；`katex` 直接依赖从 `^0.16.22` 对齐到 `^0.18.11`（原直接依赖
+  只为引 `katex.min.css`）。升级后 vendor 与 Rollup 两份副本都是 0.18.11。
+- 兼容性验证：mermaid 12 要求 node >= 22.12（bun 1.4.0 报 26.3.0，满足）；
+  默认导出仍带 `initialize`/`render`，`render` 仍返回 `{ svg, bindFunctions }`；
+  在真实浏览器中渲染 flowchart，3 节点 / 2 条带箭头边 / 边标签齐全；
+  classic `test:node` 140 项通过，prettier 与 eslint 通过。
+- 教训：手工 vendor 的第三方预构建产物是依赖审计的盲区——它不在 lockfile
+  的依赖树里，audit 看不见；只有扫产物才能发现。
 
 **验证**：clean install + build 后 classic 产物 `"0.18.11"`；两前端
 `bun audit --production` 均 0 漏洞；镜像按 `5a308f34f` 重建，隔离容器
