@@ -40,7 +40,9 @@ jobs:
       # 未被调用的（如 x/crypto/openpgp）不计入，避免无法修复的项卡住门禁。
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # 钉版本：@latest 会让门禁随上游发版静默漂移（漏洞库仍由 govulncheck
+          # 每次联网更新，那是数据不是代码）。
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           "$(go env GOPATH)/bin/govulncheck" ./...
 
   frontend-checks:
