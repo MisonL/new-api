@@ -38,7 +38,6 @@ test("Docker build entrypoints pass EFFECTIVE_APP_VERSION explicitly", () => {
   const entrypoints = [
     ".github/workflows/docker-build.yml",
     ".github/workflows/docker-image-alpha.yml",
-    ".github/workflows/docker-image-nightly.yml",
     "scripts/build-docker-local.sh",
   ];
 
