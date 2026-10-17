@@ -446,3 +446,42 @@
   `model/{batch_flush_test,channel,main,utils}.go`、`EditChannelModal.jsx`、两份新增文件）。
 - 未覆盖：真实 MySQL/PG 实跑全量回归（仅 route scope 单点实测）、真实上游中间 usage 帧
   频率、带登录态浏览器点击。
+
+## 8. 第三批：CI 门禁与工具链统一（2026-10-17）
+
+第十轮复盘发现的"验证缺口"批次——问题不在业务代码，在于这些代码从来没有被机器强制
+检查过。
+
+- **`805316857` format:check 转绿**：`bun run format:check` 长期不在任何 CI 里，
+  prettier 漂移积累到 20 个文件（3 个是上批提交插 import 引入，17 个是 520c691eb 等
+  存量）。纯格式改动，lint/typecheck/build 复验通过。
+- **`c5ebb906c` Go 统一到 1.27.2**：go.mod 1.25.1 / Dockerfile 1.26.8 / tauri 1.25.14 /
+  release.yml 浮动 `>=1.25.14` 四处各自为政；1.27.2 是 go.dev 当前最新稳定版
+  （`curl go.dev/dl/?mode=json`：1.27.2、1.26.9）。Dockerfile 换
+  `golang:1.27.2-alpine@sha256:f92b6ef8...`，go.mod 与嵌套工具模块 go 指令、五个
+  setup-go 全部对齐；go.sum 零变化。验证：1.27.2 容器内 `go build ./...`、
+  `go vet ./...` 通过，AGENTS.md 最小集全绿。
+- **`5bf7dcb37` classic eslint 修复**：根配置 ecmaVersion 2020 解析不了 tests 的顶层
+  await，`bun run eslint` 一直是红的；tests/** override 升 2022，src 规则不动。
+- **`d3a016906` go-test-all.sh 嵌套模块修复**：全量跑出唯一失败——rg 枚举把
+  `tools/relaykit-dto-compat`（独立 go.mod）当主模块包，`go test` 报
+  "does not contain package"。主循环排除 + 结尾按各自 go.mod 分跑；反向验证：去掉
+  排除行原失败复现。修后 exit=0（88 主模块包 + 嵌套模块，66 个 ok 行）。
+- **`d9467a07c` CI 接入 Go 与双前端门禁**：repo-gates 新增 `go-tests`（go build/vet/
+  全量测试，stub 两个 go:embed dist）与 `frontend-checks`（web/default format/
+  lint/typecheck/build，web/classic prettier/eslint 与 140 个 node 契约测试，bun 版本
+  读 `.bun-version`）。此前 CI 里 `grep "go test"` 零命中，HEAD 带着未定义函数都能
+  提交（本轮 ebfb9e944 修的正是这种断裂）。
+- **`85299c2a5` relaykit 钉点单一来源**：workflow 手写 `--ref 789c97019` 与
+  selfcheck 的 `UPSTREAM_PIN` 是两份副本，升锚漏改就分叉。新增 `relaykit-pin.py` 从
+  常量取值，workflow 改动态引用；`check_ci_pin` 对钉点做一致性核对（动态形态或字面
+  相等，否则 fail-closed），补 5 个单测（42→47）。空 `--ref` 实测 exit=1，取值失败
+  不会回落到会漂移的 upstream/main。
+- **`9f6ee63cf` 文档与 CODEOWNERS**：AGENTS.md/架构计划的"Go 1.25+"对齐 1.27.2；
+  新增 CODEOWNERS 声明 CI/部署/契约脚本的审阅面（需分支保护开关才强制）。
+
+**最终验证（干净克隆 `9f6ee63cf`）**：`go build` OK；`go-test-all.sh -count=1`
+exit=0；selfcheck 自述计数全一致、47 单测 OK；compose/dockerfile 契约全绿；镜像
+（Go 1.27.2 工具链）重建后隔离容器 healthy、build-info=9f6ee63cf、healthz OK、
+启动日志 0 panic。未覆盖：GitHub Actions 真实 runner 上的首次运行（本地按同一步骤
+逐条跑通，workflow YAML 结构已解析校验）；双前端旧版本的 live 服务器回归。
