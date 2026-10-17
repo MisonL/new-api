@@ -1,0 +1,12 @@
+# 高风险面由维护者审阅：CI 门禁、部署编排、契约脚本、构建入口。
+# 本文件只有在仓库分支保护启用 "Require review from Code Owners" 后才强制生效；
+# 未启用时它只是所有权声明，不会阻止合并。
+
+/.github/ @MisonL
+/deploy/ @MisonL
+/scripts/ @MisonL
+/Dockerfile @MisonL
+/docker-compose.yml @MisonL
+/docker-compose.dev.yml @MisonL
+/go.mod @MisonL
+/go.sum @MisonL
