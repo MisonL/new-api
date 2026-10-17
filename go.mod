@@ -1,11 +1,12 @@
 module github.com/QuantumNous/new-api
 
-// +heroku goVersion go1.18
-go 1.25.1
+// +heroku goVersion go1.27.2
+go 1.27.2
 
 require (
 	github.com/Calcium-Ion/go-epay v0.0.4
 	github.com/abema/go-mp4 v1.4.1
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/andybalholm/brotli v1.1.1
 	github.com/anknown/ahocorasick v0.0.0-20190904063843-d75dbd5169c0
 	github.com/aws/aws-sdk-go-v2 v1.41.5
@@ -13,6 +14,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.50.4
 	github.com/aws/smithy-go v1.24.2
 	github.com/bytedance/gopkg v0.1.3
+	github.com/expr-lang/expr v1.17.8
 	github.com/gin-contrib/cors v1.7.2
 	github.com/gin-contrib/gzip v0.0.6
 	github.com/gin-contrib/sessions v0.0.5
@@ -26,8 +28,10 @@ require (
 	github.com/go-webauthn/webauthn v0.14.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/sessions v1.2.1
 	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/grafana/pyroscope-go v1.2.7
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/jinzhu/copier v0.4.0
 	github.com/joho/godotenv v1.5.1
@@ -63,7 +67,6 @@ require (
 
 require (
 	github.com/DmitriyVTitov/size v1.5.0 // indirect
-	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/anknown/darts v0.0.0-20151216065714-83ff685239e6 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
@@ -78,7 +81,6 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/expr-lang/expr v1.17.8
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
@@ -94,12 +96,10 @@ require (
 	github.com/google/go-tpm v0.9.5 // indirect
 	github.com/gorilla/context v1.1.1 // indirect
 	github.com/gorilla/securecookie v1.1.1 // indirect
-	github.com/gorilla/sessions v1.2.1
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.9 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.9.2
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
