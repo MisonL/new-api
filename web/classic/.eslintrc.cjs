@@ -9,6 +9,15 @@ module.exports = {
   plugins: ['header', 'react-hooks'],
   overrides: [
     {
+      // Node test files are ESM and use top-level await; ecmaVersion 2020
+      // (applied to src for browser compatibility) cannot parse that.
+      files: ['tests/**/*.js'],
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: 'module',
+      },
+    },
+    {
       files: ['**/*.{js,jsx}'],
       rules: {
         'header/header': [
