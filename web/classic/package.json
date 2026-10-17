@@ -108,8 +108,9 @@
     "minimatch": "10.2.3",
     "minimist": "1.2.6",
     "node-releases": "^2.0.37",
-    "postcss-selector-parser": "^6.1.3",
-    "update-browserslist-db": "^1.2.3"
+    "postcss-selector-parser": "^7.1.6",
+    "update-browserslist-db": "^1.2.3",
+    "katex": "^0.18.11"
   },
   "prettier": {
     "singleQuote": true,

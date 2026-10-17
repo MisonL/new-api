@@ -118,7 +118,8 @@
     "decode-uri-component": "0.5.0",
     "fast-uri": "3.1.8",
     "ip-address": "10.7.3",
-    "minimist": "1.2.6"
+    "minimist": "1.2.6",
+    "katex": "^0.18.11"
   },
   "browserslist": {
     "production": [
