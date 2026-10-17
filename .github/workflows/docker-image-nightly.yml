@@ -89,7 +89,22 @@ jobs:
         with:
           images: |
             ${{ steps.registry.outputs.ghcr_repository }}
-            ${{ steps.registry.outputs.dockerhub_enabled == 'true' && steps.registry.outputs.dockerhub_repository || steps.registry.outputs.ghcr_repository }}
+
+      # 与 docker-build.yml 同口径：tag 列表在 shell 里拼，Docker Hub 未启用时
+      # 不产生空行（空字符串会被 build-push-action 当成非法 tag）。
+      - name: Prepare image tags
+        id: tags
+        run: |
+          {
+            echo "value<<EOF"
+            echo "${{ steps.registry.outputs.ghcr_repository }}:nightly-${{ matrix.arch }}"
+            echo "${{ steps.registry.outputs.ghcr_repository }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}"
+            if [ "${{ steps.registry.outputs.dockerhub_enabled }}" = "true" ]; then
+              echo "${{ steps.registry.outputs.dockerhub_repository }}:nightly-${{ matrix.arch }}"
+              echo "${{ steps.registry.outputs.dockerhub_repository }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build & push single-arch
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -97,11 +112,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
-          tags: |
-            ${{ steps.registry.outputs.ghcr_repository }}:nightly-${{ matrix.arch }}
-            ${{ steps.registry.outputs.ghcr_repository }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}
-            ${{ steps.registry.outputs.dockerhub_enabled == 'true' && format('{0}:nightly-{1}', steps.registry.outputs.dockerhub_repository, matrix.arch) || '' }}
-            ${{ steps.registry.outputs.dockerhub_enabled == 'true' && format('{0}:{1}-{2}', steps.registry.outputs.dockerhub_repository, steps.version.outputs.value, matrix.arch) || '' }}
+          tags: ${{ steps.tags.outputs.value }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ steps.version.outputs.value }}
