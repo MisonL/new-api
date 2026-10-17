@@ -519,12 +519,12 @@ workflow 层的一致性欠账。
   `client.rest.pulls.update`（关 PR）。原 workflow 全只读，三项失败动作都不会
   生效。补 `issues: write` + `pull-requests: write`（README 默认示例只给
   pull-requests write，因为它默认不评论；本项目三项全开）。
-- **`848268f7b` nightly 镜像命名空间**：`docker-image-nightly.yml` 硬编码上游
-  作者命名空间 `calciumion/new-api`，与另外两个 docker workflow 的
-  `${GITHUB_REPOSITORY}` / `secrets.DOCKERHUB_USERNAME` 口径不一致，且两个 job
-  都缺 `packages: write`。改为同口径 registry 解析（GHCR 必推、Docker Hub 有
-  secrets 才推），manifest 按同一开关分别推送。该 workflow 的触发分支
-  `nightly` 在 origin 不存在，当前处于休眠状态，修复不改变现有行为。
+- **`848268f7b` nightly 镜像命名空间**（后续该 workflow 已整体删除，见本节末）：
+  `docker-image-nightly.yml` 硬编码上游作者命名空间 `calciumion/new-api`，与另外
+  两个 docker workflow 的 `${GITHUB_REPOSITORY}` / `secrets.DOCKERHUB_USERNAME`
+  口径不一致，且两个 job 都缺 `packages: write`。改为同口径 registry 解析
+  （GHCR 必推、Docker Hub 有 secrets 才推），manifest 按同一开关分别推送。
+  该 workflow 的触发分支 `nightly` 在 origin 不存在，修复时处于休眠状态。
 - **`438a47d2d` tag 列表改 shell 拼接**：上一提交内联 `cond && x || ''` 会产生
   空字符串 tag，build-push-action 会拒绝；改为与 docker-build.yml 相同的
   `Prepare image tags` 多行输出，两种开关状态实测拼接正确。
@@ -537,6 +537,10 @@ workflow 层的一致性欠账。
 **验证（干净克隆逐 job 模拟 CI）**：stub dist 后 `go build ./...`、`go vet ./...`
 通过，`go-test-all.sh -count=1` exit=0（88 包 + 嵌套模块，66 ok）；web/default
 format/lint/typecheck/build 全过；web/classic prettier/eslint/140 个 node 测试
-全过；8 个 workflow YAML 全部可解析。未覆盖：GitHub Actions 真实 runner 的首次
-运行（权限是否如预期生效只能由实际 PR 验证）；`nightly` 分支从未推送，nightly
-workflow 整体仍未经实跑。
+全过；7 个 workflow YAML 全部可解析。未覆盖：GitHub Actions 真实 runner 的首次
+运行（权限是否如预期生效只能由实际 PR 验证）。
+
+**nightly 构建整体删除**：按维护者决定，`docker-image-nightly.yml` 直接删除——
+该 workflow 的触发分支从未存在，镜像命名空间还是上游作者的，且已有
+`docker-build.yml`（手动稳定版）与 `docker-image-alpha.yml`（alpha 通道）覆盖
+镜像发布需求。上面的命名空间修复仅作为历史记录保留。
