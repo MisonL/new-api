@@ -266,10 +266,19 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 	}
+	// Stop the periodic batch writer and wait for any in-flight database write
+	// before flushing the final in-memory deltas and closing the pool.
+	model.StopBatchUpdater()
 	// Quota charged during the last batch interval is still in memory at this
 	// point. Flushing after Shutdown drains the request path first, so no new
 	// deltas are produced while this write runs. A SIGKILL skips this entirely.
 	model.FlushBatchUpdates()
+	// 看板聚合缓存（CacheQuotaData）只在 DataExportInterval（默认 5 分钟）的
+	// 定时器里落盘；不在这里补一次，重启会丢掉最近一个窗口的聚合。放在
+	// FlushBatchUpdates 之后：请求路径已排空，不会再产生新聚合。
+	if common.DataExportEnabled {
+		model.SaveQuotaDataCache()
+	}
 	common.SysLog("server exited")
 }
 
