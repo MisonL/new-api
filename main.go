@@ -266,9 +266,6 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 	}
-	// Stop the periodic batch writer and wait for any in-flight database write
-	// before flushing the final in-memory deltas and closing the pool.
-	model.StopBatchUpdater()
 	// Quota charged during the last batch interval is still in memory at this
 	// point. Flushing after Shutdown drains the request path first, so no new
 	// deltas are produced while this write runs. A SIGKILL skips this entirely.
