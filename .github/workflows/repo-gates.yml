@@ -93,8 +93,9 @@ jobs:
       # audit 读 lockfile，产物可能打包另一份旧副本（§11.1：classic 曾把
       # mermaid 嵌套的 katex@0.16.47 打进 dist，而 audit 显示 0.18.11 已修）。
       # 该检查直接扫两个 dist，要求打包进去的版本与 node_modules 解析一致。
+      # 本 job 已 setup-bun，用 bun 跑与 Dockerfile/发布脚本同源。
       - name: verify bundled dependency versions
-        run: node scripts/frontend-bundle-versions.mjs
+        run: bun scripts/frontend-bundle-versions.mjs
 
   relaykit-gates:
     runs-on: ubuntu-latest

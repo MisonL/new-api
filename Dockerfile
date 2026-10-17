@@ -16,6 +16,7 @@ COPY ./web/default .
 COPY ./web/scripts /scripts
 COPY ./VERSION .
 COPY ./scripts/write-frontend-release-metadata.sh /scripts/write-frontend-release-metadata.sh
+COPY ./scripts/frontend-bundle-versions.mjs /scripts/frontend-bundle-versions.mjs
 ARG APP_VERSION=unknown
 ARG EFFECTIVE_APP_VERSION=${APP_VERSION}
 ARG VCS_REF=unknown
@@ -24,6 +25,7 @@ RUN VERSION_VALUE="${EFFECTIVE_APP_VERSION}"; \
     if [ -z "$VERSION_VALUE" ] || [ "$VERSION_VALUE" = "unknown" ]; then VERSION_VALUE="${APP_VERSION}"; fi; \
     if [ -z "$VERSION_VALUE" ] || [ "$VERSION_VALUE" = "unknown" ]; then echo "EFFECTIVE_APP_VERSION or APP_VERSION build arg is required" >&2; exit 1; fi; \
     DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$VERSION_VALUE" bun run build && \
+    bun /scripts/frontend-bundle-versions.mjs --root /build --only web/default --dist-dir dist --modules-dir node_modules && \
     sh /scripts/write-frontend-release-metadata.sh default dist "$VERSION_VALUE" "$VCS_REF" "$BUILD_DATE"
 
 FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS builder-classic
@@ -37,6 +39,7 @@ COPY ./web/classic .
 COPY ./web/scripts /scripts
 COPY ./VERSION .
 COPY ./scripts/write-frontend-release-metadata.sh /scripts/write-frontend-release-metadata.sh
+COPY ./scripts/frontend-bundle-versions.mjs /scripts/frontend-bundle-versions.mjs
 ARG APP_VERSION=unknown
 ARG EFFECTIVE_APP_VERSION=${APP_VERSION}
 ARG VCS_REF=unknown
@@ -45,6 +48,7 @@ RUN VERSION_VALUE="${EFFECTIVE_APP_VERSION}"; \
     if [ -z "$VERSION_VALUE" ] || [ "$VERSION_VALUE" = "unknown" ]; then VERSION_VALUE="${APP_VERSION}"; fi; \
     if [ -z "$VERSION_VALUE" ] || [ "$VERSION_VALUE" = "unknown" ]; then echo "EFFECTIVE_APP_VERSION or APP_VERSION build arg is required" >&2; exit 1; fi; \
     DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$VERSION_VALUE" bun run build && \
+    bun /scripts/frontend-bundle-versions.mjs --root /build --only web/classic --dist-dir dist --modules-dir node_modules && \
     sh /scripts/write-frontend-release-metadata.sh classic dist "$VERSION_VALUE" "$VCS_REF" "$BUILD_DATE"
 
 FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS builder2

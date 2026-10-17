@@ -12,26 +12,33 @@ import { fileURLToPath } from "node:url";
 
 const script = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  "frontend-bundle-versions.mjs"
+  "frontend-bundle-versions.mjs",
 );
 
-function makeFixture({ classicVersion = "0.18.11", bundleVersion = "0.18.11", omit = [] } = {}) {
+function makeFixture({
+  classicVersion = "0.18.11",
+  bundleVersion = "0.18.11",
+  omit = [],
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), "bundle-versions-"));
   mkdirSync(join(root, "web/classic/dist"), { recursive: true });
   mkdirSync(join(root, "web/default/dist"), { recursive: true });
 
   if (!omit.includes("classic-modules")) {
-    mkdirSync(join(root, "web/classic/node_modules/katex"), { recursive: true });
+    mkdirSync(join(root, "web/classic/node_modules/katex"), {
+      recursive: true,
+    });
     writeFileSync(
       join(root, "web/classic/node_modules/katex/package.json"),
-      JSON.stringify({ name: "katex", version: classicVersion })
+      JSON.stringify({ name: "katex", version: classicVersion }),
     );
   }
   writeFileSync(
     join(root, "web/classic/dist/chunk-a.js"),
-    `var x="katex-mathml";var v="${bundleVersion}";\n`
+    `var x="katex-mathml";var v="${bundleVersion}";\n`,
   );
-  writeFileSync(join(root, "web/default/dist/index.html"), "<html>no math</html>\n");
+  // 每个 dist 都必须有 JS：门禁把"有目录但无 JS"视为构建失败，不再跳过。
+  writeFileSync(join(root, "web/default/dist/index.js"), "var ok=1;\n");
   return root;
 }
 
@@ -80,10 +87,12 @@ test("fails when one of several copies is stale", () => {
   // vendor 目录里还有一份 0.16.45。"任一文件匹配即通过"会放过它。
   const root = makeFixture();
   try {
-    mkdirSync(join(root, "web/classic/dist/vendor/mermaid"), { recursive: true });
+    mkdirSync(join(root, "web/classic/dist/vendor/mermaid"), {
+      recursive: true,
+    });
     writeFileSync(
       join(root, "web/classic/dist/vendor/mermaid/katex.mjs"),
-      'var x="katex-mathml";var v="0.16.45";\n'
+      'var x="katex-mathml";var v="0.16.45";\n',
     );
     const result = run(root);
     assert.equal(result.code, 1);
@@ -134,10 +143,84 @@ test("treats a sentinel that only appears in CSS as not bundled", () => {
   const root = makeFixture({ omit: ["classic-modules"] });
   try {
     writeFileSync(join(root, "web/classic/dist/chunk-a.js"), 'var v="1";\n');
-    writeFileSync(join(root, "web/classic/dist/style.css"), ".katex-mathml{display:none}\n");
+    writeFileSync(
+      join(root, "web/classic/dist/style.css"),
+      ".katex-mathml{display:none}\n",
+    );
     const result = run(root);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /web\/classic: katex 未打包进产物，跳过/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("checks only the requested frontend with --only", () => {
+  // Dockerfile 里两个前端各自独立构建，看不到彼此的 dist。
+  const root = makeFixture();
+  try {
+    rmSync(join(root, "web/default/dist"), { recursive: true, force: true });
+    const result = execFileSync(
+      process.execPath,
+      [script, "--root", root, "--only", "web/classic"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    assert.match(result, /web\/classic: katex 0\.18\.11 已确认打包/);
+    assert.doesNotMatch(result, /web\/default/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("accepts Docker-style dist and modules overrides", () => {
+  const root = makeFixture();
+  try {
+    mkdirSync(join(root, "docker-build/node_modules/katex"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(root, "docker-build/node_modules/katex/package.json"),
+      JSON.stringify({ name: "katex", version: "0.18.11" }),
+    );
+    mkdirSync(join(root, "docker-build/dist"), { recursive: true });
+    writeFileSync(
+      join(root, "docker-build/dist/chunk.js"),
+      'var x="katex-mathml";var v="0.18.11";\n',
+    );
+    const result = execFileSync(
+      process.execPath,
+      [
+        script,
+        "--root",
+        root,
+        "--only",
+        "web/classic",
+        "--dist-dir",
+        "docker-build/dist",
+        "--modules-dir",
+        "docker-build/node_modules",
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    assert.match(result, /web\/classic: katex 0\.18\.11 已确认打包/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a dist that has no JavaScript at all", () => {
+  // 构建静默失败只留下 index.html 时，哨兵扫描会得出"未打包"并放行；
+  // 该缺口必须 fail-closed。
+  const root = makeFixture();
+  try {
+    rmSync(join(root, "web/default/dist/index.js"));
+    writeFileSync(
+      join(root, "web/default/dist/index.html"),
+      "<html>build failed silently</html>\n",
+    );
+    const result = run(root);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /web\/default: .*没有任何 js\/mjs\/cjs 文件/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

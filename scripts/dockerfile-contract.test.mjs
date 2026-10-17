@@ -61,6 +61,23 @@ test("Dockerfile writes release metadata for both embedded frontends", () => {
   );
 });
 
+test("Dockerfile verifies bundled dependency versions for both frontends", () => {
+  // 镜像里的前端产物不经过 repo-gates；门禁必须在构建阶段执行，否则
+  // 打包了旧依赖副本的镜像可以正常发布。
+  assert.match(
+    dockerfile,
+    /bun \/scripts\/frontend-bundle-versions\.mjs --root \/build --only web\/default/
+  );
+  assert.match(
+    dockerfile,
+    /bun \/scripts\/frontend-bundle-versions\.mjs --root \/build --only web\/classic/
+  );
+  assert.match(
+    dockerfile,
+    /COPY \.\/scripts\/frontend-bundle-versions\.mjs \/scripts\/frontend-bundle-versions\.mjs/
+  );
+});
+
 test("frontend release metadata script emits parseable JSON", () => {
   const distDir = mkdtempSync(resolve(tmpdir(), "new-api-release-"));
   try {

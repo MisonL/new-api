@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { readVersion, tauriAppDir, webDir } from './lib/project.mjs';
+import { readVersion, repoRoot, tauriAppDir, webDir } from './lib/project.mjs';
 
 function run(command, args, cwd, env = {}) {
   execFileSync(command, args, {
@@ -21,6 +21,9 @@ function buildWeb() {
     DISABLE_ESLINT_PLUGIN: 'true',
     VITE_REACT_APP_VERSION: version,
   });
+  // 桌面产物同样内嵌前端 bundle，必须与 Web/镜像走同一道产物版本门禁：
+  // audit 只读 lockfile，证明不了 dist 里打包的是哪个版本。
+  run('bun', ['scripts/frontend-bundle-versions.mjs', '--only', 'web/classic'], repoRoot);
   const webDistDir = resolve(webDir, 'dist');
   const tauriDistDir = resolve(tauriAppDir, 'dist');
   if (!existsSync(webDistDir)) {

@@ -634,6 +634,37 @@ override 生效后没有被清理。dist 是在这堆陈旧 node_modules 上构�
 - 教训：手工 vendor 的第三方预构建产物是依赖审计的盲区——它不在 lockfile
   的依赖树里，audit 看不见；只有扫产物才能发现。
 
+### 11.3 门禁覆盖到发布链路与 dompurify 漂移（2026-10-17 晚）
+
+11.1/11.2 把检查做进了 PR 门禁，但复查发现三处缺口，本轮补齐：
+
+- **发布链路未覆盖**：`repo-gates.yml` 只监听 pull_request 与 main/dev 的
+  push；`release.yml`（tag 发布）与 `docker-build.yml`（workflow_dispatch）
+  各自构建前端，不调用该检查。tag 即使从未通过 repo-gates 也能产出发布物。
+  处置：`scripts/build-release-frontends.sh` 在两个前端构建后调用门禁；
+  Dockerfile 的 `builder` 与 `builder-classic` 阶段各自在 `bun run build`
+  之后调用（两个前端在独立阶段，看不到彼此 dist，故脚本新增 `--only`、
+  `--dist-dir`、`--modules-dir` 以适配容器内布局）。
+- **空 dist 是 fail-open**：产物目录存在但没有任何 js/mjs/cjs 时，哨兵扫描
+  得出"未打包"并 exit 0。构建步骤本身通常先失败，但判据上必须 fail-closed。
+  处置：无 JS 文件直接失败，并补了对应夹具。
+- **dompurify 漂移（已知，不纳入门禁）**：mermaid 12.2.0 的预构建 chunk
+  `chunk-FWWDAFD2.mjs` 内联 dompurify **3.4.12**，`node_modules` 解析到
+  **3.4.16**。3.4.12 落在三条公告范围内（GHSA-55q2-fjhq-7xh7 fixed 3.4.13；
+  GHSA-6688-9rhm-gjv2、GHSA-p98j-92pf-mc4p fixed 3.4.16）。可达性判定为
+  不可达：三条公告都要求 `IN_PLACE` 模式，dompurify 的实现条件是
+  `IN_PLACE && typeof dirty !== 'string' && _isNode(dirty)`，而 mermaid 的
+  `sanitizeMore(text: string, ...)` 传字符串，分支不进入；生产 dist 上用
+  `strict` 渲染注入 payload，script 标签、onerror 属性与 XSS 标记均为 0。
+  该副本是 mermaid 发布物的一部分，override 无法改动，纳入门禁只会长期红灯，
+  因此登记为已知漂移而非门禁项。
+- **同源漂移清单**：同一 vendor chunk 里内联的 marked 16.3.0、dayjs 1.11.21
+  均无已知公告；mermaid 12.2.0 与 katex 0.18.11 按精确版本查询 OSV 为 0。
+
+**验证**：门禁脚本 11 个夹具用例通过（node 与 bun 两种运行时）；
+`--only`/`--dist-dir`/`--modules-dir` 在模拟 Docker 布局下验证；
+`web/classic/dist` 与 `web/default/dist` 真实产物检查通过。
+
 **验证**：clean install + build 后 classic 产物 `"0.18.11"`；两前端
 `bun audit --production` 均 0 漏洞；镜像按 `5a308f34f` 重建，隔离容器
 healthy、build-info 匹配、healthz OK、启动 0 panic。
