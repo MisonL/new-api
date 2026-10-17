@@ -485,3 +485,25 @@ exit=0；selfcheck 自述计数全一致、47 单测 OK；compose/dockerfile 契
 （Go 1.27.2 工具链）重建后隔离容器 healthy、build-info=9f6ee63cf、healthz OK、
 启动日志 0 panic。未覆盖：GitHub Actions 真实 runner 上的首次运行（本地按同一步骤
 逐条跑通，workflow YAML 结构已解析校验）；双前端旧版本的 live 服务器回归。
+
+## 9. 第四批：CI 自身缺陷（2026-10-17）
+
+上一批把门禁接进 CI 后复查门禁本身，找到三处「门禁会红、但原因不是代码问题」的缺陷。
+
+- **`d716acd81` go-test-all.sh 依赖 rg**：脚本开头 `command -v rg || exit 1`，而
+  GitHub ubuntu runner 不预装 ripgrep（`actions/runner-images` 的 Ubuntu2404
+  工具清单 126 条无 ripgrep，已实读核对）。改成三段式：rg 优先 / git 仓库退回
+  `git ls-files` + 未跟踪文件 / 非 git 目录退回 find。验证：两条路径对同一仓库
+  枚举出完全相同的 1166 个 .go 文件（diff 为空），88 包 + 嵌套模块各跑一次，
+  两路 `-count=1` 全量 exit=0、66 个 ok。
+- **`609b99f5e` i18n-gate 的 bun 未钉版**：frontend-checks 与 tauri 读
+  `.bun-version`(1.4.0)，i18n-gate 不传版本取 latest，同仓库两个 job 跑不同 bun。
+- **嵌套模块发现的参数误传**：非 rg 分支里 `list_files -g 'go.mod'` 会把 -g 当普通
+  参数忽略、返回全部 3135 个文件，dirname 后冒出 `.agents/skills/...` 这类假模块。
+  改为 `--go-mod` 专用分支。这条在无 rg 沙箱里实测复现并修复。
+
+**未修（需你决策）**：`pr-check.yml` 声明 `contents/issues/pull-requests: read`，
+但配置了 `failure-add-pr-labels` 与 `close-pr: true`——只读 token 打不了标签也关
+不了 PR。要么补 `pull-requests: write` / `issues: write`，要么这两项实际不生效。
+该 action 的 action.yml 在 v0.2.1 取不到（404），无法确认它到底需要哪几项，故未擅自
+放权。
