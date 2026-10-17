@@ -544,3 +544,31 @@ format/lint/typecheck/build 全过；web/classic prettier/eslint/140 个 node �
 该 workflow 的触发分支从未存在，镜像命名空间还是上游作者的，且已有
 `docker-build.yml`（手动稳定版）与 `docker-image-alpha.yml`（alpha 通道）覆盖
 镜像发布需求。上面的命名空间修复仅作为历史记录保留。
+
+## 11. 第六批：依赖漏洞面（2026-10-17）
+
+前几轮从未系统跑过依赖审计。本轮实跑 govulncheck / bun audit / cargo audit。
+
+- **`24be2b809` Go 5 个可达漏洞**：govulncheck（GOTOOLCHAIN=go1.27.2，与
+  Dockerfile 一致）报 `golang.org/x/net@v0.57.0` 的 HTTP/2 实现 5 项可达：
+  GO-2026-6617/6612/6611/6610（头部框架解析）与 GO-2026-6603（Trailer 头
+  内存耗尽），调用链在 `service/http_client.go` 的 ssrfGuardedTransport 与
+  `controller.RelayTask`，属对外暴露面。x/net 升 v0.61.0（连带 x/crypto、
+  x/sync、x/sys、x/text 配套升级）。重扫：可达漏洞 0，剩 x/crypto/openpgp
+  的 GO-2026-5932（未 import、不可达、上游 N/A 无修复版）。
+- **`057576231` 前端两处**：katex（0.16.x，GHSA-238p-pmpm-9mq7）override
+  到 ^0.18.11——0.18 的 breaking change 只加内部 CSS 类名前缀，本仓库只用
+  `.katex`/`.katex-display` 两个根类（0.18.11 实测保留），rehype-katex 用的
+  renderToString 签名未变，并用 remark-math + rehype-katex 实跑渲染验证；
+  postcss-selector-parser 的 classic override 从 ^6.1.3（恰好钉在漏洞区间）
+  升到 ^7.1.6，构建实测通过。braces 3.0.3 是已发布最新版、advisory 覆盖
+  <=3.0.3、无修复版，且只在 dev 依赖链（shadcn/knip/chokidar）里，保留。
+- **`5d908e040` 扫描进 CI**：go-tests 加 govulncheck（只判可达漏洞，
+  不可达的 N/A 项不卡门禁）；frontend-checks 加两个 `bun audit --production`
+  （实测双前端 0 漏洞；dev-only 的 braces 不阻塞）。
+- **cargo audit（Tauri）**：0 个 vulnerability，11 条 unmaintained/unsound
+  警告全部来自 Tauri/GTK 上游依赖链（fxhash、proc-macro-error、unic-*、
+  glib 0.18、rand 0.7 等），非本仓库可控，记录不修。
+
+**未覆盖**：GitHub Actions 真实 runner 的首次扫描（govulncheck 需联网拉
+漏洞库）；braces 修复需等上游发版后重新评估。
