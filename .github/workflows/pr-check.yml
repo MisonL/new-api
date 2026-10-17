@@ -2,8 +2,12 @@ name: PR Check
 
 permissions:
   contents: read
-  issues: read
-  pull-requests: read
+  # anti-slop 的失败动作：打标签/评论/锁会话走 issues API（addLabels、
+  # createComment、lock），关 PR 走 pulls API（pulls.update）。只读 token 执行
+  # 不了这两类操作，而本 workflow 同时启用了 failure-add-pr-labels、
+  # failure-pr-message 与 close-pr，因此两类写权限都必须给。
+  issues: write
+  pull-requests: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'

@@ -27,6 +27,7 @@ jobs:
 
     permissions:
       contents: read
+      packages: write
 
     steps:
       - name: Check out (shallow)
@@ -51,10 +52,32 @@ jobs:
           echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
           echo "source=https://github.com/${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare registry targets
+        id: registry
+        run: |
+          # 原文件硬编码了上游作者的 Docker Hub 命名空间 calciumion/new-api，
+          # 与本仓库另外两个 docker workflow 的 ${GITHUB_REPOSITORY} /
+          # secrets.DOCKERHUB_USERNAME 口径不一致；推了会往上游仓库写镜像。
+          echo "ghcr_repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "dockerhub_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "dockerhub_repository=${{ secrets.DOCKERHUB_USERNAME }}/new-api" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Log in to Docker Hub
+        if: steps.registry.outputs.dockerhub_enabled == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -65,7 +88,8 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: |
-            calciumion/new-api
+            ${{ steps.registry.outputs.ghcr_repository }}
+            ${{ steps.registry.outputs.dockerhub_enabled == 'true' && steps.registry.outputs.dockerhub_repository || steps.registry.outputs.ghcr_repository }}
 
       - name: Build & push single-arch
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -74,8 +98,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            calciumion/new-api:nightly-${{ matrix.arch }}
-            calciumion/new-api:${{ steps.version.outputs.value }}-${{ matrix.arch }}
+            ${{ steps.registry.outputs.ghcr_repository }}:nightly-${{ matrix.arch }}
+            ${{ steps.registry.outputs.ghcr_repository }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}
+            ${{ steps.registry.outputs.dockerhub_enabled == 'true' && format('{0}:nightly-{1}', steps.registry.outputs.dockerhub_repository, matrix.arch) || '' }}
+            ${{ steps.registry.outputs.dockerhub_enabled == 'true' && format('{0}:{1}-{2}', steps.registry.outputs.dockerhub_repository, steps.version.outputs.value, matrix.arch) || '' }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ steps.version.outputs.value }}
@@ -89,9 +115,13 @@ jobs:
           sbom: false
 
   create_manifests:
-    name: Create multi-arch manifests (Docker Hub)
+    name: Create multi-arch manifests (GHCR + optional Docker Hub)
     needs: [build_single_arch]
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Check out (shallow)
@@ -106,22 +136,57 @@ jobs:
           echo "value=$VERSION" >> $GITHUB_OUTPUT
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
+      - name: Prepare registry targets
+        id: registry
+        run: |
+          echo "ghcr_repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "dockerhub_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "dockerhub_repository=${{ secrets.DOCKERHUB_USERNAME }}/new-api" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Log in to Docker Hub
+        if: steps.registry.outputs.dockerhub_enabled == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Create & push manifest (Docker Hub - nightly)
+      - name: Create & push manifest (GHCR - nightly)
         run: |
           docker buildx imagetools create \
-            -t calciumion/new-api:nightly \
-            calciumion/new-api:nightly-amd64 \
-            calciumion/new-api:nightly-arm64
+            -t "${{ steps.registry.outputs.ghcr_repository }}:nightly" \
+            "${{ steps.registry.outputs.ghcr_repository }}:nightly-amd64" \
+            "${{ steps.registry.outputs.ghcr_repository }}:nightly-arm64"
+
+      - name: Create & push manifest (GHCR - versioned nightly)
+        run: |
+          docker buildx imagetools create \
+            -t "${{ steps.registry.outputs.ghcr_repository }}:${VERSION}" \
+            "${{ steps.registry.outputs.ghcr_repository }}:${VERSION}-amd64" \
+            "${{ steps.registry.outputs.ghcr_repository }}:${VERSION}-arm64"
+
+      - name: Create & push manifest (Docker Hub - nightly)
+        if: steps.registry.outputs.dockerhub_enabled == 'true'
+        run: |
+          docker buildx imagetools create \
+            -t "${{ steps.registry.outputs.dockerhub_repository }}:nightly" \
+            "${{ steps.registry.outputs.dockerhub_repository }}:nightly-amd64" \
+            "${{ steps.registry.outputs.dockerhub_repository }}:nightly-arm64"
 
       - name: Create & push manifest (Docker Hub - versioned nightly)
+        if: steps.registry.outputs.dockerhub_enabled == 'true'
         run: |
           docker buildx imagetools create \
-            -t calciumion/new-api:${VERSION} \
-            calciumion/new-api:${VERSION}-amd64 \
-            calciumion/new-api:${VERSION}-arm64
+            -t "${{ steps.registry.outputs.dockerhub_repository }}:${VERSION}" \
+            "${{ steps.registry.outputs.dockerhub_repository }}:${VERSION}-amd64" \
+            "${{ steps.registry.outputs.dockerhub_repository }}:${VERSION}-arm64"
