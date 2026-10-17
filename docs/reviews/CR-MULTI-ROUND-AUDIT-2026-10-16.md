@@ -364,7 +364,7 @@
   从 DB 重读的真实值而非 5 字段零值，随后的 `manage(disable)` 走 `InvalidateUserCache`，
   TokenAuth 对失效缓存返回 500 而非放行。不成立。
 
-### 7.2 修复（8 个提交）
+### 7.2 修复（第一批，8 个提交）
 
 - **`d9db30fbb` 结算列不再随陈旧快照回写**：`User.Update` 排除
   `Quota/UsedQuota/RequestCount/AffQuota/AffCount/AffHistoryQuota`，其余字段保留"零值不写"
@@ -384,7 +384,33 @@
 - **`3ae21aca4` 前端两项**：通用 Markdown 叠加 `rehype-sanitize`；playground 调试面板两条发送
   路径都在发请求前清空回复累加器。
 
-### 7.3 第十轮明确不修（与理由）
+### 7.3 修复（第二批，10 个提交，2026-10-17）
+
+- **`6127e10e0` override 后失效用户缓存**：管理员 override 直写 DB 不走 Redis 同步，TTL 内
+  `GetUserQuota` 仍按旧额度鉴权/预扣。回归断言"缓存不得仍是旧值 + DB 读为新值"。
+- **`e9d5dbd0a` 退出时落盘看板聚合缓存**：`CacheQuotaData` 只在 5 分钟定时器落盘，优雅退出
+  会丢最近一个窗口的 `quota_data` 聚合；在 `FlushBatchUpdates` 之后补
+  `SaveQuotaDataCache`（仅 `DataExportEnabled`）。
+- **`d7440123c` Claude 请求转发 tool_choice**：`ClaudeToOpenAIRequest` 此前只映射 tools，
+  `{"type":"tool"/"none"/"auto"}` 全部丢失、上游按默认 auto 执行。四个子用例钉住映射。
+- **`c09821b47` 路由范围保存与 RowsAffected 解耦**：MySQL 的 `RowsAffected` 是"变更行数"，
+  同值重写返回 0，旧代码据此误判"行不存在"跳过更新。改为 COUNT 存在性检查 + 无条件
+  `Updates`。已在一次性 MySQL 8.0 容器上实测同值重写返回 0。
+- **`6fe4d0313` Telegram 一次性签名 Redis 去重**：进程内集合在多实例下各存一份，签名可跨
+  实例重放；改为 `SET NX`（2s 超时），Redis 报错显式失败，仅 Redis 未启用时走进程内兜底。
+- **`ef8e142e4` 前端两项**：default 微信绑定改回 POST（与后端路由一致）；classic 日志筛选补
+  `upstream_request_id`（7 个 locale 同步）。
+- **`ae61c8ff0` 只读代理硬化**：默认只绑 loopback，启用 `init`。
+- **`ebfb9e944` 修复 `e9d5dbd0a` 的越界提交**：后者把另一会话未提交的
+  `model.StopBatchUpdater()` 调用卷进索引，而该函数只存在于对方工作区，HEAD 因此无法编译。
+  本提交只从提交内容移除这三行，工作区文件不动。已用干净克隆验证 HEAD `go build` 通过。
+- **`a0fccdaab` 契约测试接入 CI**：新增 `operational-contracts` job 跑
+  compose-healthcheck-contract(.test).py 与 dockerfile-contract.test.mjs。
+  后者对健康检查的断言从精确 argv 放宽为语义检查——根 compose 在 `48c569077` 改为 shell
+  形态读取 PORT 后，该测试在 HEAD 上一直红着（本次修复前确认）。反向验证：注入 `-T 5` 后
+  测试按预期变红。
+
+### 7.4 第十轮明确不修（与理由）
 
 - **`DecreaseUserQuota` 相对扣减无余额守卫**（对照 aff 转移有 `aff_quota >= ?`）：预扣费链路
   已有余额校验，加守卫会让"预扣后补扣"在边界上失败，改动风险大于收益；现有行为不造成进一步
@@ -397,13 +423,26 @@
   会让现有绑定挂载写失败，需与部署一起做。
 - **`dtolnay/rust-toolchain@stable` 未钉 SHA**：该 action 的用法本身不支持 SHA 钉版，维持现状。
 - **`/api/pricing` 匿名可见分组名、`/api/status` 字段暴露**：维持既有结论，属产品决策。
+- **本地 `deploy/env/dev-isolated.env` 的 `DEV_REDIS_PORT=6381`**：与 example 的 6380 不一致，
+  但 6380 当前无监听、legacy `docker-compose.dev.yml`（用 6381）已不运行，冲突源不存在；
+  本地 env 是未跟踪的个人配置，不改。
 
-### 7.4 第十轮验证记录
+### 7.5 第十轮验证记录
 
 - 后端：`go test ./controller ./model ./relay/... ./service ./middleware ./types -count=1` 全绿；
   AGENTS.md 最小集 `go test ./controller ./model ./relay/common ./relay/helper ./service` 全绿。
 - 前端：`bun run typecheck`、`bun run lint`、`bun run build` 均通过（含 Safari 兼容重写检查）。
+- 契约脚本：`python3 -I scripts/compose-healthcheck-contract.test.py`、
+  `python3 -I scripts/compose-healthcheck-contract.py`、`node --test scripts/dockerfile-contract.test.mjs`
+  在修复后 HEAD 内容上全绿；`dockerfile-contract.test.mjs` 的 timeout 断言做过注入 `-T 5`
+  的反向验证。
+- HEAD 构建：干净克隆 `git clone --no-local --branch dev` + 复制前端 dist 后
+  `go build -o /dev/null .` 退出 0（`ebfb9e944` 之前该构建因 `model.StopBatchUpdater` 未定义
+  失败）。
+- MySQL 语义：一次性 `mysql:8.0` 容器（127.0.0.1:33307）验证同值 `UPDATE` 的
+  `RowsAffected` 为 0，容器用后移除。
 - 探针：全部在内存 SQLite / miniredis / `/tmp` overlay 上运行，仓库内零残留，未触碰生产容器
-  与开发库数据；工作区仅余另一并发会话的 `EditChannelModal.jsx`。
-- 未覆盖：真实 MySQL/PG 实跑（route scope RowsAffected 与三库语义）、真实上游中间 usage 帧
+  与开发库数据；工作区余下改动均属另一并发会话（`.env.example`、`docker-compose.yml`、
+  `model/{batch_flush_test,channel,main,utils}.go`、`EditChannelModal.jsx`、两份新增文件）。
+- 未覆盖：真实 MySQL/PG 实跑全量回归（仅 route scope 单点实测）、真实上游中间 usage 帧
   频率、带登录态浏览器点击。
