@@ -103,6 +103,38 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	}
 	openAIRequest.Tools = openAITools
 
+	// tool_choice 与 tools 是一对：只转发 tools 会把客户端的强制/禁用选择
+	// 悄悄改成上游默认 auto。三种 Claude 形态映射到 OpenAI 等价物：
+	// {"type":"auto"/"any"} 是字面值；{"type":"tool","name":N} 变
+	// {"type":"function","function":{"name":N}}；{"type":"none"} 也是字面值。
+	if claudeRequest.ToolChoice != nil {
+		switch choice := claudeRequest.ToolChoice.(type) {
+		case map[string]any:
+			switch choiceType, _ := choice["type"].(string); choiceType {
+			case "tool":
+				name, _ := choice["name"].(string)
+				if strings.TrimSpace(name) == "" {
+					return nil, fmt.Errorf("tool_choice.type=tool requires a name")
+				}
+				openAIRequest.ToolChoice = map[string]any{
+					"type":     "function",
+					"function": map[string]any{"name": name},
+				}
+			case "auto", "any", "none":
+				openAIRequest.ToolChoice = choiceType
+			default:
+				return nil, fmt.Errorf("unsupported tool_choice type %q", choiceType)
+			}
+		case string:
+			if choice != "auto" && choice != "none" {
+				return nil, fmt.Errorf("unsupported tool_choice %q", choice)
+			}
+			openAIRequest.ToolChoice = choice
+		default:
+			return nil, fmt.Errorf("unsupported tool_choice shape %T", claudeRequest.ToolChoice)
+		}
+	}
+
 	// Convert messages
 	openAIMessages := make([]dto.Message, 0)
 	extractThinkTaggedHistory := shouldExtractThinkTaggedClaudeHistory(claudeRequest.Model, info)
