@@ -36,6 +36,12 @@ jobs:
         run: go vet ./...
       - name: go test (full suite, nested modules included)
         run: ./scripts/go-test-all.sh -count=1
+      # 可达漏洞必须是 0。govulncheck 只报调用链真实可达的漏洞；模块里存在但
+      # 未被调用的（如 x/crypto/openpgp）不计入，避免无法修复的项卡住门禁。
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
 
   frontend-checks:
     runs-on: ubuntu-latest
@@ -47,6 +53,11 @@ jobs:
       - name: install web/default deps
         working-directory: web/default
         run: bun install --frozen-lockfile
+      # 运行时依赖零漏洞。--production 排除 devDependencies（braces 3.0.3 无
+      # 修复版且只在 shadcn/knip/chokidar 的构建链里，不进产物）。
+      - name: web/default audit (production)
+        working-directory: web/default
+        run: bun audit --production
       - name: web/default format
         working-directory: web/default
         run: bun run format:check
@@ -62,6 +73,9 @@ jobs:
       - name: install web/classic deps
         working-directory: web/classic
         run: bun install --frozen-lockfile
+      - name: web/classic audit (production)
+        working-directory: web/classic
+        run: bun audit --production
       - name: web/classic format
         working-directory: web/classic
         run: bun run lint
