@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -34,24 +35,51 @@ const telegramClockSkew = 5 * time.Minute
 // cannot be replayed even within the freshness window. Keyed by the full
 // signed hash; entries expire lazily. Widgets sign per-login data, so the
 // set stays bounded by real logins.
+//
+// 这是 Redis 不可用时的进程内兜底。多实例部署下进程内集合各存一份，同一签名
+// 可以在另一实例上重放；配置了 Redis 时以 SET NX 为准（跨实例唯一），Redis
+// 不可用则显式失败——与桌面端 OAuth handoff 的"Redis 不可用即失败"同一约定，
+// 不静默降级成各实例各放行一次。
 var telegramUsedAuth sync.Map // map[string]time.Time (consumed at)
+
+const telegramUsedAuthRedisPrefix = "telegram:used_auth:"
 
 // telegramAuthOnce rejects a signature that was already consumed. A cleanup
 // pass runs opportunistically; correctness does not depend on it, because an
 // expired entry is rejected by the auth_date freshness check anyway.
 func telegramAuthOnce(hash string) bool {
-	now := time.Now()
-	if _, loaded := telegramUsedAuth.LoadOrStore(hash, now); loaded {
+	consumed, ok := consumeTelegramAuthOnce(hash)
+	if !ok {
 		return false
 	}
-	// Opportunistic sweep: only on store, cheap enough at login frequency.
-	telegramUsedAuth.Range(func(key, value any) bool {
-		if ts, ok := value.(time.Time); ok && now.Sub(ts) > telegramMaxAuthAge {
-			telegramUsedAuth.Delete(key)
-		}
+	if consumed == nil {
 		return true
-	})
-	return true
+	}
+	// Redis path: the SET NX is authoritative and already bounds replay across
+	// instances; the in-process map only short-circuits obvious repeats.
+	_, loaded := telegramUsedAuth.LoadOrStore(hash, time.Now())
+	return !loaded
+}
+
+// consumeTelegramAuthOnce returns (consumed, allowed):
+//   - Redis enabled: (nil, false) on replay or error, (nil, true) on success.
+//   - Redis disabled: (marker, true) so the caller falls back to the in-process
+//     map; replay is caught there.
+func consumeTelegramAuthOnce(hash string) (marker *struct{}, allowed bool) {
+	if !common.RedisEnabled || common.RDB == nil {
+		return &struct{}{}, true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ok, err := common.RDB.SetNX(ctx, telegramUsedAuthRedisPrefix+hash, time.Now().Unix(), telegramMaxAuthAge).Result()
+	if err != nil {
+		common.SysError("telegram auth one-time check unavailable: " + err.Error())
+		return nil, false
+	}
+	if !ok {
+		return nil, false
+	}
+	return nil, true
 }
 
 func TelegramBind(c *gin.Context) {
