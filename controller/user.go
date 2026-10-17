@@ -1054,6 +1054,12 @@ func ManageUser(c *gin.Context) {
 				common.ApiError(c, err)
 				return
 			}
+			// 与 add/subtract 的缓存同步对齐：add/subtract 走 Increase/DecreaseUserQuota
+			// 会同步 Redis 额度，override 直写数据库，不失效缓存则 GetUserQuota 在
+			// TTL（默认 60s）内继续返回旧额度，鉴权与预扣费按旧值判定。
+			if err := model.InvalidateUserCache(user.Id); err != nil {
+				common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", user.Id, err.Error()))
+			}
 			model.RecordLogWithAdminInfo(user.Id, model.LogTypeManage,
 				fmt.Sprintf("管理员覆盖用户额度从 %s 为 %s", logger.LogQuota(oldQuota), logger.LogQuota(req.Value)), adminInfo)
 		default:
