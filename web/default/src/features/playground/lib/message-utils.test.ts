@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import type { MessageVersion } from '../types'
 import {
   appendImageUrls,
   buildRegenerationMessages,
@@ -7,7 +8,6 @@ import {
   getTextContent,
 } from './message-utils'
 import { normalizeStoredMessages } from './storage'
-import type { MessageVersion } from '../types'
 
 test('does not duplicate existing image parts when text is empty', () => {
   const content = [

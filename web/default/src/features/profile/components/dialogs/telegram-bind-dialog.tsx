@@ -12,12 +12,10 @@ import {
 } from '@/components/ui/dialog'
 import { telegramBindByParams } from '@/features/auth/api'
 import {
-  TelegramLoginWidget,
-} from '@/features/auth/components/telegram-login-widget'
-import {
   telegramAuthParams,
   type TelegramAuthData,
 } from '@/features/auth/components/telegram-auth'
+import { TelegramLoginWidget } from '@/features/auth/components/telegram-login-widget'
 
 // ============================================================================
 // Telegram Bind Dialog Component

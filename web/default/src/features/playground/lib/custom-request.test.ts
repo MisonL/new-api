@@ -32,10 +32,13 @@ test('rejects malformed JSON and non-object JSON', () => {
 })
 
 test('parses a JSON object body for sending', () => {
-  assert.deepEqual(parseCustomRequestBody('{"model":"gpt-4o","stream":false}'), {
-    model: 'gpt-4o',
-    stream: false,
-  })
+  assert.deepEqual(
+    parseCustomRequestBody('{"model":"gpt-4o","stream":false}'),
+    {
+      model: 'gpt-4o',
+      stream: false,
+    }
+  )
 })
 
 // The send path must refuse rather than silently fall back to the generated

@@ -21,10 +21,7 @@ import {
   normalizeStoredMessages,
   parseCustomRequestBody,
 } from './lib'
-import type {
-  Message as MessageType,
-  PlaygroundDebugData,
-} from './types'
+import type { Message as MessageType, PlaygroundDebugData } from './types'
 
 /** Request/response capture shown by the debug panel. */
 interface DebugCapture {

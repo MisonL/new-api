@@ -88,7 +88,9 @@ function toNestedValues(
           'general_setting.responses_stream_bootstrap_probe_interval_milliseconds'
         ],
       responses_stream_bootstrap_ping_interval_seconds:
-        flat['general_setting.responses_stream_bootstrap_ping_interval_seconds'],
+        flat[
+          'general_setting.responses_stream_bootstrap_ping_interval_seconds'
+        ],
       responses_stream_bootstrap_retryable_status_codes:
         flat[
           'general_setting.responses_stream_bootstrap_retryable_status_codes'
@@ -145,7 +147,11 @@ export function ResponsesBootstrapSection(props: {
   useEffect(() => {
     const pingField =
       'general_setting.responses_stream_bootstrap_ping_interval_seconds'
-    if (!enabled || typeof pingInterval !== 'number' || typeof gracePeriod !== 'number') {
+    if (
+      !enabled ||
+      typeof pingInterval !== 'number' ||
+      typeof gracePeriod !== 'number'
+    ) {
       form.clearErrors(pingField)
       return
     }
@@ -157,7 +163,6 @@ export function ResponsesBootstrapSection(props: {
     }
     form.clearErrors(pingField)
   }, [enabled, form, t, pingInterval, gracePeriod])
-
 
   return (
     <SettingsSection

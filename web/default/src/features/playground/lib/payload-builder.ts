@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { MESSAGE_ROLES } from '../constants'
 import type {
   ChatCompletionRequest,
   ContentPart,
@@ -7,7 +8,6 @@ import type {
   PlaygroundConfig,
   ParameterEnabled,
 } from '../types'
-import { MESSAGE_ROLES } from '../constants'
 import { formatMessageForAPI, isValidMessage } from './message-utils'
 
 type ContentPartInput = {
@@ -68,7 +68,11 @@ export function payloadToMessages(payload: unknown): Message[] {
   for (const raw of payload.messages) {
     if (!isRecord(raw)) return []
     const role = raw.role
-    if (role !== MESSAGE_ROLES.USER && role !== MESSAGE_ROLES.ASSISTANT && role !== MESSAGE_ROLES.SYSTEM) {
+    if (
+      role !== MESSAGE_ROLES.USER &&
+      role !== MESSAGE_ROLES.ASSISTANT &&
+      role !== MESSAGE_ROLES.SYSTEM
+    ) {
       return []
     }
     const content = normalizeContent(raw.content)

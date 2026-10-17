@@ -60,7 +60,8 @@ export function SignUpForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
-  const { redirectToLogin, handleLoginSuccess, redirectTo2FA } = useAuthRedirect()
+  const { redirectToLogin, handleLoginSuccess, redirectTo2FA } =
+    useAuthRedirect()
   const {
     isSending: isSendingCode,
     secondsLeft,
@@ -182,10 +183,12 @@ export function SignUpForm({
     setIsTelegramDialogOpen(true)
   }
 
-  const handleTelegramLoginSuccess = async (payload: {
-    require_2fa?: boolean
-    id?: number
-  } | null) => {
+  const handleTelegramLoginSuccess = async (
+    payload: {
+      require_2fa?: boolean
+      id?: number
+    } | null
+  ) => {
     if (payload?.require_2fa) {
       redirectTo2FA()
       return

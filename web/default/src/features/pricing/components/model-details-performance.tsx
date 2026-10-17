@@ -7,8 +7,8 @@ import {
   Timer,
   TrendingUp,
 } from 'lucide-react'
-import { useSystemConfigStore } from '@/stores/system-config-store'
 import { useTranslation } from 'react-i18next'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {

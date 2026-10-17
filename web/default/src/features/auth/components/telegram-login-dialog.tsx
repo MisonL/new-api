@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
@@ -7,12 +8,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { toast } from 'sonner'
-import {
-  telegramAuthParams,
-  type TelegramAuthData,
-} from './telegram-auth'
 import { telegramLoginByParams } from '../api'
+import { telegramAuthParams, type TelegramAuthData } from './telegram-auth'
 import { TelegramLoginWidget } from './telegram-login-widget'
 
 interface TelegramLoginDialogProps {
@@ -51,9 +48,7 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
         <DialogHeader>
           <DialogTitle>{t('Continue with Telegram')}</DialogTitle>
           <DialogDescription>
-            {t(
-              'Authorize via Telegram to sign in with your linked account.'
-            )}
+            {t('Authorize via Telegram to sign in with your linked account.')}
           </DialogDescription>
         </DialogHeader>
         <div className='flex flex-col items-center gap-4 py-2'>

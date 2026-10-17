@@ -246,7 +246,9 @@ export async function createGiftCode(
 /**
  * Look up one gift code by its code string.
  */
-export async function getGiftCode(code: string): Promise<ApiResponse<GiftCode>> {
+export async function getGiftCode(
+  code: string
+): Promise<ApiResponse<GiftCode>> {
   const res = await api.get(`/api/user/gift_codes/${encodeURIComponent(code)}`)
   return res.data
 }

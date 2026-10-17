@@ -132,7 +132,8 @@ export function isValidMessage(message: Message): boolean {
   if (content === undefined) return false
 
   // Exclude empty assistant messages (loading/streaming placeholders)
-  if (message.from === 'assistant' && !getTextContent(content).trim()) return false
+  if (message.from === 'assistant' && !getTextContent(content).trim())
+    return false
 
   return true
 }
@@ -317,7 +318,9 @@ export function sanitizeMessagesOnLoad(messages: Message[]): Message[] {
   if (targetIndex === -1) return messages
 
   const finalized = finalizeMessage(messages[targetIndex])
-  const hasContent = getTextContent(finalized.versions?.[0]?.content ?? '').trim()
+  const hasContent = getTextContent(
+    finalized.versions?.[0]?.content ?? ''
+  ).trim()
   const hasReasoning = finalized.reasoning?.content?.trim()
 
   const sanitized: Message =
@@ -357,8 +360,9 @@ export function appendImageUrls(
 
   const existingUrls = new Set(
     parts
-      .filter((part): part is ContentPart & { type: 'image_url' } =>
-        part.type === 'image_url'
+      .filter(
+        (part): part is ContentPart & { type: 'image_url' } =>
+          part.type === 'image_url'
       )
       .map((part) => part.image_url?.url.trim())
       .filter((url): url is string => !!url)

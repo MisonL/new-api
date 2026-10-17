@@ -231,7 +231,10 @@ export async function updateUserHeaderProfile(
   id: string,
   payload: HeaderProfilePayload
 ): Promise<UserHeaderProfilesResponse> {
-  const res = await api.put(`/api/user/header_profiles/${encodeURIComponent(id)}`, payload)
+  const res = await api.put(
+    `/api/user/header_profiles/${encodeURIComponent(id)}`,
+    payload
+  )
   return res.data
 }
 
@@ -263,9 +266,10 @@ export async function getUserHeaderTemplates(): Promise<UserHeaderTemplateListRe
   return res.data
 }
 
-export async function createUserHeaderTemplate(
-  payload: { name: string; content: string }
-): Promise<UserHeaderTemplateResponse> {
+export async function createUserHeaderTemplate(payload: {
+  name: string
+  content: string
+}): Promise<UserHeaderTemplateResponse> {
   const res = await api.post('/api/user/header-templates', payload)
   return res.data
 }
@@ -274,14 +278,19 @@ export async function updateUserHeaderTemplate(
   id: number,
   payload: { name: string; content: string }
 ): Promise<UserHeaderTemplateResponse> {
-  const res = await api.put(`/api/user/header-templates/${encodeURIComponent(String(id))}`, payload)
+  const res = await api.put(
+    `/api/user/header-templates/${encodeURIComponent(String(id))}`,
+    payload
+  )
   return res.data
 }
 
 export async function deleteUserHeaderTemplate(
   id: number
 ): Promise<{ success: boolean; message?: string }> {
-  const res = await api.delete(`/api/user/header-templates/${encodeURIComponent(String(id))}`)
+  const res = await api.delete(
+    `/api/user/header-templates/${encodeURIComponent(String(id))}`
+  )
   return res.data
 }
 

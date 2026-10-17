@@ -15,8 +15,7 @@ export function normalizePlaygroundConfig(
   value: unknown
 ): PlaygroundConfig | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const source = value as Partial<PlaygroundConfig> &
-    Record<string, unknown>
+  const source = value as Partial<PlaygroundConfig> & Record<string, unknown>
   const normalized: PlaygroundConfig = {
     ...DEFAULT_CONFIG,
     model:
@@ -31,7 +30,8 @@ export function normalizePlaygroundConfig(
       typeof source.temperature === 'number'
         ? source.temperature
         : DEFAULT_CONFIG.temperature,
-    top_p: typeof source.top_p === 'number' ? source.top_p : DEFAULT_CONFIG.top_p,
+    top_p:
+      typeof source.top_p === 'number' ? source.top_p : DEFAULT_CONFIG.top_p,
     max_tokens:
       typeof source.max_tokens === 'number'
         ? source.max_tokens
@@ -44,9 +44,11 @@ export function normalizePlaygroundConfig(
       typeof source.presence_penalty === 'number'
         ? source.presence_penalty
         : DEFAULT_CONFIG.presence_penalty,
-    seed:
-      typeof source.seed === 'number' ? source.seed : DEFAULT_CONFIG.seed,
-    stream: typeof source.stream === 'boolean' ? source.stream : DEFAULT_CONFIG.stream,
+    seed: typeof source.seed === 'number' ? source.seed : DEFAULT_CONFIG.seed,
+    stream:
+      typeof source.stream === 'boolean'
+        ? source.stream
+        : DEFAULT_CONFIG.stream,
     imageEnabled:
       typeof source.imageEnabled === 'boolean'
         ? source.imageEnabled

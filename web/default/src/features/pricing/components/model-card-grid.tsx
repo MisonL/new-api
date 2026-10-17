@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 import { Button } from '@/components/ui/button'
 import { PageJumpInput } from '@/components/data-table/page-jump-input'
 import { getPerfMetricsSummary } from '../api'
@@ -9,7 +10,6 @@ import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelCard } from './model-card'
 import type { ModelPerfBadgeData } from './model-perf-badge'
-import { useSystemConfigStore } from '@/stores/system-config-store'
 
 export interface ModelCardGridProps {
   models: PricingModel[]

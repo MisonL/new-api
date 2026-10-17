@@ -77,7 +77,11 @@ export function useAuthRedirect() {
    * @param redirectTo - Path to return to after the code verifies
    */
   const redirectTo2FA = (redirectTo?: string) => {
-    navigate({ to: '/otp', search: redirectTo ? { redirect: redirectTo } : {}, replace: true })
+    navigate({
+      to: '/otp',
+      search: redirectTo ? { redirect: redirectTo } : {},
+      replace: true,
+    })
   }
 
   /**

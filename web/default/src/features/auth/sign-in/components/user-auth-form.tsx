@@ -171,10 +171,12 @@ export function UserAuthForm({
     setIsTelegramDialogOpen(true)
   }
 
-  const handleTelegramLoginSuccess = async (payload: {
-    require_2fa?: boolean
-    id?: number
-  } | null) => {
+  const handleTelegramLoginSuccess = async (
+    payload: {
+      require_2fa?: boolean
+      id?: number
+    } | null
+  ) => {
     if (payload?.require_2fa) {
       redirectTo2FA(redirectTo)
       return
