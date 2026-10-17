@@ -507,3 +507,36 @@ exit=0；selfcheck 自述计数全一致、47 单测 OK；compose/dockerfile 契
 不了 PR。要么补 `pull-requests: write` / `issues: write`，要么这两项实际不生效。
 该 action 的 action.yml 在 v0.2.1 取不到（404），无法确认它到底需要哪几项，故未擅自
 放权。
+
+## 10. 第五批：CI 权限与钉点一致性（2026-10-17）
+
+按「全权处理」授权，把第四批留下的 `pr-check.yml` 权限问题查到底，并顺带清理
+workflow 层的一致性欠账。
+
+- **`848268f7b` PR 门禁补写权限**：anti-slop@5b9bb565 的 `action.yaml` 与
+  `src/actions.ts`（按钉定 SHA 经 `gh api` 读取）显示失败动作分两类 API：
+  `client.rest.issues.addLabels/createComment/lock`（打标签、评论、锁会话）与
+  `client.rest.pulls.update`（关 PR）。原 workflow 全只读，三项失败动作都不会
+  生效。补 `issues: write` + `pull-requests: write`（README 默认示例只给
+  pull-requests write，因为它默认不评论；本项目三项全开）。
+- **`848268f7b` nightly 镜像命名空间**：`docker-image-nightly.yml` 硬编码上游
+  作者命名空间 `calciumion/new-api`，与另外两个 docker workflow 的
+  `${GITHUB_REPOSITORY}` / `secrets.DOCKERHUB_USERNAME` 口径不一致，且两个 job
+  都缺 `packages: write`。改为同口径 registry 解析（GHCR 必推、Docker Hub 有
+  secrets 才推），manifest 按同一开关分别推送。该 workflow 的触发分支
+  `nightly` 在 origin 不存在，当前处于休眠状态，修复不改变现有行为。
+- **`438a47d2d` tag 列表改 shell 拼接**：上一提交内联 `cond && x || ''` 会产生
+  空字符串 tag，build-push-action 会拒绝；改为与 docker-build.yml 相同的
+  `Prepare image tags` 多行输出，两种开关状态实测拼接正确。
+- **`7928fc858` checkout 钉点统一 v4.4.0**：同一 action 11 处用 v4.3.1、3 处用
+  v4.4.0（repo-gates 的旧钉点是从更早提交复制的）。按 `refs/tags/v4` 当前指向
+  统一；tauri-build 的 v6.1.0 更新、保留。
+- **`cb36c2e1d` setup-go 钉点统一 v6.5.0**：release.yml 三处仍钉 v5.6.0，其余
+  三处已 v6.5.0。发布流程恰恰是复现产物构建的地方，最不该落后一个大版本。
+
+**验证（干净克隆逐 job 模拟 CI）**：stub dist 后 `go build ./...`、`go vet ./...`
+通过，`go-test-all.sh -count=1` exit=0（88 包 + 嵌套模块，66 ok）；web/default
+format/lint/typecheck/build 全过；web/classic prettier/eslint/140 个 node 测试
+全过；8 个 workflow YAML 全部可解析。未覆盖：GitHub Actions 真实 runner 的首次
+运行（权限是否如预期生效只能由实际 PR 验证）；`nightly` 分支从未推送，nightly
+workflow 整体仍未经实跑。
