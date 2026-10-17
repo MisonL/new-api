@@ -1,2 +1,5 @@
 node_modules/
 .cache/
+# prepare:web 把 web/classic/dist 复制到这里再嵌入 Tauri 产物；它是构建产物，
+# 每次桌面构建都会重写，不应进入版本库。
+dist/

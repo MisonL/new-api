@@ -21,7 +21,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { join, relative, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -181,7 +181,7 @@ function main() {
     if (stale.length > 0) {
       fail(
         `${check.label}: 产物里有 ${stale.length} 个文件打包的 ${check.pkg} 不是 ${versionLiteral}：` +
-          `${stale.map((f) => f.replace(root + "/", "")).join(", ")}；` +
+          `${stale.map((f) => relative(root, f)).join(", ")}；` +
           `可能是嵌套 node_modules 里的旧副本（执行 bun install --force 后重建），` +
           `也可能是绕过打包器的手工 vendor 产物（需升级提供方依赖）`,
       );

@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# 本项目只用 bun；其他包管理器的锁文件不参与构建，也不应入库。
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
 .env
 
 # Editor directories and files
