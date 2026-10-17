@@ -5,7 +5,7 @@ ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG SOURCE_URL=https://github.com/MisonL/new-api
 
-FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS builder
+FROM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS builder
 
 WORKDIR /build
 COPY web/default/package.json .
@@ -28,7 +28,7 @@ RUN VERSION_VALUE="${EFFECTIVE_APP_VERSION}"; \
     bun /scripts/frontend-bundle-versions.mjs --root /build --only web/default --dist-dir dist --modules-dir node_modules && \
     sh /scripts/write-frontend-release-metadata.sh default dist "$VERSION_VALUE" "$VCS_REF" "$BUILD_DATE"
 
-FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS builder-classic
+FROM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS builder-classic
 
 WORKDIR /build
 COPY web/classic/package.json .

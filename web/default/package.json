@@ -1,7 +1,7 @@
 {
   "name": "newapi-web",
   "private": false,
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.3",
   "version": "1.0.0",
   "type": "module",
   "scripts": {

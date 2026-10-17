@@ -663,8 +663,20 @@ override 生效后没有被清理。dist 是在这堆陈旧 node_modules 上构�
 
 **验证**：门禁脚本 11 个夹具用例通过（node 与 bun 两种运行时）；
 `--only`/`--dist-dir`/`--modules-dir` 在模拟 Docker 布局下验证；
-`web/classic/dist` 与 `web/default/dist` 真实产物检查通过。
+`web/classic/dist` 与 `web/default/dist` 真实产物检查通过；镜像内正向复跑
+exit 0，注入旧版本副本后 exit 1。11.2 记录的 clean install + build 与隔离
+容器验证不受本轮改动影响，结论仍然成立。
 
-**验证**：clean install + build 后 classic 产物 `"0.18.11"`；两前端
-`bun audit --production` 均 0 漏洞；镜像按 `5a308f34f` 重建，隔离容器
-healthy、build-info 匹配、healthz OK、启动 0 panic。
+### 11.4 bun 升级到 1.4.3（2026-10-18）
+
+- 范围：`.bun-version`、`Dockerfile` 两个 `oven/bun` 阶段（digest
+  `sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598`）、
+  三个 `packageManager` 字段（web/default、web/classic、desktop/tauri-app）。
+- 同时消除钉法漂移：`release.yml`（三处）与 `tauri-release.yml` 原本硬编码
+  `bun-version: 1.4.0`，其余工作流读 `.bun-version`；升级时只改文件会让两者
+  分叉。现全部改为 `bun-version-file: .bun-version`，升版只需改一处。
+- 验证：bun 1.4.3 下三个 lockfile `bun install --frozen-lockfile` 均无变化；
+  两前端构建成功且门禁通过（classic 的 vendor 与 Rollup 两份 katex 仍为
+  0.18.11）；门禁 11 个夹具用例、dockerfile 契约 8 项、compose 契约均通过；
+  `docker build --target builder-classic` 使用新镜像成功。
+
