@@ -556,6 +556,7 @@
     "上游总耗时": "Upstream total time",
     "上游模型管理": "Upstream Model Management",
     "上游状态码：": "Upstream status code: ",
+    "上游请求 ID": "Upstream Request ID",
     "上游请求策略": "Upstream Request Strategy",
     "上游路径": "Upstream Path",
     "上游返回": "Upstream response",

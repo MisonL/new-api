@@ -106,7 +106,8 @@ export async function bindEmail(
  * Bind WeChat account
  */
 export async function bindWeChat(code: string): Promise<ApiResponse> {
-  const res = await api.get(`/api/oauth/wechat/bind?code=${code}`)
+  // 后端只注册了 POST /api/oauth/wechat/bind，请求体为 { code }（与 classic 一致）。
+  const res = await api.post('/api/oauth/wechat/bind', { code })
   return res.data
 }
 

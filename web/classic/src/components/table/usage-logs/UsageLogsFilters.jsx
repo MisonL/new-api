@@ -182,6 +182,16 @@ const LogsFilters = ({
             minLength={1}
           />
 
+          <FilterAutoComplete
+            field='upstream_request_id'
+            endpoint={suggestionEndpoint}
+            placeholder={t('上游请求 ID')}
+            prefix={<IconSearch />}
+            buildParams={buildSuggestionParams}
+            enableSuggestions={false}
+            minLength={1}
+          />
+
           {isAdminUser && (
             <>
               <FilterAutoComplete
