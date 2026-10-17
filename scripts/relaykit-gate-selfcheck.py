@@ -449,6 +449,32 @@ def compare(claims, actual):
     return mismatches
 
 
+def check_ci_pin(text):
+    """CI 里 citation 的 --ref 不得与 UPSTREAM_PIN 分叉。
+
+    workflow 曾手写 --ref 789c97019：升锚时只改 UPSTREAM_PIN、漏改 workflow
+    就会 citation 跑旧锚点而 selfcheck 核新锚点。允许两种形态——动态取值的
+    $(python3 -I scripts/relaykit-pin.py)，或恰好等于 UPSTREAM_PIN 的字面量；
+    其他情况 fail-closed，提示改用 pin 脚本。
+    """
+    invocations = [line for line in text.splitlines()
+                   if "relaykit-citation-check.py" in line and "--ref" in line]
+    if not invocations:
+        return ["CI 钉点检查：repo-gates.yml 未调用 relaykit-citation-check.py --ref"]
+    failures = []
+    for line in invocations:
+        if "$(python3 -I scripts/relaykit-pin.py)" in line:
+            continue
+        match = re.search(r"--ref\s+(\S+)", line)
+        literal = (match.group(1) or "").strip('"\'') if match else ""
+        if literal == UPSTREAM_PIN:
+            continue
+        failures.append(
+            f"CI 钉点检查：citation --ref {literal or '(空)'} 与 UPSTREAM_PIN "
+            f"{UPSTREAM_PIN} 不一致（改用 --ref \"$(python3 -I scripts/relaykit-pin.py)\"）")
+    return failures
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--doc", default=DEFAULT_DOC)
@@ -476,6 +502,12 @@ def main():
     if missing_kinds:
         failures.append("设计文档缺少声明类别：" + "、".join(missing_kinds)
                         + "（整类删除声明必须失败，而不是放行）")
+
+    ci_workflow = os.path.join(ROOT, ".github", "workflows", "repo-gates.yml")
+    if os.path.exists(ci_workflow):
+        failures.extend(check_ci_pin(read_text(ci_workflow)))
+    else:
+        failures.append("CI 钉点检查：缺少 .github/workflows/repo-gates.yml")
 
     if failures:
         print("\n门禁自身失败：")

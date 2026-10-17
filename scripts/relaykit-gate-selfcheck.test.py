@@ -432,6 +432,46 @@ class TestRequiredClaimKinds(unittest.TestCase):
         self.assertIn("缺少声明类别", proc.stdout)
 
 
+class TestCiPin(unittest.TestCase):
+    """CI 钉点不得与 UPSTREAM_PIN 分叉。
+
+    workflow 曾手写 --ref 789c97019：升锚只改 UPSTREAM_PIN、漏改 workflow
+    就会 citation 跑旧锚点而 selfcheck 核新锚点，且两边都各自"绿"。
+    """
+
+    WORKFLOW_LINE_DYNAMIC = (
+        "        run: python3 -I scripts/relaykit-citation-check.py"
+        " --ref \"$(python3 -I scripts/relaykit-pin.py)\"\n")
+    WORKFLOW_LINE_LITERAL_OK = (
+        "        run: python3 -I scripts/relaykit-citation-check.py"
+        " --ref " + selfcheck.UPSTREAM_PIN + "\n")
+    WORKFLOW_LINE_STALE = (
+        "        run: python3 -I scripts/relaykit-citation-check.py --ref 000000000\n")
+
+    def test_dynamic_pin_form_passes(self):
+        self.assertEqual(selfcheck.check_ci_pin(self.WORKFLOW_LINE_DYNAMIC), [])
+
+    def test_literal_pin_form_passes(self):
+        self.assertEqual(selfcheck.check_ci_pin(self.WORKFLOW_LINE_LITERAL_OK), [])
+
+    def test_stale_literal_fails_closed(self):
+        failures = selfcheck.check_ci_pin(self.WORKFLOW_LINE_STALE)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("不一致", failures[0])
+
+    def test_missing_invocation_fails_closed(self):
+        failures = selfcheck.check_ci_pin("steps:\n  - run: echo hi\n")
+        self.assertEqual(len(failures), 1)
+        self.assertIn("未调用", failures[0])
+
+    def test_real_workflow_matches_pin(self):
+        workflow = os.path.join(
+            os.path.dirname(_HERE), ".github", "workflows", "repo-gates.yml")
+        with open(workflow, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertEqual(selfcheck.check_ci_pin(text), [])
+
+
 class TestRealDoc(unittest.TestCase):
     def test_real_doc_matches_real_gates(self):
         """端到端：实跑各门禁，与设计文档的自述计数比对。

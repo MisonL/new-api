@@ -79,9 +79,11 @@ jobs:
         with:
           fetch-depth: 0
       # citation-check 的默认 ref 是 upstream/main（fail-closed 设计），CI 中无该
-      # remote 且预期漂移，因此显式使用钉点 ref，与 gate-selfcheck 的声明一致。
+      # remote 且预期漂移，因此显式钉在设计文档声明的锚点上。ref 值经
+      # scripts/relaykit-pin.py 从 selfcheck 的 UPSTREAM_PIN 取得，升锚只改一处；
+      # gate-selfcheck 的 check_ci_pin 会核对这一行没有分叉。
       - name: relaykit citation check
-        run: python3 -I scripts/relaykit-citation-check.py --ref 789c97019
+        run: python3 -I scripts/relaykit-citation-check.py --ref "$(python3 -I scripts/relaykit-pin.py)"
       - name: relaykit c-symbols check
         run: python3 -I scripts/relaykit-c-symbols-check.py
       - name: relaykit gate selfcheck
