@@ -572,3 +572,24 @@ format/lint/typecheck/build 全过；web/classic prettier/eslint/140 个 node �
 
 **未覆盖**：GitHub Actions 真实 runner 的首次扫描（govulncheck 需联网拉
 漏洞库）；braces 修复需等上游发版后重新评估。
+
+### 11.1 第六批补充：katex 修复的验证盲区（2026-10-17 晚）
+
+第六批记录 katex 已修，但只验证了 `bun audit`（读 lockfile）。事后检查**构建
+产物**发现 classic 的 `markdown-core` chunk 里仍是 `katex 0.16.47`——位于
+`node_modules/mermaid/node_modules/katex` 的嵌套副本，安装于 2026-08-25，
+override 生效后没有被清理。dist 是在这堆陈旧 node_modules 上构建的。
+
+- 根因：override 只影响依赖解析；bun 不会主动删除已存在的不满足新范围的
+  嵌套副本。干净克隆 `bun install --frozen-lockfile` **不会**重建该副本，
+  说明修复本身正确，是工作区残留。
+- 处置：`bun install --frozen-lockfile --force` 清除残留，重建后产物内为
+  `"0.18.11"`；default 侧无残留（其 bundle 里的 katex 字样是 streamdown 的
+  处理器名，不是库）。
+- 教训：依赖漏洞的"已修复"判定必须看**产物里实际打包的版本**，不能只看
+  audit 读 lockfile 的结果。CI 的 `bun audit --production` 只能证明 lockfile
+  干净，构建产物的版本需要另外核对（当前靠本地构建后 grep 版本标记）。
+
+**验证**：clean install + build 后 classic 产物 `"0.18.11"`；两前端
+`bun audit --production` 均 0 漏洞；镜像按 `5a308f34f` 重建，隔离容器
+healthy、build-info 匹配、healthz OK、启动 0 panic。
