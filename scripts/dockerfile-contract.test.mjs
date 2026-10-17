@@ -105,10 +105,17 @@ test("Compose health checks use a direct lightweight liveness probe", () => {
   for (const composeFile of composeFiles) {
     const compose = readRepoFile(composeFile);
     assert.match(compose, /\n\s+init: true\n/);
-    assert.match(
-      compose,
-      /test: \["CMD", "wget", "-q", "-T", "10", "-O", "\/dev\/null", "http:\/\/127\.0\.0\.1:3000\/api\/healthz"\]/
-    );
+    // The probe may be a direct argv or a shell string wrapping the same
+    // command; the root compose file uses the shell form to honor the
+    // configured PORT, dev-isolated the direct form. Both must point at
+    // /api/healthz with a wget timeout of at least 10 seconds.
+    const probe = compose.match(/test: \["CMD", "sh", "-c", "([^"]+)"\]/)
+      ?? compose.match(/test: \["CMD", "((?:[^"\\]|\\.)*)"\]/);
+    assert.ok(probe, `${composeFile}: no CMD healthcheck found`);
+    const command = probe[1];
+    assert.match(command, /wget\b/, `${composeFile}: healthcheck must use wget`);
+    assert.match(command, /-T\s+([1-9][0-9]+)\b/, `${composeFile}: wget timeout must be >= 10`);
+    assert.match(command, /\/api\/healthz\b/, `${composeFile}: probe must target /api/healthz`);
     assert.match(compose, /timeout: 15s/);
     assert.match(compose, /retries: 5/);
     assert.match(compose, /start_period: 60s/);
