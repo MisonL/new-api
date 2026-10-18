@@ -113,10 +113,18 @@ LABEL org.opencontainers.image.title="new-api" \
       org.opencontainers.image.version="${EFFECTIVE_APP_VERSION}"
 
 RUN apk upgrade --no-cache \
-    && apk add --no-cache ca-certificates tzdata \
+    && apk add --no-cache ca-certificates tzdata su-exec \
     && update-ca-certificates
 
 COPY --from=builder2 /build/new-api /
+# 运行时以非 root 运行；属主交接逻辑见 deploy/docker/entrypoint.sh。
+# /data 是 WORKDIR（SQLite、pprof 默认落点），/app/logs 是 compose 的日志目录。
+COPY deploy/docker/entrypoint.sh /entrypoint.sh
+RUN chmod 0755 /entrypoint.sh \
+    && addgroup -g 1000 newapi \
+    && adduser -D -u 1000 -G newapi newapi \
+    && mkdir -p /data /app/logs \
+    && chown -R 1000:1000 /data /app/logs
 EXPOSE 3000
 WORKDIR /data
-ENTRYPOINT ["/new-api"]
+ENTRYPOINT ["/entrypoint.sh"]

@@ -246,6 +246,39 @@ test("tauri-build path filters include the scripts desktop builds invoke", () =>
   }
 });
 
+test("Dockerfile runs the container as a non-root user via the entrypoint", () => {
+  // 直接写 USER 1000 会让既有部署在升级后写不了 root 属主的绑定挂载，
+  // 因此改由 entrypoint 在启动时交接属主再降权。这里同时固定住三件事：
+  // 镜像装了 su-exec、入口指向 entrypoint、以及入口脚本本身执行降权。
+  const entrypoint = readRepoFile("deploy/docker/entrypoint.sh");
+
+  assert.match(dockerfile, /apk add --no-cache ca-certificates tzdata su-exec/);
+  assert.match(dockerfile, /COPY deploy\/docker\/entrypoint\.sh \/entrypoint\.sh/);
+  assert.match(dockerfile, /ENTRYPOINT \["\/entrypoint\.sh"\]/);
+  assert.doesNotMatch(
+    dockerfile,
+    /ENTRYPOINT \["\/new-api"\]/,
+    "ENTRYPOINT 必须经过 entrypoint.sh，否则降权逻辑不会执行"
+  );
+  assert.match(dockerfile, /adduser -D -u 1000/, "镜像必须创建非 root 运行账户");
+
+  assert.match(entrypoint, /exec su-exec "\$APP_UID:\$APP_GID" \/new-api/,
+    "entrypoint 必须以非 root 身份启动服务");
+  assert.match(entrypoint, /NEW_API_RUN_AS_ROOT/, "必须保留显式放弃降权的开关");
+  // 降权不能变成静默降级：属主改不动时要留下明确原因。
+  assert.match(entrypoint, /无法把 \$dir 的属主改为/);
+});
+
+test("entrypoint script is executable in git", () => {
+  // 镜像里还会 chmod，但仓库内不可执行的入口脚本在本地直接运行、
+  // 以及在不重建镜像的场景下都会失败。
+  const mode = execFileSync("git", ["ls-files", "-s", "deploy/docker/entrypoint.sh"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  }).trim();
+  assert.match(mode, /^100755 /, "deploy/docker/entrypoint.sh 必须以可执行权限入库");
+});
+
 test("frontend release metadata script emits parseable JSON", () => {
   const distDir = mkdtempSync(resolve(tmpdir(), "new-api-release-"));
   try {
