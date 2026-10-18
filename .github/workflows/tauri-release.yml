@@ -81,8 +81,14 @@ jobs:
         with:
           go-version: '1.27.2'
 
+      # 钉 master 历史内的提交。不能用 stable 分支 tip：它是 master 的后代，
+      # 不在 master 历史内，按该 action 的 README 会被 GC 回收导致工作流失效。
+      # 该提交的 action.yml 把 toolchain 声明为 required，所以显式传 stable；
+      # Rust 编译器版本本身仍是浮动 stable，钉住的只是 action 代码。
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master @ 2026-10-16
+        with:
+          toolchain: stable
 
       - name: Install Linux desktop dependencies
         if: matrix.platform == 'linux'

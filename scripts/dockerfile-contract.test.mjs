@@ -126,6 +126,24 @@ test("workflows install bun from .bun-version instead of a hardcoded version", (
   }
 });
 
+test("workflows pin every action to a full commit SHA", () => {
+  // dtolnay/rust-toolchain 曾被认为无法钉版，实测可以：钉 master 历史内的
+  // 提交（stable 分支 tip 是 master 的后代，会被 GC）。回归这条规则。
+  for (const file of readdirSync(resolve(repoRoot, ".github/workflows"))) {
+    if (!file.endsWith(".yml") && !file.endsWith(".yaml")) continue;
+    const text = readRepoFile(`.github/workflows/${file}`);
+    const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
+    for (const ref of uses) {
+      if (ref.startsWith("./")) continue; // 本仓库复用步骤不经过外部 action
+      assert.match(
+        ref,
+        /@[a-f0-9]{40}$/,
+        `.github/workflows/${file} 的 action 未钉完整 SHA: ${ref}`
+      );
+    }
+  }
+});
+
 test("Dockerfile runs the bundle gate before writing release metadata", () => {
   // 顺序反转会让不合格的产物也写出 new-api-release.json，
   // 中止的构建留下看似有效的发布描述。
