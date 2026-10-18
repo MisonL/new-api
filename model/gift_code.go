@@ -67,7 +67,17 @@ func NormalizeGiftCodeReceiver(bindType string, bindValue string) (string, strin
 	case GiftCodeReceiverTypeUsername:
 		err = DB.Where("username = ?", bindValue).First(&user).Error
 	case GiftCodeReceiverTypeEmail:
-		err = DB.Where("email = ?", bindValue).First(&user).Error
+		// email 不是唯一索引（username 是），历史重复行可能仍然存在。
+		// First 会任意挑一行且不报错，等于把额度绑到另一个账户上，
+		// 因此匹配到多个在用账户时必须拒绝。
+		var matches []User
+		if findErr := DB.Where("email = ?", bindValue).Limit(2).Find(&matches).Error; findErr != nil {
+			err = findErr
+		} else if len(matches) != 1 {
+			return "", "", nil, errors.New("该邮箱关联了多个账户，无法绑定")
+		} else {
+			user = matches[0]
+		}
 	default:
 		return "", "", nil, errors.New("不支持的绑定方式")
 	}
