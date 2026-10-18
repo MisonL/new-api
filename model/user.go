@@ -785,16 +785,32 @@ func IsTelegramIdAlreadyTaken(telegramId string) bool {
 	return identityInUse(DB.Unscoped().Where("telegram_id = ?", telegramId))
 }
 
+// ResetUserPasswordByEmail 重写某个邮箱对应账户的密码。email 非唯一索引，
+// 按 email 直接 UPDATE 会改写所有匹配行，而调用方会把新生成的明文密码返回
+// 给请求者，共享地址即跨账户接管。绑定与注册侧的复查只保证新数据不产生重复，
+// 历史重复行仍可能存在，因此这里必须 fail-closed：匹配到非墓碑行不等于 1
+// 时拒绝，而不是挑一行或全改。
 func ResetUserPasswordByEmail(email string, password string) error {
+	email = strings.TrimSpace(email)
 	if email == "" || password == "" {
 		return errors.New("邮箱地址或密码为空！")
+	}
+	// 默认作用域已排除墓碑行：已注销账户的邮箱不应挡住在用账户的重置。
+	var users []User
+	if err := DB.Where("email = ?", email).Limit(2).Find(&users).Error; err != nil {
+		return err
+	}
+	if len(users) == 0 {
+		return errors.New("该邮箱未关联可用账户，无法重置密码")
+	}
+	if len(users) > 1 {
+		return errors.New("该邮箱关联了多个账户，出于安全考虑拒绝重置密码")
 	}
 	hashedPassword, err := common.Password2Hash(password)
 	if err != nil {
 		return err
 	}
-	err = DB.Model(&User{}).Where("email = ?", email).Update("password", hashedPassword).Error
-	return err
+	return DB.Model(&User{}).Where("id = ?", users[0].Id).Update("password", hashedPassword).Error
 }
 
 func IsAdmin(userId int) bool {
