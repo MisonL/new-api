@@ -91,6 +91,16 @@ revision=<40-character-commit>
 worktree=clean
 ```
 
+### 运行时用户
+
+镜像以 root 启动入口脚本，脚本处理运行时目录后立即用 `su-exec` 降权，服务进程本身是非 root（uid/gid 1000）。升级到该版本时新增一项验收：
+
+```bash
+docker top new-api -o pid,user,args | grep '/new-api'
+```
+
+输出中的 `USER` 必须是 `1000`，不能是 `root`。入口脚本会为 `/data`、`/app/logs` 和 `--log-dir` 指定目录尝试 `chown`，判定标准是目标 uid 能否真的写入；`chown` 失败或之后仍不可写时会输出明确告警。出现告警时先修正宿主机目录属主或挂载选项，只有在只读挂载、NFS root_squash 等无法交接属主的场景下，才允许设置 `NEW_API_RUN_AS_ROOT=1` 显式放弃降权，并在批准记录里写明原因。不得把该开关当作默认值。
+
 ## 门禁 E：维护窗口与灰度
 
 正式维护窗口开始前必须同时满足：
