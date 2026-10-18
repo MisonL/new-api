@@ -144,6 +144,39 @@ test("workflows pin every action to a full commit SHA", () => {
   }
 });
 
+test("every workflow job declares a timeout", () => {
+  // 没有 timeout 的 job 卡住时会一直占用 runner 直到 GitHub 默认的 6 小时上限，
+  // 矩阵构建（tauri 三平台、docker 双架构）会成倍放大。桌面构建实测 15-24 分钟，
+  // 因此给到 90 分钟即可覆盖正常波动又能在真挂起时快速失败。
+  for (const file of readdirSync(resolve(repoRoot, ".github/workflows"))) {
+    if (!file.endsWith(".yml") && !file.endsWith(".yaml")) continue;
+    const lines = readRepoFile(`.github/workflows/${file}`).split("\n");
+    const inJobs = lines.findIndex((line) => /^jobs:$/.test(line));
+    if (inJobs === -1) continue;
+    let current = null;
+    let hasTimeout = false;
+    const flush = () => {
+      if (current !== null) {
+        assert.ok(
+          hasTimeout,
+          `.github/workflows/${file} 的 job ${current} 未声明 timeout-minutes`
+        );
+      }
+    };
+    for (const line of lines.slice(inJobs + 1)) {
+      const job = line.match(/^  ([A-Za-z0-9_-]+):\s*$/);
+      if (job) {
+        flush();
+        current = job[1];
+        hasTimeout = false;
+        continue;
+      }
+      if (/^    timeout-minutes:\s*\d+/.test(line)) hasTimeout = true;
+    }
+    flush();
+  }
+});
+
 test("Dockerfile runs the bundle gate before writing release metadata", () => {
   // 顺序反转会让不合格的产物也写出 new-api-release.json，
   // 中止的构建留下看似有效的发布描述。

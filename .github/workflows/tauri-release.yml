@@ -21,6 +21,7 @@ jobs:
   build:
     name: Build Tauri bundle (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -138,6 +139,7 @@ jobs:
     name: Upload Tauri artifacts to GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Resolve tag
         run: |

@@ -25,6 +25,7 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
 
     permissions:
       packages: write
@@ -158,6 +159,7 @@ jobs:
     name: Create multi-arch manifests (GHCR + optional Docker Hub)
     needs: [build_single_arch]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       packages: write
       contents: read

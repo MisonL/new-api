@@ -14,6 +14,7 @@ jobs:
   resolve_alpha_source:
     name: Resolve alpha source
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     outputs:
@@ -50,6 +51,7 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     permissions:
       packages: write
       contents: read
@@ -173,6 +175,7 @@ jobs:
     name: Create multi-arch manifests (GHCR + optional Docker Hub)
     needs: [resolve_alpha_source, build_single_arch]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       packages: write
       contents: read
