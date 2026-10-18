@@ -698,6 +698,14 @@ exit 0，注入旧版本副本后 exit 1。11.2 记录的 clean install + build 
 - **门禁先于 metadata 的顺序**：发布脚本、Dockerfile 两个阶段、sidecar 三处
   均要求门禁先于 `write-frontend-release-metadata.sh`，否则中止的构建会留下
   看似有效的发布描述。已加顺序断言。
+- **tauri-build 的 paths 过滤缺脚本入口**：`tauri-build.yml` 只监听
+  `desktop/tauri-app/**`、`web/**` 等，而 `prepare:web`/`prepare:sidecar`
+  会调用 `scripts/frontend-bundle-versions.mjs` 与
+  `scripts/write-frontend-release-metadata.sh`；改这两个脚本不会触发桌面构建。
+  处置：两个脚本加入 pull_request 与 push 的 paths，并加断言锁住。
+- **文档命令的 cwd 修正**：11.5 首次把 `bun scripts/frontend-bundle-versions.mjs`
+  直接接在 `cd ../classic` 之后，此时 cwd 是 `web/classic`，相对路径解析到不
+  存在的 `web/classic/scripts/`；改为 `cd ../..` 回到仓库根。
 
 **验证**：`scripts/dockerfile-contract.test.mjs` 13 项通过。三条新断言均在
 `/tmp` 副本上做反向验证——分别制造版本漂移、硬编码 `bun-version`、删除
