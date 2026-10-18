@@ -122,6 +122,22 @@ function ensureEmbeddedWebDist(version, commit, buildDate) {
         stdio: 'inherit',
       });
 
+      // 与 Web/镜像/桌面 prepare:web 同一道产物版本门禁：sidecar 内嵌的
+      // 两个前端 dist 也会被 //go:embed 打进二进制，audit 证明不了其中的版本。
+      // 放在写 metadata 之前，产物不合格时不留看似有效的发布描述。
+      execFileSync(
+        'bun',
+        [
+          'scripts/frontend-bundle-versions.mjs',
+          '--only',
+          `web/${name}`,
+        ],
+        {
+          cwd: repoRoot,
+          stdio: 'inherit',
+        },
+      );
+
       execFileSync(
         'sh',
         [

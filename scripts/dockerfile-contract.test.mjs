@@ -159,6 +159,26 @@ test("release frontend build runs the bundle gate before writing metadata", () =
   );
 });
 
+test("desktop sidecar build runs the bundle gate for both embedded frontends", () => {
+  // prepare-sidecar 直接构建并嵌入两个前端 dist，是 repo-gates/Dockerfile/
+  // build-release-frontends 之外的第四个构建入口；漏掉它会绕过产物版本门禁。
+  const script = readRepoFile("desktop/tauri-app/scripts/prepare-sidecar.mjs");
+  assert.match(
+    script,
+    /scripts\/frontend-bundle-versions\.mjs/,
+    "prepare-sidecar must run the bundle version gate"
+  );
+  assert.match(script, /`web\/\$\{name\}`/);
+  const gate = script.indexOf("scripts/frontend-bundle-versions.mjs");
+  const metadata = script.indexOf("write-frontend-release-metadata.sh");
+  assert.ok(gate !== -1, "prepare-sidecar must run the bundle gate");
+  assert.ok(metadata !== -1, "prepare-sidecar must write release metadata");
+  assert.ok(
+    gate < metadata,
+    "prepare-sidecar must run the bundle gate before release metadata is written"
+  );
+});
+
 test("frontend release metadata script emits parseable JSON", () => {
   const distDir = mkdtempSync(resolve(tmpdir(), "new-api-release-"));
   try {
