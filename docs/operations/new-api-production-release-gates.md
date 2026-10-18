@@ -59,7 +59,7 @@ docker exec new-api /new-api --build-info
 go test ./controller ./model ./relay/common ./relay/helper ./service
 cd web/default && bun run lint && bun run build
 cd ../classic && bun run lint && bun run build
-bun scripts/frontend-bundle-versions.mjs
+cd ../.. && bun scripts/frontend-bundle-versions.mjs
 ```
 
 产物版本门禁校验 dist 里实际打包的依赖版本与 node_modules 解析一致（`bun audit` 只读 lockfile，证明不了产物内容）。该门禁同样内置在 `scripts/build-release-frontends.sh` 与 Dockerfile 的每个前端构建阶段，脚本从自己的路径解析仓库根目录，不依赖调用时的 cwd。
