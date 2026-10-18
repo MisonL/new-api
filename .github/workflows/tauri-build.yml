@@ -16,6 +16,10 @@ on:
       - "go.mod"
       - "go.sum"
       - "VERSION"
+      # prepare-web / prepare-sidecar 会调用这两个脚本；改脚本同样是桌面构建的
+      # 行为变更，必须触发本 workflow。
+      - "scripts/frontend-bundle-versions.mjs"
+      - "scripts/write-frontend-release-metadata.sh"
   push:
     branches:
       - main
@@ -28,6 +32,8 @@ on:
       - "go.mod"
       - "go.sum"
       - "VERSION"
+      - "scripts/frontend-bundle-versions.mjs"
+      - "scripts/write-frontend-release-metadata.sh"
   workflow_dispatch:
 
 permissions:

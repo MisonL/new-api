@@ -179,6 +179,22 @@ test("desktop sidecar build runs the bundle gate for both embedded frontends", (
   );
 });
 
+test("tauri-build path filters include the scripts desktop builds invoke", () => {
+  // tauri-build 有 paths 过滤，只监听 desktop/、web/ 等。prepare:web 与
+  // prepare:sidecar 会调用 scripts 下的门禁与 metadata 脚本，改这些脚本
+  // 不会触发桌面构建，等于绕过验证。
+  const workflow = readRepoFile(".github/workflows/tauri-build.yml");
+  for (const script of [
+    "scripts/frontend-bundle-versions.mjs",
+    "scripts/write-frontend-release-metadata.sh",
+  ]) {
+    assert.ok(
+      workflow.includes(`- "${script}"`),
+      `.github/workflows/tauri-build.yml 的 paths 必须包含 ${script}`
+    );
+  }
+});
+
 test("frontend release metadata script emits parseable JSON", () => {
   const distDir = mkdtempSync(resolve(tmpdir(), "new-api-release-"));
   try {
