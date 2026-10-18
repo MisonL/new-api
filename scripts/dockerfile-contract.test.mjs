@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -76,6 +76,54 @@ test("Dockerfile verifies bundled dependency versions for both frontends", () =>
     dockerfile,
     /COPY \.\/scripts\/frontend-bundle-versions\.mjs \/scripts\/frontend-bundle-versions\.mjs/
   );
+});
+
+test("bun version is consistent across .bun-version, Dockerfile and packageManager", () => {
+  // 三处独立声明：CI 用 .bun-version 装 bun，镜像用 FROM oven/bun，前端用
+  // packageManager 约束本地版本。只改其中一处时其余两处会静默停留在旧版本，
+  // 表现为"本地能构建、镜像里构建失败"或反过来。
+  const declared = readRepoFile(".bun-version").trim();
+  assert.match(declared, /^\d+\.\d+\.\d+$/, ".bun-version 必须是精确版本号");
+
+  const fromTags = [...dockerfile.matchAll(/FROM oven\/bun:(\d+\.\d+\.\d+)/g)].map(
+    (m) => m[1]
+  );
+  assert.ok(fromTags.length > 0, "Dockerfile 必须使用 oven/bun 基础镜像");
+  for (const tag of fromTags) {
+    assert.equal(tag, declared, `Dockerfile 的 oven/bun:${tag} 与 .bun-version ${declared} 不一致`);
+  }
+
+  for (const manifest of [
+    "web/default/package.json",
+    "web/classic/package.json",
+    "desktop/tauri-app/package.json",
+  ]) {
+    const pkg = JSON.parse(readRepoFile(manifest));
+    assert.equal(
+      pkg.packageManager,
+      `bun@${declared}`,
+      `${manifest} 的 packageManager 与 .bun-version ${declared} 不一致`
+    );
+  }
+});
+
+test("workflows install bun from .bun-version instead of a hardcoded version", () => {
+  // 硬编码 bun-version 会让 workflow 与 .bun-version 各自漂移。
+  for (const file of readdirSync(resolve(repoRoot, ".github/workflows"))) {
+    if (!file.endsWith(".yml") && !file.endsWith(".yaml")) continue;
+    const text = readRepoFile(`.github/workflows/${file}`);
+    if (!text.includes("oven-sh/setup-bun")) continue;
+    assert.match(
+      text,
+      /bun-version-file:\s*\.bun-version/,
+      `.github/workflows/${file} 必须用 bun-version-file: .bun-version`
+    );
+    assert.doesNotMatch(
+      text,
+      /^\s*bun-version:\s*\d/m,
+      `.github/workflows/${file} 不得硬编码 bun-version`
+    );
+  }
 });
 
 test("Dockerfile runs the bundle gate before writing release metadata", () => {
