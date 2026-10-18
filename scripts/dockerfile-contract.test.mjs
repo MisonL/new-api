@@ -78,6 +78,39 @@ test("Dockerfile verifies bundled dependency versions for both frontends", () =>
   );
 });
 
+test("Dockerfile runs the bundle gate before writing release metadata", () => {
+  // 顺序反转会让不合格的产物也写出 new-api-release.json，
+  // 中止的构建留下看似有效的发布描述。
+  for (const frontend of ["default", "classic"]) {
+    const gate = dockerfile.indexOf(
+      `bun /scripts/frontend-bundle-versions.mjs --root /build --only web/${frontend}`
+    );
+    const metadata = dockerfile.indexOf(
+      `sh /scripts/write-frontend-release-metadata.sh ${frontend}`
+    );
+    assert.ok(gate !== -1, `Dockerfile must run the bundle gate for ${frontend}`);
+    assert.ok(metadata !== -1, `Dockerfile must write release metadata for ${frontend}`);
+    assert.ok(
+      gate < metadata,
+      `Dockerfile must run the bundle gate before release metadata for ${frontend}`
+    );
+  }
+});
+
+test("release frontend build runs the bundle gate before writing metadata", () => {
+  const script = readRepoFile("scripts/build-release-frontends.sh");
+  const gate = script.indexOf(
+    'bun scripts/frontend-bundle-versions.mjs --only "$frontend_dir"'
+  );
+  const metadata = script.indexOf("sh scripts/write-frontend-release-metadata.sh");
+  assert.ok(gate !== -1, "release script must run the bundle version gate");
+  assert.ok(metadata !== -1, "release script must write frontend release metadata");
+  assert.ok(
+    gate < metadata,
+    "release script must run the bundle gate before release metadata is written"
+  );
+});
+
 test("frontend release metadata script emits parseable JSON", () => {
   const distDir = mkdtempSync(resolve(tmpdir(), "new-api-release-"));
   try {
