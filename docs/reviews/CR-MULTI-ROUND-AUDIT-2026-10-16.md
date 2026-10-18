@@ -680,3 +680,28 @@ exit 0，注入旧版本副本后 exit 1。11.2 记录的 clean install + build 
   0.18.11）；门禁 11 个夹具用例、dockerfile 契约 8 项、compose 契约均通过；
   `docker build --target builder-classic` 使用新镜像成功。
 
+### 11.5 门禁覆盖第四个构建入口与版本多源一致性（2026-10-18）
+
+11.3 补齐了 repo-gates、发布脚本、Dockerfile 三个入口，复查又发现两处：
+
+- **桌面 sidecar 是第四个构建入口**：`desktop/tauri-app/scripts/prepare-sidecar.mjs`
+  会构建 `web/default` 与 `web/classic` 的 dist，并通过 `//go:embed` 打进
+  sidecar 二进制，但此前没有调用 `frontend-bundle-versions.mjs`。桌面产物
+  因此可以带着旧依赖副本发布。处置：在 `bun run build` 之后、写
+  `new-api-release.json` 之前调用门禁，`--only web/<name>` 覆盖两个前端。
+- **bun 版本三源无一致性约束**：`.bun-version`（CI 安装）、Dockerfile 的
+  `FROM oven/bun:<tag>`（镜像构建）、三个 `packageManager` 字段（本地）各自
+  声明，没有任何断言保证相等。只改一处时其余两处静默停留旧版本，表现为
+  "CI 绿、镜像红"或反之。处置：`scripts/dockerfile-contract.test.mjs` 新增
+  两条契约——三源版本必须相等；所有使用 `setup-bun` 的 workflow 必须写
+  `bun-version-file: .bun-version`，禁止硬编码 `bun-version`。
+- **门禁先于 metadata 的顺序**：发布脚本、Dockerfile 两个阶段、sidecar 三处
+  均要求门禁先于 `write-frontend-release-metadata.sh`，否则中止的构建会留下
+  看似有效的发布描述。已加顺序断言。
+
+**验证**：`scripts/dockerfile-contract.test.mjs` 13 项通过。三条新断言均在
+`/tmp` 副本上做反向验证——分别制造版本漂移、硬编码 `bun-version`、删除
+sidecar 门禁调用，对应断言均按预期失败。`web/default` 的 `format:check` 与
+`typecheck`（`tsc -b`，exit 0）、两前端 `bun audit --production`（779/688 包，
+0 漏洞）在本轮复跑通过。
+
