@@ -713,3 +713,69 @@ sidecar 门禁调用，对应断言均按预期失败。`web/default` 的 `forma
 `typecheck`（`tsc -b`，exit 0）、两前端 `bun audit --production`（779/688 包，
 0 漏洞）在本轮复跑通过。
 
+
+### 11.6 第七批：workflow 超时、邮箱多账户 fail-closed 与容器降权（2026-10-18）
+
+承接 7.4 的三条"明确不修"，本轮把其中两条重新评估后落地，并处理两个新缺陷。
+
+- **全部 workflow job 补 `timeout-minutes`**（`968c05921`）：此前 8 个 workflow、
+  19 个 job 无一条超时声明，卡住时按 GitHub 默认 6 小时占用 runner；tauri 三
+  平台矩阵与 docker 双架构会成倍放大。按历史实测（tauri 构建 15-24 分钟）给
+  到 90 分钟余量，其余 job 10-60 分钟。`scripts/dockerfile-contract.test.mjs`
+  新增"每个 job 必须声明 timeout"契约，反向验证过删掉一条即精确失败。
+- **`dtolnay/rust-toolchain` 钉到 master 历史内的 SHA**（`23a598e01`）：7.4 的
+  "该 action 不支持 SHA 钉版"是错判。该 action 的 README 要求钉进 master 分支
+  历史，stable 分支 tip 是 master 的后代（GitHub compare API：
+  `b725eda...683b588` → `ahead_by 0, behind_by 1, merge_base 683b588`），会被
+  GC 回收，因此钉 `683b588`（master @ 2026-10-16）。该提交把 `toolchain` 声明
+  为 required，需要显式传 `stable`——钉住的是 action 代码，Rust 版本仍浮动。
+  同时新增"所有 action 必须钉完整 40 位 SHA"契约。
+- **礼品码邮箱绑定命中多账户 fail-closed**（`c2e0162c2`）：`NormalizeGiftCodeReceiver`
+  对 email 用 `First` 任意挑一行且不报错，解析出的 `User.Id` 成为 `ReceiverUserId`，
+  而 `ReceiveGiftCode` 只允许该 id 领取——共享邮箱即把额度绑到另一个账号。
+  与 `3cb3d9099`（密码重置）同源：`email` 是非唯一索引，注册/绑定侧的
+  `identityInUse` 复查只保证新数据不产生重复，消费侧必须自行 fail-closed。
+  改为 `Limit(2)` 判定，非恰好一行即拒绝。新增 4 条回归测试，反向验证过
+  回退修复后重复行用例精确失败。
+- **容器运行时降权到非 root**（`a6a0d5cf5`、`289ca5f02`）：7.4 判定"单侧改动会
+  让绑定挂载写失败"，本轮用入口脚本解决而不牺牲降权：
+  - `deploy/docker/entrypoint.sh` 在 root 启动时处理 `/data`、`/app/logs` 与
+    `--log-dir` 指定目录，再用 `su-exec` 降权；编排已指定 `user:` 时直接透传。
+  - 第二版按"目标 uid 能否真的写入"探测（探针文件），而非按 `stat` 到的属主。
+    首版按属主判断在 Docker Desktop 的 virtiofs 下失效——挂载目录在容器内
+    一律显示 `0:0`，属主检查恒真，每次启动白跑一遍 `chown -R`；反过来若宿主
+    属主恰为 1000 但挂载不可写，又会跳过 chown 直接失败。
+  - `chown` 失败或 chown 后仍不可写时输出明确原因并提示 `NEW_API_RUN_AS_ROOT=1`，
+    不静默降级。
+  - 实测（隔离环境，重建后）：容器内服务进程 uid=1000、`healthy`、`healthz` 返回
+    `ok`、SQLite 与日志文件正常写入；`NEW_API_RUN_AS_ROOT=1` 保持 root、
+    编排 `-u 1000:1000` 直接透传两条逃生路径均验证；只读日志目录下只输出一条
+    告警，可写目录下零告警；`docker stop` 立即退出（无信号处理挂起）。
+
+**本轮验证记录**：
+
+- `go build ./...` exit 0；`go vet ./model/... ./controller/...` exit 0。
+- `go test ./controller ./model ./relay/common ./relay/helper ./service -count=1`
+  全绿（10.7s / 6.5s / 0.09s / 14.3s / 18.8s）。
+- `node --test scripts/dockerfile-contract.test.mjs` 18 项通过；非 root 契约在
+  `/tmp` 副本上反向验证：把 `ENTRYPOINT` 换回 `/new-api`、以及从 `apk add`
+  移除 `su-exec`，对应断言均按预期失败。
+- `web/default`：`bun run lint` exit 0。
+- 容器侧：`scripts/build-docker-local.sh new-api-local:dev` 重建后
+  `docker compose ... up -d --no-deps --force-recreate new-api`，
+  `docker top` 显示 `/entrypoint.sh` 为 root、`/new-api` 为 1000。
+
+**仍未处理（需决策或部署侧动作）**：
+
+- **`main` 与 `dev` 均无分支保护**：`gh api repos/MisonL/new-api/branches/{main,dev}/protection`
+  均返回 404。这是仓库设置而非代码，Agent 未代为开启（会影响所有协作者的
+  推送方式）。
+- **`repo-gates.yml` 从未运行过**：该文件只存在于本地工作区，`origin/dev` 与
+  `origin/main` 上都没有，GitHub 侧也没有注册同名 workflow；新增的门禁在
+  推送并触发前尚不能拦截任何东西。
+- **生产库重复邮箱实况**：`users.email` 非唯一，这两处 fail-closed 只是消费侧
+  兜底。库里到底有多少组重复邮箱需要连生产库查询，本地无法证实。
+- **`/api/user/groups` 与 `/api/pricing` 匿名可见分组名与倍率**、
+  **`/api/status` 字段暴露**：维持 7.4 结论，属产品决策。
+- **`braces` 3.0.3**（11 节）：未打进任何 dist 产物，字符串命中来自编辑器
+  语法/主题资源，上游无修复版本，且是 `--production` 审计排除的 devDependency。维持接受。
