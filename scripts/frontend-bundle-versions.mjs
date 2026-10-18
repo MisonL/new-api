@@ -120,7 +120,7 @@ function main() {
       i += 1;
     } else if (args[i] === "--help" || args[i] === "-h") {
       console.log(
-        "usage: node scripts/frontend-bundle-versions.mjs [--root DIR] [--only FRONTEND]",
+        "usage: node scripts/frontend-bundle-versions.mjs [--root DIR] [--only FRONTEND] [--dist-dir DIR] [--modules-dir DIR]",
       );
       return 0;
     } else {
@@ -151,7 +151,9 @@ function main() {
     // 构建成功的产物一定含 JS。"有 dist 目录但没有任何 JS"意味着构建静默失败，
     // 此时下面的哨兵扫描会得出"未打包"并放行，是个 fail-open 缺口。
     if (files.length === 0) {
-      fail(`${check.label}: ${check.distDir} 里没有任何 js/mjs/cjs 文件（构建可能失败）`);
+      fail(
+        `${check.label}: ${check.distDir} 里没有任何 js/mjs/cjs 文件（构建可能失败）`,
+      );
     }
     const withSentinel = files.filter((file) =>
       readFileSync(file, "utf8").includes(check.sentinel),

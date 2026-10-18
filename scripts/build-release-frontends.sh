@@ -24,6 +24,10 @@ build_frontend() {
     bun install --frozen-lockfile
     DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$build_version" bun run build
   )
+  # 门禁先于 metadata：与 Dockerfile 一致。产物不合格时不写发布元数据，
+  # 避免在中止的构建里留下看似有效的 release 描述。frontend_dir 即 CHECKS
+  # 里的 label（web/default、web/classic），dist 路径用脚本内默认值。
+  bun scripts/frontend-bundle-versions.mjs --only "$frontend_dir"
   sh scripts/write-frontend-release-metadata.sh \
     "${frontend_dir#web/}" \
     "$frontend_dir/dist" \
@@ -35,12 +39,5 @@ build_frontend() {
 for frontend in "${frontends[@]}"; do
   build_frontend "$frontend" "$version"
 done
-
-# 产物版本门禁：bun audit 只证明 lockfile 干净，证明不了产物里打包的是哪个版本
-# （overrides 不清理嵌套副本，手工 vendor 的预构建产物完全不在依赖树里）。
-# 发布物与镜像都经此脚本构建，所以检查放在这里，而不是只放在 PR 门禁里。
-# 用 bun 而不是 node：调用方（release.yml）不安装 node，依赖 runner 预装版本会
-# 让门禁行为随 runner 镜像漂移；bun 由 .bun-version 钉死，与 Dockerfile 同源。
-bun scripts/frontend-bundle-versions.mjs
 
 echo "All frontends built successfully for $version: ${frontends[*]}"
