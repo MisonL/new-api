@@ -11,10 +11,19 @@ server {
         return 405;
     }
 
-    # setup is deliberately absent: POST /api/setup is already rejected by the
-    # method check above, and GET /api/setup is a pure read the root bootstrap
-    # calls once per session.
-    location ~ ^/api/(oauth/|auth/external/|user/logout$|verification$|reset_password$) {
+    # 只读联调的第二层阻断。方法检查只能挡住写请求，挡不住注册为 GET 却会
+    # 改状态的接口；AGENTS.md 第 7 节要求代理层再阻断这些副作用路径。
+    # 列表必须与 web/default/src/lib/readonly-guard.ts 和
+    # web/classic/src/helpers/readonlyGuard.js 的 READONLY_BLOCKED_PATHS 同步，
+    # scripts/readonly-proxy-contract.test.mjs 会比对两边并验证不误伤普通读接口。
+    #
+    # nginx 在匹配 location 前会 percent-decode 并合并重复斜杠，因此这里的正则
+    # 覆盖 /api/user%2Ftoken 与 /api//user/token 这类变形；单个尾斜杠单独放行
+    # 会绕过后端 301 到同一处理器，所以每条路径都接受可选的尾斜杠。
+    #
+    # setup 故意不在列表里：POST /api/setup 已被方法检查拒绝，GET /api/setup 是
+    # root 初始化时读取一次的纯读接口。
+    location ~ ^/api/(oauth/|auth/external/|user/logout/?$|verification/?$|reset_password/?$|user/token/?$|user/aff/?$|user/epay/notify/?$|subscription/epay/(notify|return)/?$|channel/test/?$|channel/test/[^/]+/?$|channel/update_balance/?$|channel/update_balance/[^/]+/?$|channel/fetch_models/[^/]+/?$|channel/ollama/version/[^/]+/?$|channel/[^/]+/codex/usage/?$) {
         return 403;
     }
 

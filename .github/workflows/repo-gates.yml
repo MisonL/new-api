@@ -151,6 +151,10 @@ jobs:
           python3 -I scripts/compose-healthcheck-contract.py
       - name: dockerfile and compose contract
         run: node --test scripts/dockerfile-contract.test.mjs
+      # 只读代理必须与两份前端 guard 阻断同一批 GET 副作用接口，否则 curl 可以
+      # 绕过前端直接落到正式后端。
+      - name: read-only proxy contract
+        run: node --test scripts/readonly-proxy-contract.test.mjs
       # 门禁脚本自身的回归测试：确保"产物版本 == 解析版本"的判据不会被改坏。
       - name: frontend bundle version check contract
         run: node --test scripts/frontend-bundle-versions.test.mjs
