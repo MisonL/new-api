@@ -236,3 +236,31 @@ zhipu 去掉原先的重复关闭，保证每个请求只关一次。
   `service`、`relay/...`。
 - `MaskSensitiveInfo` 的新增模式只做了单元测试，未用真实上游错误体做回归。
 - 未启动服务发送 HTTP 请求，接口级结论来自 handler 级测试与源码审查。
+
+## 认证与会话维度（2026-10-20，继续）
+
+- **TOTP 验证码可重放**（`common/totp.go`、`model/twofa.go`、
+  `controller/twofa.go`）。`totp.Validate` 只比对当前及前后一步窗口，
+  不记录已用步进，同一个 6 位码在有效期内可无限次通过；截获后可在另一
+  会话重放完成登录或 step-up。修复：`common.ValidateTOTPStep` 返回步进
+  并拒绝不大于已记录步进的匹配；`TwoFA` 新增 `last_used_step` 列（由
+  AutoMigrate 添加，默认 0）；登录、step-up、启用三处写入。首版仍存在
+  校验与落库之间的竞态，8 并发实测 3 次成功，随即改为
+  `UPDATE ... WHERE last_used_step < ?` 条件写回，并发只放行一次。
+  提交 `0e467bc01`、`f5c894740`。
+- **`SESSION_SECRET`/`CRYPTO_SECRET` 可互相回退且无最小熵校验**：已确认
+  语义（缺一个时用另一个补位，均未校验长度或强度）。收紧会导致单密钥
+  部署启动失败，属部署契约变更，记录未改。
+- **支付回调日志的请求体与响应体**：Creem/Stripe/Waffo Pancake 在匿名路径
+  把完整 body 与平台响应体写进日志。修复：统一
+  `LocalLogPreview(MaskSensitiveInfo(...))`，源码级测试覆盖三个文件。
+  提交 `d1ab72523`。
+- **通知与 worker 下载失败日志**、**DEBUG 上游 URL**、**上游错误体回显**、
+  **Midjourney 错误响应**、**管理员用户接口的推送凭据**：同上一节，已修复。
+
+### 验证边界补充
+
+- TOTP 修复只在 SQLite 内存库上验证了条件更新的并发语义；MySQL /
+  PostgreSQL 上 `UPDATE ... WHERE rowcount` 的语义相同，但未实测。
+- `last_used_step` 依赖启动时的 AutoMigrate 新增列；未验证从旧库升级时
+  SQLite 与 MySQL 的列默认值回填是否与 GORM 预期一致。
