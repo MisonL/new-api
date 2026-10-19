@@ -163,6 +163,17 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			delete(otherMap, "error_event")
 			delete(otherMap, "upstream_request_path")
 			delete(otherMap, "channel_capability_snapshot")
+			// 渠道身份、参数覆盖审计原文、请求头策略审计和渠道拦截原因都只在
+			// 管理员视图中展示；前端靠 isAdmin 隐藏，但原始 other 仍会下发。
+			delete(otherMap, "channel_id")
+			delete(otherMap, "channel_name")
+			delete(otherMap, "channel_type")
+			delete(otherMap, "po")
+			delete(otherMap, "request_header_policy")
+			delete(otherMap, "header_policy_mode")
+			delete(otherMap, "request_header_policy_mode")
+			delete(otherMap, "reject_reason")
+			delete(otherMap, "request_conversion")
 			for key := range otherMap {
 				if strings.HasPrefix(key, "responses_") && key != "responses_compact_mode" && key != "responses_routing_summary" {
 					delete(otherMap, key)
