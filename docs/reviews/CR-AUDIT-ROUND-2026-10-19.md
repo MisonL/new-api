@@ -82,6 +82,21 @@ zhipu 去掉原先的重复关闭，保证每个请求只关一次。
   SQLSTATE 42883。
 - PostgreSQL 为隔离实例 `127.0.0.1:5433`（`new-api-dev`），未触碰正式库。
 
+### 5. FetchModels 绕过 SSRF 校验（`f03a56540`）
+
+`controller/channel.go` 的 `FetchModels` 通用分支用裸 `&http.Client{}` 请求
+请求体中的 `base_url`。共享客户端的 SSRF 校验是逐请求 opt-in 的
+（`common.WithSSRFValidation`），裸客户端既没打标记也不受 `RelayTimeout`
+约束，因此该接口可以把任意 URL 的响应体取回并返回给调用方。
+
+复现：打开 SSRF 保护、`DomainFilterMode` 设为白名单且列表为空，让
+`base_url` 指向本机 `httptest` 服务器。修复前返回
+`{"data":["leaked-model"],"success":true}`；修复后传输层拒绝该目的地。
+
+修复：改用 `service.GetHttpClient()` 并显式 `WithSSRFValidation`。
+反向验证：去掉该标记后测试重新失败。Gemini 分支走 `FetchGeminiModels`，
+原本就使用共享客户端，不在本缺陷内。
+
 ## 已复现但判定为不修
 
 - `common.InMemoryRateLimiter.Request` 的零容量路径：探针测试传入
