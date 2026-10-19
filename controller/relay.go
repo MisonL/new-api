@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -3524,7 +3523,6 @@ func RelayMidjourney(c *gin.Context) {
 		mjErr = relay.RelayMidjourneySubmit(c, relayInfo)
 	}
 	//err = relayMidjourneySubmit(c, relayMode)
-	log.Println(mjErr)
 	if mjErr != nil {
 		statusCode := http.StatusBadRequest
 		if mjErr.Code == 30 {
@@ -3534,7 +3532,7 @@ func RelayMidjourney(c *gin.Context) {
 			statusCode = http.StatusServiceUnavailable
 		}
 		c.JSON(statusCode, gin.H{
-			"description": fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result),
+			"description": common.MaskSensitiveInfo(fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)),
 			"type":        "upstream_error",
 			"code":        mjErr.Code,
 		})
