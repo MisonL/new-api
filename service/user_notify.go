@@ -13,6 +13,18 @@ import (
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
+// notifyTransportError 把发送失败的错误文案收敛到一个地方。
+//
+// Go 的 url.Error 默认带完整 URL：Bark 把设备 key 放在路径里，Gotify 把
+// token 放在 query 里。调用方会把错误写进系统日志，因此这里必须先脱敏，
+// 否则每次发送失败都会把用户的推送凭据打进日志。
+func notifyTransportError(channel string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("failed to send %s request: %s", channel, common.MaskSensitiveInfo(err.Error()))
+}
+
 func NotifyRootUser(t string, subject string, content string) {
 	user := model.GetRootUser().ToBaseUser()
 	err := NotifyUser(user.Id, user.Email, user.GetSetting(), dto.NewNotify(t, subject, content, nil))
@@ -143,7 +155,7 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 
 		resp, err = DoWorkerRequest(workerReq)
 		if err != nil {
-			return fmt.Errorf("failed to send bark request through worker: %v", err)
+			return notifyTransportError("bark", err)
 		}
 		defer resp.Body.Close()
 
@@ -166,7 +178,7 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 		client := GetHttpClient()
 		resp, err = client.Do(req)
 		if err != nil {
-			return fmt.Errorf("failed to send bark request: %v", err)
+			return notifyTransportError("bark", err)
 		}
 		defer resp.Body.Close()
 
@@ -232,7 +244,7 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 
 		resp, err = DoWorkerRequest(workerReq)
 		if err != nil {
-			return fmt.Errorf("failed to send gotify request through worker: %v", err)
+			return notifyTransportError("gotify", err)
 		}
 		defer resp.Body.Close()
 
@@ -256,7 +268,7 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 		client := GetHttpClient()
 		resp, err = client.Do(req)
 		if err != nil {
-			return fmt.Errorf("failed to send gotify request: %v", err)
+			return notifyTransportError("gotify", err)
 		}
 		defer resp.Body.Close()
 
