@@ -103,6 +103,24 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 	user.Setting = string(settingBytes)
 }
 
+// ForAdminView 返回一份可安全下发给管理员界面（用户列表/用户详情）的副本。
+//
+// 管理员没有查看或使用他人通知凭据的需要：webhook_secret、gotify_token 和
+// 带设备 key 的 bark_url 只对该用户本人有意义，一旦随列表下发就等于所有
+// 管理员共享了这些凭据。原对象不被修改，计费等内部路径仍读到完整设置。
+func (user *User) ForAdminView() *User {
+	if user == nil || user.Setting == "" {
+		return user
+	}
+	view := *user
+	setting := view.GetSetting()
+	setting.WebhookSecret = ""
+	setting.GotifyToken = ""
+	setting.BarkUrl = ""
+	view.SetSetting(setting)
+	return &view
+}
+
 // 根据用户角色生成默认的边栏配置
 func generateDefaultSidebarConfigForRole(userRole int) string {
 	defaultConfig := map[string]interface{}{}

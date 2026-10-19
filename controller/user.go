@@ -277,6 +277,9 @@ func GetAllUsers(c *gin.Context) {
 		return
 	}
 
+	for i := range users {
+		users[i] = users[i].ForAdminView()
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
 
@@ -294,6 +297,9 @@ func SearchUsers(c *gin.Context) {
 		return
 	}
 
+	for i := range users {
+		users[i] = users[i].ForAdminView()
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
 	common.ApiSuccess(c, pageInfo)
@@ -319,7 +325,7 @@ func GetUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    user,
+		"data":    user.ForAdminView(),
 	})
 	return
 }
