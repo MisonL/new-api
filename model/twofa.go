@@ -243,17 +243,30 @@ func (t *TwoFA) ValidateTOTPAndUpdateUsage(code string) (bool, error) {
 		return false, nil
 	}
 
-	// 验证成功，重置失败次数并更新最后使用时间
+	// 验证成功。步进必须带条件写回：校验与落库之间若有并发请求，
+	// 两者都会通过上面的比较，只有一个能真正把步进推进。
 	now := time.Now()
+	result := DB.Model(&TwoFA{}).
+		Where("id = ? AND (last_used_step IS NULL OR last_used_step < ?)", t.Id, step).
+		Updates(map[string]interface{}{
+			"failed_attempts": 0,
+			"locked_until":    nil,
+			"last_used_at":    &now,
+			"last_used_step":  step,
+		})
+	if result.Error != nil {
+		common.SysLog("更新2FA使用记录失败: " + result.Error.Error())
+		return true, nil
+	}
+	if result.RowsAffected == 0 {
+		// 另一个并发请求已经消费了这个码。
+		return false, nil
+	}
+
 	t.FailedAttempts = 0
 	t.LockedUntil = nil
 	t.LastUsedAt = &now
 	t.LastUsedStep = step
-
-	if err := t.Update(); err != nil {
-		common.SysLog("更新2FA使用记录失败: " + err.Error())
-	}
-
 	return true, nil
 }
 
