@@ -293,7 +293,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		if err != nil {
 			return nil, types.NewOpenAIError(fmt.Errorf("read Ollama error response: %w", err), types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
 		}
-		return nil, types.NewOpenAIError(fmt.Errorf("Ollama returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), types.ErrorCodeBadResponseBody, resp.StatusCode)
+		return nil, types.NewOpenAIError(fmt.Errorf("Ollama returned HTTP %d: %s", resp.StatusCode, common.LocalUpstreamErrorPreview(string(body))), types.ErrorCodeBadResponseBody, resp.StatusCode)
 	}
 	if info == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("Ollama relay info is nil"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
@@ -485,7 +485,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, types.NewOpenAIError(fmt.Errorf("ollama returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), types.ErrorCodeBadResponseBody, resp.StatusCode)
+		return nil, types.NewOpenAIError(fmt.Errorf("ollama returned HTTP %d: %s", resp.StatusCode, common.LocalUpstreamErrorPreview(string(body))), types.ErrorCodeBadResponseBody, resp.StatusCode)
 	}
 	if info == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("ollama relay info is nil"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)

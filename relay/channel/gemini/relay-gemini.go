@@ -2002,7 +2002,7 @@ func FetchGeminiModels(baseURL, apiKey, proxyURL string, extraHeaders ...http.He
 			body, _ := io.ReadAll(response.Body)
 			response.Body.Close()
 			cancel()
-			return nil, fmt.Errorf("服务器返回错误 %d: %s", response.StatusCode, string(body))
+			return nil, fmt.Errorf("服务器返回错误 %d: %s", response.StatusCode, common.LocalUpstreamErrorPreview(string(body)))
 		}
 
 		body, err := io.ReadAll(response.Body)

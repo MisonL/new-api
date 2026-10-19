@@ -107,6 +107,32 @@ func LocalLogPreview(content string) string {
 	return fmt.Sprintf("%s... [truncated, original_length=%d, limit=%d]", preview, len(content), LocalLogContentLimit)
 }
 
+// LocalUpstreamErrorMessageLimit 是拼进用户可见错误消息的上游响应体上限。
+// 上游错误页可能达到 MB 级（Ollama 8MB、Dify 1MB），整段回显既占内存也把
+// 内部堆栈、文件路径带进 API 响应。
+const LocalUpstreamErrorMessageLimit = 512
+
+const boundedPreviewMarkerReserve = 64
+
+// LocalUpstreamErrorPreview 把上游错误体收敛成可安全回显的片段：
+// 先按日志规则脱敏，再按字节上限截断（保留 UTF-8 边界），并标注原长度。
+func LocalUpstreamErrorPreview(content string) string {
+	content = strings.TrimSpace(content)
+	content = MaskSensitiveInfo(content)
+	if len(content) <= LocalUpstreamErrorMessageLimit {
+		return content
+	}
+	originalLength := len(content)
+	end := LocalUpstreamErrorMessageLimit
+	for end > 0 && !utf8.RuneStart(content[end]) {
+		end--
+	}
+	if end == 0 {
+		end = LocalUpstreamErrorMessageLimit
+	}
+	return fmt.Sprintf("%s... [truncated, original_length=%d]", content[:end], originalLength)
+}
+
 func GetStringIfEmpty(str string, defaultValue string) string {
 	if str == "" {
 		return defaultValue

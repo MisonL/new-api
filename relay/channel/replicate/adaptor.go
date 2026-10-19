@@ -493,7 +493,7 @@ func uploadFileFromForm(c *gin.Context, info *relaycommon.RelayInfo, fieldCandid
 		return "", fmt.Errorf("replicate adaptor: read upload response failed: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("replicate adaptor: upload image failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return "", fmt.Errorf("replicate adaptor: upload image failed with status %d: %s", resp.StatusCode, common.LocalUpstreamErrorPreview(string(respBody)))
 	}
 
 	var uploadResp FileUploadResponse

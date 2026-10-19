@@ -147,7 +147,7 @@ func uploadDifyFile(c *gin.Context, info *relaycommon.RelayInfo, user string, me
 			return nil, fmt.Errorf("failed to read Dify upload response: %w", err)
 		}
 		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			return nil, fmt.Errorf("Dify file upload returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+			return nil, fmt.Errorf("Dify file upload returned HTTP %d: %s", resp.StatusCode, common.LocalUpstreamErrorPreview(string(responseBody)))
 		}
 
 		var result struct {
@@ -380,7 +380,7 @@ func difyStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		if err != nil {
 			return nil, types.NewOpenAIError(fmt.Errorf("read Dify error response: %w", err), types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
 		}
-		return nil, types.NewOpenAIError(fmt.Errorf("Dify returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), types.ErrorCodeBadResponseBody, resp.StatusCode)
+		return nil, types.NewOpenAIError(fmt.Errorf("Dify returned HTTP %d: %s", resp.StatusCode, common.LocalUpstreamErrorPreview(string(body))), types.ErrorCodeBadResponseBody, resp.StatusCode)
 	}
 	var responseText string
 	usage := &dto.Usage{}
@@ -448,7 +448,7 @@ func difyHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respons
 	}
 	service.CloseResponseBodyGracefully(resp)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, types.NewOpenAIError(fmt.Errorf("Dify returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody))), types.ErrorCodeBadResponseBody, resp.StatusCode)
+		return nil, types.NewOpenAIError(fmt.Errorf("Dify returned HTTP %d: %s", resp.StatusCode, common.LocalUpstreamErrorPreview(string(responseBody))), types.ErrorCodeBadResponseBody, resp.StatusCode)
 	}
 	err = common.Unmarshal(responseBody, &difyResponse)
 	if err != nil {

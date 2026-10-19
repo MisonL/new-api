@@ -579,7 +579,7 @@ func ollamaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	}
 	service.CloseResponseBodyGracefully(resp)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, types.NewOpenAIError(fmt.Errorf("ollama returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), types.ErrorCodeBadResponseBody, resp.StatusCode)
+		return nil, types.NewOpenAIError(fmt.Errorf("ollama returned HTTP %d: %s", resp.StatusCode, common.LocalUpstreamErrorPreview(string(body))), types.ErrorCodeBadResponseBody, resp.StatusCode)
 	}
 	if err = common.Unmarshal(body, &oResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -631,7 +631,7 @@ func FetchOllamaModels(baseURL, apiKey string, extraHeaders ...http.Header) ([]O
 		if readErr != nil {
 			return nil, fmt.Errorf("读取错误响应失败: %v", readErr)
 		}
-		return nil, fmt.Errorf("服务器返回错误 %d: %s", response.StatusCode, string(body))
+		return nil, fmt.Errorf("服务器返回错误 %d: %s", response.StatusCode, common.LocalUpstreamErrorPreview(string(body)))
 	}
 
 	var tagsResponse OllamaTagsResponse
@@ -698,7 +698,7 @@ func PullOllamaModel(baseURL, apiKey, modelName string, extraHeaders ...http.Hea
 
 	if response.StatusCode != http.StatusOK {
 		body, _ := readOllamaResponseBody(response.Body)
-		return fmt.Errorf("拉取模型失败 %d: %s", response.StatusCode, string(body))
+		return fmt.Errorf("拉取模型失败 %d: %s", response.StatusCode, common.LocalUpstreamErrorPreview(string(body)))
 	}
 
 	return nil
@@ -745,7 +745,7 @@ func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback f
 
 	if response.StatusCode != http.StatusOK {
 		body, _ := readOllamaResponseBody(response.Body)
-		return fmt.Errorf("拉取模型失败 %d: %s", response.StatusCode, string(body))
+		return fmt.Errorf("拉取模型失败 %d: %s", response.StatusCode, common.LocalUpstreamErrorPreview(string(body)))
 	}
 
 	// 读取流式响应
@@ -827,7 +827,7 @@ func DeleteOllamaModel(baseURL, apiKey, modelName string, extraHeaders ...http.H
 
 	if response.StatusCode != http.StatusOK {
 		body, _ := readOllamaResponseBody(response.Body)
-		return fmt.Errorf("删除模型失败 %d: %s", response.StatusCode, string(body))
+		return fmt.Errorf("删除模型失败 %d: %s", response.StatusCode, common.LocalUpstreamErrorPreview(string(body)))
 	}
 
 	return nil
@@ -866,7 +866,7 @@ func FetchOllamaVersion(baseURL, apiKey string, extraHeaders ...http.Header) (st
 	}
 
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("查询版本失败 %d: %s", response.StatusCode, string(body))
+		return "", fmt.Errorf("查询版本失败 %d: %s", response.StatusCode, common.LocalUpstreamErrorPreview(string(body)))
 	}
 
 	var versionResp struct {

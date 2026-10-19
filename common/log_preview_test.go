@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestLocalLogPreview(t *testing.T) {
@@ -76,4 +78,22 @@ func TestLocalLogPreviewTruncatesInvalidUTF8ByByte(t *testing.T) {
 	if !strings.Contains(got, expectedMarker) {
 		t.Fatalf("expected invalid utf-8 truncated marker, got %q", got)
 	}
+}
+
+// 适配器把上游错误体拼进用户可见的错误消息时使用 LocalUpstreamErrorPreview：
+// 必须脱敏（与日志同一套规则）并有固定长度上限，不能把 8MB 的错误页原样
+// 回显给调用方。DEBUG 也不能放开这两个限制。
+func TestLocalUpstreamErrorPreviewMasksAndBounds(t *testing.T) {
+	long := strings.Repeat("x", LocalUpstreamErrorMessageLimit+500)
+	got := LocalUpstreamErrorPreview("upstream 500: " + long)
+	require.LessOrEqual(t, len(got), LocalUpstreamErrorMessageLimit+boundedPreviewMarkerReserve)
+	require.Contains(t, got, "[truncated")
+
+	secret := LocalUpstreamErrorPreview(`{"client_secret":"cs_live_abc123","detail":"boom"}`)
+	require.NotContains(t, secret, "cs_live_abc123")
+	require.Contains(t, secret, "boom")
+}
+
+func TestLocalUpstreamErrorPreviewKeepsShortContent(t *testing.T) {
+	require.Equal(t, "invalid model", LocalUpstreamErrorPreview(" invalid model "))
 }
