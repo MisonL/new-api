@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -130,6 +131,8 @@ type vendorAggregate struct {
 var (
 	rankingCacheMu sync.Mutex
 	rankingCache   = map[string]rankingCacheItem{}
+	// rankingSnapshotGroup 保证同一个 period 只有一次全量聚合在进行。
+	rankingSnapshotGroup singleflight.Group
 )
 
 func GetRankingsSnapshot(period string) (*RankingsResponse, error) {
@@ -146,19 +149,36 @@ func GetRankingsSnapshot(period string) (*RankingsResponse, error) {
 	}
 	rankingCacheMu.Unlock()
 
-	data, err := buildRankingsSnapshot(config, now)
+	// 缓存过期瞬间会有多个并发请求同时到达。排行榜是两条全区间 GROUP BY，
+	// 没有 single-flight 时它们会同时压到 quota_data 上，把 DB CPU 与连接池
+	// 一起占满，进而拖累中继。同一个 period 只允许一个请求去算。
+	value, err, _ := rankingSnapshotGroup.Do(config.id, func() (any, error) {
+		// 双检：等待期间其他请求可能已经重建好了。
+		rankingCacheMu.Lock()
+		if item, ok := rankingCache[config.id]; ok && time.Now().Before(item.expiresAt) {
+			rankingCacheMu.Unlock()
+			return item.data, nil
+		}
+		rankingCacheMu.Unlock()
+
+		buildTime := time.Now()
+		data, buildErr := buildRankingsSnapshot(config, buildTime)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+
+		rankingCacheMu.Lock()
+		rankingCache[config.id] = rankingCacheItem{
+			expiresAt: buildTime.Add(rankingCacheTTL),
+			data:      data,
+		}
+		rankingCacheMu.Unlock()
+		return data, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	rankingCacheMu.Lock()
-	rankingCache[config.id] = rankingCacheItem{
-		expiresAt: now.Add(rankingCacheTTL),
-		data:      data,
-	}
-	rankingCacheMu.Unlock()
-
-	return data, nil
+	return value.(*RankingsResponse), nil
 }
 
 func rankingConfig(period string) (rankingPeriodConfig, error) {
