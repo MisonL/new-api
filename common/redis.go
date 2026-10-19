@@ -282,8 +282,8 @@ func RedisHIncrBy(key, field string, delta int64) error {
 		return fmt.Errorf("failed to get TTL: %w", err)
 	}
 
+	ctx := context.Background()
 	if ttl > 0 {
-		ctx := context.Background()
 		txn := RDB.TxPipeline()
 
 		incrCmd := txn.HIncrBy(ctx, key, field, delta)
@@ -296,7 +296,19 @@ func RedisHIncrBy(key, field string, delta int64) error {
 		_, err = txn.Exec(ctx)
 		return err
 	}
-	return nil
+
+	// key 不存在（ttl == -2）或没有过期时间（-1）。此前这里直接 return nil，
+	// 调用方据此认为扣减成功，实际什么都没写：缓存额度会长期高于真实值。
+	// 重建这个字段，并补上默认 TTL，避免留下永不过期的 key。
+	defaultTTL := time.Duration(RedisKeyCacheSeconds()) * time.Second
+	if defaultTTL <= 0 {
+		defaultTTL = time.Minute
+	}
+	txn := RDB.TxPipeline()
+	txn.HIncrBy(ctx, key, field, delta)
+	txn.Expire(ctx, key, defaultTTL)
+	_, err = txn.Exec(ctx)
+	return err
 }
 
 func RedisHSetField(key, field string, value interface{}) error {
@@ -309,8 +321,8 @@ func RedisHSetField(key, field string, value interface{}) error {
 		return fmt.Errorf("failed to get TTL: %w", err)
 	}
 
+	ctx := context.Background()
 	if ttl > 0 {
-		ctx := context.Background()
 		txn := RDB.TxPipeline()
 
 		hsetCmd := txn.HSet(ctx, key, field, value)
@@ -323,5 +335,15 @@ func RedisHSetField(key, field string, value interface{}) error {
 		_, err = txn.Exec(ctx)
 		return err
 	}
-	return nil
+
+	// 与 RedisHIncrBy 同理：key 缺失时静默丢弃会让回写"成功"却没生效。
+	defaultTTL := time.Duration(RedisKeyCacheSeconds()) * time.Second
+	if defaultTTL <= 0 {
+		defaultTTL = time.Minute
+	}
+	txn := RDB.TxPipeline()
+	txn.HSet(ctx, key, field, value)
+	txn.Expire(ctx, key, defaultTTL)
+	_, err = txn.Exec(ctx)
+	return err
 }
