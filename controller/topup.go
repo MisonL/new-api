@@ -377,8 +377,9 @@ func EpayNotify(c *gin.Context) {
 		}
 		if topUp.Status == common.TopUpStatusPending && topUp.PaymentMethod != verifyInfo.Type {
 			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 实际支付方式与订单不同 trade_no=%s order_payment_method=%s actual_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentMethod, verifyInfo.Type, c.ClientIP()))
-			topUp.PaymentMethod = verifyInfo.Type
-			if err := topUp.Update(); err != nil {
+			// 只更新支付方式这一列，不能用全字段 Save：并发的结算可能已经把
+			// 订单写成 success，全字段写回会退回 pending 并导致重复入账。
+			if err := model.UpdatePendingTopUpPaymentMethod(verifyInfo.ServiceTradeNo, model.PaymentProviderEpay, verifyInfo.Type); err != nil {
 				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新实际支付方式失败 trade_no=%s client_ip=%s error=%q", topUp.TradeNo, c.ClientIP(), err.Error()))
 				return
 			}

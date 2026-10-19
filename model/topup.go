@@ -104,6 +104,31 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 	})
 }
 
+// UpdatePendingTopUpPaymentMethod 在订单仍为 pending 时更新实际支付方式。
+//
+// 不能用 TopUp.Update()：那是 DB.Save 全字段写入，会把调用方手上那份可能
+// 已过期的快照（Status 仍是 pending）整体写回。多副本部署时另一个副本可能
+// 刚把订单结算成 success，被这次 Save 覆盖回 pending 后，回调重放就会
+// 再执行一次 quota + ?，形成重复入账。这里用带条件的单字段更新。
+func UpdatePendingTopUpPaymentMethod(tradeNo string, expectedPaymentProvider string, paymentMethod string) error {
+	if tradeNo == "" {
+		return errors.New("未提供支付单号")
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+
+	query := DB.Model(&TopUp{}).
+		Where(refCol+" = ?", tradeNo).
+		Where("status = ?", common.TopUpStatusPending)
+	if expectedPaymentProvider != "" {
+		query = query.Where("payment_provider = ?", expectedPaymentProvider)
+	}
+	return query.Update("payment_method", paymentMethod).Error
+}
+
 func Recharge(referenceId string, customerId string, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
