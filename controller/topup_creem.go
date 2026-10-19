@@ -34,7 +34,7 @@ func generateCreemSignature(payload string, secret string) string {
 // 验证Creem webhook签名
 func verifyCreemSignature(payload string, signature string, secret string) bool {
 	if secret == "" {
-		logger.LogWarn(context.Background(), fmt.Sprintf("Creem webhook secret 未配置 test_mode=%t signature=%q body=%q", setting.CreemTestMode, signature, payload))
+		logger.LogWarn(context.Background(), fmt.Sprintf("Creem webhook secret 未配置 test_mode=%t signature=%q body=%q", setting.CreemTestMode, signature, common.LocalLogPreview(common.MaskSensitiveInfo(payload))))
 		return false
 	}
 
@@ -151,7 +151,7 @@ func RequestCreemPay(c *gin.Context) {
 		return
 	}
 
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 支付请求已收到 user_id=%d body=%q", c.GetInt("id"), string(bodyBytes)))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem 支付请求已收到 user_id=%d body=%q", c.GetInt("id"), common.LocalLogPreview(common.MaskSensitiveInfo(string(bodyBytes)))))
 
 	// 重新设置body供后续的ShouldBindJSON使用
 	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -242,16 +242,16 @@ func CreemWebhook(c *gin.Context) {
 
 	// 获取签名头
 	signature := c.GetHeader(CreemSignatureHeader)
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem webhook 收到请求 path=%q client_ip=%s signature=%q body=%q", c.Request.RequestURI, c.ClientIP(), signature, string(bodyBytes)))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Creem webhook 收到请求 path=%q client_ip=%s signature=%q body=%q", c.Request.RequestURI, c.ClientIP(), signature, common.LocalLogPreview(common.MaskSensitiveInfo(string(bodyBytes)))))
 	if signature == "" {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem webhook 缺少签名 path=%q client_ip=%s body=%q", c.Request.RequestURI, c.ClientIP(), string(bodyBytes)))
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem webhook 缺少签名 path=%q client_ip=%s body=%q", c.Request.RequestURI, c.ClientIP(), common.LocalLogPreview(common.MaskSensitiveInfo(string(bodyBytes)))))
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return
 	}
 
 	// 验证签名
 	if !verifyCreemSignature(string(bodyBytes), signature, setting.CreemWebhookSecret) {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem webhook 验签失败 path=%q client_ip=%s signature=%q body=%q", c.Request.RequestURI, c.ClientIP(), signature, string(bodyBytes)))
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Creem webhook 验签失败 path=%q client_ip=%s signature=%q body=%q", c.Request.RequestURI, c.ClientIP(), signature, common.LocalLogPreview(common.MaskSensitiveInfo(string(bodyBytes)))))
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return
 	}
@@ -264,7 +264,7 @@ func CreemWebhook(c *gin.Context) {
 	// 解析新格式的webhook数据
 	var webhookEvent CreemWebhookEvent
 	if err := c.ShouldBindJSON(&webhookEvent); err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem webhook 解析失败 path=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.ClientIP(), err.Error(), string(bodyBytes)))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem webhook 解析失败 path=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.ClientIP(), err.Error(), common.LocalLogPreview(common.MaskSensitiveInfo(string(bodyBytes)))))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
@@ -434,7 +434,7 @@ func genCreemLink(ctx context.Context, referenceId string, product *CreemProduct
 		return "", fmt.Errorf("读取响应失败: %v", err)
 	}
 
-	logger.LogInfo(ctx, fmt.Sprintf("Creem API 响应已收到 trade_no=%s status_code=%d body=%q", referenceId, resp.StatusCode, string(body)))
+	logger.LogInfo(ctx, fmt.Sprintf("Creem API 响应已收到 trade_no=%s status_code=%d body=%q", referenceId, resp.StatusCode, common.LocalLogPreview(common.MaskSensitiveInfo(string(body)))))
 
 	// 检查响应状态
 	if resp.StatusCode/100 != 2 {
