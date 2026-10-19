@@ -136,6 +136,31 @@ zhipu 去掉原先的重复关闭，保证每个请求只关一次。
   key 要 root"：**属实，属权限模型内暴露**。`/api/channel/multi_key/manage`
   挂 `AdminAuth`。未改，因为收紧会改变现有管理员可用功能，需产品决策。
 
+## 追加维度自查（2026-10-20）
+
+在等待并发审计返回期间，自查了以下维度：
+
+- **命令注入**：全仓 `exec.Command` 只有 `common/utils.go:29-35` 的
+  `OpenBrowser`，参数以数组形式传入，无 shell 拼接，无用户可控参数进入
+  命令名。无缺陷。
+- **模板注入**：`html/template` 只作为类型引用出现，没有渲染用户输入的模板。
+  无缺陷。
+- **桌面端 sidecar 环境隔离**（AGENTS.md 第 8 节）：
+  `desktop/tauri-app/src-tauri/src/runtime.rs:92-100` 显式设置
+  `NEW_API_SKIP_DOTENV=true`、`SQL_DSN=local`、空 `LOG_SQL_DSN`、空
+  `REDIS_CONN_STRING`、`SQLITE_PATH` 指向应用数据目录，并注入
+  `SESSION_SECRET`/`CRYPTO_SECRET`。符合要求。
+- **匿名分组暴露**：`GET /api/user/groups` 走 `TryUserAuth`，匿名时
+  `c.GetInt("id")` 为 0，`GetUserById(0)` 有显式保护并回落到空分组，最终返回
+  `default` 等分组名称与倍率。这是定价页所需的既有设计，未改。
+- **前端测试从不执行**：`web/default/tests/` 有 26 个测试文件，但
+  `web/default/package.json` 没有 `test` 脚本，`.github/workflows/` 也只运行
+  classic 的 `test:node`。全量运行结果为 208 pass / 2 fail，两处失败是
+  `tests/option-write-order.test.ts` 与 `tests/code-block-linkify.test.ts`：
+  它们导入的 `optionWriteOrder`/`sortOptionWrites` 与 `linkifyHtml` 在源码中
+  从未存在。这是测试先于实现的遗留缺口，本轮只记录，未实现缺失功能，也未把
+  一个必然失败的脚本接进 CI。
+
 ## 本轮未覆盖
 
 - MySQL 实例未启动：MySQL 侧结论（Error 1091、dialector 行为）来自驱动源码与
