@@ -35,8 +35,16 @@ var (
 	// maskStandaloneKeyPattern masks provider-style keys when they are not preceded by a label.
 	maskStandaloneKeyPattern = regexp.MustCompile(`(?i)(^|[^[:alnum:]_-])(?:sk|rk|sess)(?:-|_)[^\s,;}\]"')]+`)
 	// maskNamedSecretPattern also covers query-style credentials without a URL
-	// scheme, for example "api.example.com?token=secret".
-	maskNamedSecretPattern = regexp.MustCompile(`(?i)(^|[^[:alnum:]_-])((?:access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|api[-_]?key|apikey|key)\s*[:=]\s*)(['"]?)([^\s,;&}\]"']+)(['"]?)`)
+	// scheme, for example "api.example.com?token=secret". The key may be quoted
+	// JSON style ({"secret":"..."}), which puts a closing quote before the colon.
+	maskNamedSecretPattern = regexp.MustCompile(`(?i)(^|[^[:alnum:]_-])((?:access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|api[-_]?key|apikey|key)['"]?\s*[:=]\s*)(['"]?)([^\s,;&}\]"']+)(['"]?)`)
+	// maskJSONCredentialPattern covers credential keys that appear only as a
+	// quoted JSON key (client_secret, webhook_secret, auth_token, ...), the form
+	// that upstream error bodies and webhook payloads actually use.
+	maskJSONCredentialPattern = regexp.MustCompile(`(?i)(["'](?:[a-z0-9_.-]*[-_.])?(?:secret|token|password|passwd|passwd|credential|signing[-_]?key|private[-_]?key|api[-_]?key|apikey|auth[-_]?key|access[-_]?key|session[-_]?key|encryption[-_]?key|cookie)["']\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;&}\]"']+)`)
+	// maskStandaloneProviderKeyPattern covers provider keys that carry no label
+	// at all: Google API keys (AIza...) and AWS access key ids (AKIA...).
+	maskStandaloneProviderKeyPattern = regexp.MustCompile(`\b(?:AIza[0-9A-Za-z_-]{35}|AKIA[0-9A-Z]{16})\b`)
 )
 
 // Responses event names contain dots but are protocol identifiers, not hostnames.
@@ -294,6 +302,8 @@ func MaskSensitiveInfo(str string) string {
 	str = maskStandaloneKeyPattern.ReplaceAllString(str, "${1}***")
 	str = maskSensitiveHeaderPattern.ReplaceAllString(str, "${1}${2}${3}***")
 	str = maskNamedSecretPattern.ReplaceAllString(str, "${1}${2}${3}***${5}")
+	str = maskJSONCredentialPattern.ReplaceAllString(str, "${1}\"***\"")
+	str = maskStandaloneProviderKeyPattern.ReplaceAllString(str, "***")
 
 	// Mask URLs
 	str = maskURLPattern.ReplaceAllStringFunc(str, func(urlStr string) string {

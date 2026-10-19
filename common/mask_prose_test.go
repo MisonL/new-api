@@ -100,3 +100,49 @@ func TestMaskSensitiveInfoStillMasksRealCredentials(t *testing.T) {
 		require.Contains(t, masked, "***")
 	}
 }
+
+// JSON 形式的凭据键在键名与冒号之间还有闭合引号，例如 {"secret":"..."}。
+// 旧正则要求键名后紧跟 : 或 =，于是 "已脱敏" 的错误与日志路径会把
+// 整个 JSON 里的密钥原样带出。这里覆盖常见键名与两种引号风格。
+func TestMaskSensitiveInfoMasksJSONQuotedCredentialKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		leak string
+	}{
+		{"secret", `{"secret":"plainsecret"}`, "plainsecret"},
+		{"client_secret", `{"client_secret":"cs_live_abc123"}`, "cs_live_abc123"},
+		{"webhook_secret", `{"webhook_secret":"whsec_abc123"}`, "whsec_abc123"},
+		{"token", `{"token":"tok_live_abcdef"}`, "tok_live_abcdef"},
+		{"key", `{"key":"0123abcd-efgh-ijkl"}`, "0123abcd-efgh-ijkl"},
+		{"cookie", `"cookie": "session=abcdef123456"`, "session=abcdef123456"},
+		{"spaced", `{ "api_key" : "sk-live-abcdef" }`, "sk-live-abcdef"},
+		{"single quoted", `{'password':'hunter2'}`, "hunter2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := MaskSensitiveInfo(tc.in)
+			require.NotContains(t, got, tc.leak, "credential value must be masked in %q", tc.in)
+			require.Contains(t, got, "***", "masked output must keep a visible marker")
+		})
+	}
+}
+
+// 无前缀的供应商密钥（Google / AWS）不经过任何键值形式，需要独立模式。
+func TestMaskSensitiveInfoMasksStandaloneProviderKeys(t *testing.T) {
+	cases := []string{
+		"upstream said: invalid key AIzaSyD-abcdefghijklmnopqrstuvwxyz01234",
+		"aws rejected AKIAIOSFODNN7EXAMPLE",
+	}
+	for _, in := range cases {
+		got := MaskSensitiveInfo(in)
+		require.NotContains(t, got, "AIzaSyD-abcdefghijklmnopqrstuvwxyz01234")
+		require.NotContains(t, got, "AKIAIOSFODNN7EXAMPLE")
+	}
+}
+
+// 脱敏不得破坏普通 JSON 诊断，否则日志与错误信息会被改写成语义不明的内容。
+func TestMaskSensitiveInfoKeepsOrdinaryJSONFields(t *testing.T) {
+	in := `{"model":"gpt-5.6-sol","status_code":200,"error_code":"rate_limit_exceeded"}`
+	require.Equal(t, in, MaskSensitiveInfo(in))
+}
