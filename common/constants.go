@@ -104,6 +104,10 @@ var SMTPServer = ""
 var SMTPPort = 587
 var SMTPSSLEnabled = false
 var SMTPForceAuthLogin = false
+
+// SMTPSkipTLSVerify 显式放弃隐式 TLS 的证书校验，只用于自签证书的 SMTP
+// 服务器。默认关闭：密码重置链接与邮箱验证码都会经过这条连接。
+var SMTPSkipTLSVerify = false
 var SMTPAccount = ""
 var SMTPFrom = ""
 var SMTPToken = ""

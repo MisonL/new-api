@@ -33,6 +33,19 @@ func getSMTPAuth() smtp.Auth {
 	return smtp.PlainAuth("", SMTPAccount, SMTPToken, SMTPServer)
 }
 
+// smtpImplicitTLSConfig 构造隐式 TLS（465 端口 / SMTPSSLEnabled）的客户端配置。
+//
+// 不能无条件 InsecureSkipVerify：密码重置链接与邮箱验证码都经过这条连接，
+// 位于网关与 SMTP 服务器之间的任何人都能出示任意证书并读到它们。
+// 需要自签证书的环境用 SMTP_TLS_INSECURE_SKIP_VERIFY 显式放弃校验。
+func smtpImplicitTLSConfig(serverName string, skipVerify bool) *tls.Config {
+	return &tls.Config{
+		InsecureSkipVerify: skipVerify,
+		ServerName:         serverName,
+		MinVersion:         tls.VersionTLS12,
+	}
+}
+
 func SendEmail(subject string, receiver string, content string) error {
 	if SMTPFrom == "" { // for compatibility
 		SMTPFrom = SMTPAccount
@@ -57,10 +70,7 @@ func SendEmail(subject string, receiver string, content string) error {
 	to := strings.Split(receiver, ";")
 	var err error
 	if SMTPPort == 465 || SMTPSSLEnabled {
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: true,
-			ServerName:         SMTPServer,
-		}
+		tlsConfig := smtpImplicitTLSConfig(SMTPServer, SMTPSkipTLSVerify)
 		conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", SMTPServer, SMTPPort), tlsConfig)
 		if err != nil {
 			return err
