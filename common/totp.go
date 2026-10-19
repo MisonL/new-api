@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
@@ -43,6 +44,60 @@ func ValidateTOTPCode(secret, code string) bool {
 
 	// 验证验证码
 	return totp.Validate(cleanCode, secret)
+}
+
+// totpPeriodSeconds 与 GenerateTOTPSecret 中使用的 30 秒周期保持一致。
+const totpPeriodSeconds = 30
+
+// ValidateTOTPStep 验证 TOTP 验证码，并返回它所属的时间步进。
+//
+// totp.Validate 只比对当前及相邻窗口，不记录已经用过的码：同一个 6 位码
+// 在有效期内可以重复通过，一旦被截获即可重放。调用方应把返回的步进持久化，
+// 之后以 lastUsedStep 传入；前一窗口的码只用于容忍时钟偏差，并且只有在
+// 未使用过时才接受，因此 nextStep 始终前进，不会因偏慢的时钟回退。
+func ValidateTOTPStep(secret, code string, now time.Time, lastUsedStep int64, hasLastUsedStep bool) (int64, bool) {
+	cleanCode := strings.ReplaceAll(code, " ", "")
+	if len(cleanCode) != 6 {
+		return 0, false
+	}
+	now = now.UTC()
+	opts := totp.ValidateOpts{
+		Period:    totpPeriodSeconds,
+		Skew:      1,
+		Digits:    otp.DigitsSix,
+		Algorithm: otp.AlgorithmSHA1,
+	}
+	matches := make([]int64, 0, 3)
+	for _, offset := range []int{0, -1, 1} {
+		candidateAt := now.Add(time.Duration(offset*totpPeriodSeconds) * time.Second)
+		valid, err := totp.ValidateCustom(cleanCode, secret, candidateAt, opts)
+		if err == nil && valid {
+			matches = append(matches, candidateAt.Unix()/totpPeriodSeconds)
+		}
+	}
+	if len(matches) == 0 {
+		return 0, false
+	}
+
+	currentStep := now.Unix() / totpPeriodSeconds
+	nextStep := int64(0)
+	for _, step := range matches {
+		if hasLastUsedStep && step <= lastUsedStep {
+			continue
+		}
+		// 只接受当前或更早一步的匹配；未来一步的窗口用于容忍用户设备时钟
+		// 稍快，但记录它会让之后的正常码同样可用，因此不推进到未来。
+		if step > currentStep {
+			continue
+		}
+		if step > nextStep {
+			nextStep = step
+		}
+	}
+	if nextStep == 0 {
+		return 0, false
+	}
+	return nextStep, true
 }
 
 // GenerateBackupCodes 生成备用恢复码

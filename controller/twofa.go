@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -177,13 +178,16 @@ func Enable2FA(c *gin.Context) {
 		return
 	}
 
-	if !common.ValidateTOTPCode(twoFA.Secret, cleanCode) {
+	step, ok := common.ValidateTOTPStep(twoFA.Secret, cleanCode, time.Now(), twoFA.LastUsedStep, twoFA.LastUsedStep > 0)
+	if !ok {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "验证码或备用码错误，请重试",
 		})
 		return
 	}
+	// 启用时消费当前步进：用于启用的码不能再拿去登录。
+	twoFA.LastUsedStep = step
 
 	// 启用2FA
 	if err := twoFA.Enable(); err != nil {
