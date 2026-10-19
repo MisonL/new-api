@@ -12,6 +12,7 @@ import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 import { api, getSelf } from '@/lib/api'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import { normalizeLoginRedirectTarget } from '@/features/auth/lib/redirect-target'
 
 type OAuthRequestConfig = AxiosRequestConfig & {
   skipBusinessError?: boolean
@@ -53,7 +54,10 @@ function OAuthCallback() {
               currentPath !== normalizedTarget &&
               currentPath !== `${normalizedTarget}/`
             ) {
-              window.location.replace(target)
+              // target 来自 ?redirect= 查询参数，未经校验时会跳到外部站点。
+              // 这里只接受站内路径，其余回落到默认页。
+              const safeTarget = normalizeLoginRedirectTarget(target)
+              window.location.replace(safeTarget || '/dashboard')
             }
           }, 100)
         }
@@ -125,7 +129,9 @@ function OAuthCallback() {
       }
 
       const redirectAfterLogin = (target?: string) => {
-        const to = target || search?.redirect || '/dashboard'
+        const to =
+          normalizeLoginRedirectTarget(target || search?.redirect) ||
+          '/dashboard'
         safeNavigate(to)
         toast.success(i18next.t('Signed in successfully!'))
       }

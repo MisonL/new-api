@@ -138,6 +138,11 @@ export default defineConfig(({ envMode }) => {
       entry: {
         index: './src/main.tsx',
       },
+      // loadEnv 只读取变量，不会把它们注入产物；必须显式交给 source.define，
+      // 否则 import.meta.env.VITE_* 在打包后是 undefined。只读守卫的
+      // IS_READONLY_FRONTEND 依赖这个注入，没接上时它会被常量折叠成 false，
+      // 整个第二层阻断静默失效。
+      define: env.publicVars,
     },
     resolve: {
       alias: {
@@ -168,7 +173,15 @@ export default defineConfig(({ envMode }) => {
       // Speed up repeated `rsbuild build` (local + CI when node_modules/.cache is preserved).
       // @see https://v2.rsbuild.dev/config/performance/build-cache
       buildCache: {
-        cacheDigest: [process.env.VITE_REACT_APP_VERSION],
+        // 缓存摘要必须包含所有影响产物的环境变量，否则翻转只读开关后重建会
+        // 复用旧产物，看起来像"开关没生效"。publicVars 已经包含 VITE_* 的
+        // 全部键值，这里连同版本号一起进入摘要。
+        cacheDigest: [
+          process.env.VITE_REACT_APP_VERSION,
+          ...Object.entries(env.publicVars ?? {}).map(
+            ([key, value]) => `${key}=${value}`,
+          ),
+        ],
       },
     },
     tools: {

@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { getSelf } from '@/lib/api'
 import type { User } from '@/features/users/types'
 import { saveUserId } from '../lib/storage'
+import { normalizeLoginRedirectTarget } from '../lib/redirect-target'
 
 function getSavedLanguage(user: User): string | undefined {
   const userData = user as Record<string, unknown>
@@ -68,7 +69,8 @@ export function useAuthRedirect() {
     }
 
     // Navigate to target page
-    const targetPath = redirectTo || '/dashboard'
+    const targetPath =
+      normalizeLoginRedirectTarget(redirectTo) || '/dashboard'
     navigate({ to: targetPath, replace: true })
   }
 
@@ -77,9 +79,12 @@ export function useAuthRedirect() {
    * @param redirectTo - Path to return to after the code verifies
    */
   const redirectTo2FA = (redirectTo?: string) => {
+    // 把未校验的 redirect 继续传进 /otp 会让开放重定向在 2FA 之后触发一次。
+    // 这里收敛成站内路径，非法值直接丢弃。
+    const target = normalizeLoginRedirectTarget(redirectTo)
     navigate({
       to: '/otp',
-      search: redirectTo ? { redirect: redirectTo } : {},
+      search: target ? { redirect: target } : {},
       replace: true,
     })
   }

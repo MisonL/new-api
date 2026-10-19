@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 import { getSelf } from '@/lib/api'
 import { wechatLoginByCode } from '@/features/auth/api'
+import { normalizeLoginRedirectTarget } from '@/features/auth/lib/redirect-target'
 
 function OAuthComponent() {
   const navigate = useNavigate()
@@ -24,7 +25,8 @@ function OAuthComponent() {
         const res = await getSelf()
         if (res?.success) {
           useAuthStore.getState().auth.setUser(res.data as AuthUser)
-          const target = search?.redirect || '/dashboard'
+          const target =
+            normalizeLoginRedirectTarget(search?.redirect) || '/dashboard'
           navigate({ to: target, replace: true })
           return
         }
