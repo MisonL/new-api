@@ -253,3 +253,18 @@ func GetUserLanguage(userId int) string {
 	}
 	return userCache.GetSetting().Language
 }
+
+// InvalidateUserQuotaAfterRecharge 在充值/兑换直接写库后清掉用户缓存。
+//
+// 这些路径在事务里执行 `quota + ?`，不经过 IncreaseUserQuota 的缓存增量，
+// 缓存里最长 60 秒（SyncFrequency）仍是充值前的值：用户付款成功后立刻发请求
+// 会被 PreConsumeQuota 判为"额度不足"。这里在事务提交后失效整条哈希，
+// 下一次读取回源到已提交的新值。
+func InvalidateUserQuotaAfterRecharge(userId int) {
+	if userId <= 0 {
+		return
+	}
+	if err := InvalidateUserCache(userId); err != nil {
+		common.SysLog("failed to invalidate user cache after recharge: " + err.Error())
+	}
+}
