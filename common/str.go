@@ -397,6 +397,40 @@ func MaskSensitiveInfo(str string) string {
 	return str
 }
 
+// MaskURLCredentials 只脱敏 URL 中的凭据部分（userinfo 与全部 query 值），
+// 保留 scheme、host 和 path。
+//
+// DEBUG 日志需要看清打到哪个上游端点，但 Vertex API-key 模式把渠道密钥放在
+// query（?key=AIza...），用户配置的渠道也可能在 userinfo 里带账号密码。
+// MaskSensitiveInfo 会把 host 与 path 一并抹掉，不适合这个用途。
+func MaskURLCredentials(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return MaskSensitiveInfo(raw)
+	}
+	if parsed.User != nil {
+		parsed.User = url.User("***")
+	}
+	if parsed.RawQuery != "" {
+		keys := make([]string, 0)
+		for key := range parsed.Query() {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		masked := make([]string, 0, len(keys))
+		for _, key := range keys {
+			masked = append(masked, key+"=***")
+		}
+		parsed.RawQuery = strings.Join(masked, "&")
+	}
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
 func isAuthSchemeProseWord(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "has", "is", "required", "missing", "unavailable", "invalid", "expired", "present", "not", "no", "none", "was", "were", "needed", "set", "provided", "count", "usage", "token",

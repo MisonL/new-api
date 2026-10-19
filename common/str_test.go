@@ -109,3 +109,48 @@ func TestIsAutoGroupIsCaseInsensitiveAndTrimmed(t *testing.T) {
 		}
 	}
 }
+
+// DEBUG 日志会打印完整上游 URL。Vertex API-key 模式把渠道密钥放在 query
+// (?key=AIza...)，渠道也可能在 userinfo 里带凭据，这两处都不能进日志。
+// 其余部分（scheme/host/path）是排障需要的，保持原样。
+func TestMaskURLCredentialsKeepsEndpointButDropsSecrets(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		leak []string
+		want []string
+	}{
+		{
+			name: "vertex key query",
+			in:   "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us/models/gemini-2.5-pro:generateContent?key=AIzaSyD-abcdefghijklmnopqrstuvwxyz01234",
+			leak: []string{"AIzaSyD-abcdefghijklmnopqrstuvwxyz01234"},
+			want: []string{"us-central1-aiplatform.googleapis.com", "/v1/projects/p/locations/us/models/gemini-2.5-pro:generateContent", "key=***"},
+		},
+		{
+			name: "userinfo and multiple query values",
+			in:   "https://user:pass@example.com/v1/chat?api_key=secret-one&model=gpt-5.6-sol",
+			leak: []string{"pass", "secret-one"},
+			want: []string{"example.com", "/v1/chat", "api_key=***", "model=***"},
+		},
+		{
+			name: "no query unchanged",
+			in:   "https://api.openai.com/v1/chat/completions",
+			want: []string{"https://api.openai.com/v1/chat/completions"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := MaskURLCredentials(tc.in)
+			for _, leak := range tc.leak {
+				if strings.Contains(got, leak) {
+					t.Fatalf("expected %q to be masked, got %q", leak, got)
+				}
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("expected %q to remain in %q", want, got)
+				}
+			}
+		})
+	}
+}

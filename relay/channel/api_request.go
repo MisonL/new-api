@@ -687,7 +687,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	recordUpstreamRequestPath(info, fullRequestURL)
 	if common2.DebugEnabled {
-		println("fullRequestURL:", fullRequestURL)
+		println("fullRequestURL:", common2.MaskURLCredentials(fullRequestURL))
 	}
 	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
@@ -733,7 +733,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	}
 	recordUpstreamRequestPath(info, fullRequestURL)
 	if common2.DebugEnabled {
-		println("fullRequestURL:", fullRequestURL)
+		println("fullRequestURL:", common2.MaskURLCredentials(fullRequestURL))
 	}
 	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
