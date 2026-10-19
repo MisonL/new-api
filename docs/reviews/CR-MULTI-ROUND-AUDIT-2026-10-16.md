@@ -808,3 +808,49 @@ sidecar 门禁调用，对应断言均按预期失败。`web/default` 的 `forma
 **验证**：`docker exec new-api-dev-isolated-postgres-1 psql -U root -d new-api-dev
 -tAc "select ... from pg_indexes where tablename='users'"` 与重复行计数查询，
 输出如上。未修改任何代码。
+
+### 11.8 encoding/json 迁移文档与仓库现状不符（2026-10-19 复查，未修）
+
+`docs/reviews/CR-JSON-HELPER-MIGRATION-2026-09-22.md` 声称"状态：迁移完成，全仓
+测试通过"，并给出"剩余违规文件: 0"。仓库现状与这份声明不符。
+
+**计数方法与结果**（`git ls-files '*.go'` 全量，排除 `_test.go`、`common/`（包装
+自身所在包）与 `tools/`；剥离 `/* */` 块注释与 `//` 行注释后统计
+`json.Marshal|Unmarshal|NewDecoder|NewEncoder|MarshalIndent|Valid` 调用，并确认
+命中文件确实 `import "encoding/json"`）：
+
+```text
+活跃的直接调用: 128 处，涉及 58 个文件
+按顶层包: relay 56 / pkg 19 / controller 15 / setting 10 / model 9 /
+          oauth 9 / service 7 / middleware 3
+热点: relay/channel/coze/relay-coze.go 7、controller/console_migrate.go 5、
+      pkg/ionet/deployment.go 5、relay/channel/baidu 5、
+      relay/channel/cloudflare 5、relay/channel/zhipu 5
+```
+
+抽样确认命中都是真的 `encoding/json`（11/11 文件同时含 `import "encoding/json"`
+与命中行）。调用形状全部可机械替换：`Unmarshal` 70、`Marshal` 43、
+`NewDecoder` 15，且 15 处 `NewDecoder` **全部**是 `json.NewDecoder(x).Decode(y)`
+单表达式形式，无"先建 decoder 再多语句 Decode"的用法。
+
+**该文档声称的改动在历史里找不到对应提交**：
+
+- 仓库内不存在任何"把 `json.Unmarshal` 改成 `common.Unmarshal`"的迁移提交
+  （`git log --all -S'common.Unmarshal('` 命中的都是零散单点改动）。
+- 文档"顺带修复的两个既有缺陷"之一所述位置仍是原样：
+  `controller/misc.go:498` 依然是 `err := json.NewDecoder(c.Request.Body).Decode(&req)`
+  且 `err` 未检查，`git blame` 指向 2023-04-22 的上游提交（`^4cbef0780`），
+  从未被改动。
+- 文档称 `relay/channel/coze/adaptor.go` 已用 `basecommon` 别名接入
+  `new-api/common`；该文件现状仍是 `import "encoding/json"`，无 `basecommon`。
+
+**结论**：该文档描述的是另一条分支上未落地（或已丢失）的工作，其"剩余违规 0"
+的声明会让人以为这条 AGENTS.md 约束已被满足，从而不再检查。按 AGENTS.md
+"文档中不得引用不存在的截图、GIF、Demo 或阶段报告"，属于需要修正的文档事实。
+
+**未修的原因**：本轮只确认了量级与可机械替换性，没有执行 128 处替换。
+`relay/` 下有 56 处且分散在 30 余个渠道目录，替换本身机械（包装是直通，
+行为等价），但需要逐包 `go build` / `go test` 验证，属于可独立成篇的原子任务；
+且 AGENTS.md 要求"每次只处理一个原子任务"。此处记录事实与计数口径，供后续单独立项。
+
+**验证**：上述计数脚本与 `git log -S` / `git blame` 输出；未修改任何代码。
