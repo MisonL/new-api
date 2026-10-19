@@ -63,17 +63,15 @@ var (
 )
 
 func GetPricing() []Pricing {
+	updatePricingLock.Lock()
 	if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-		updatePricingLock.Lock()
-		defer updatePricingLock.Unlock()
-		// Double check after acquiring the lock
-		if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-			modelSupportEndpointsLock.Lock()
-			defer modelSupportEndpointsLock.Unlock()
-			updatePricing()
-		}
+		modelSupportEndpointsLock.Lock()
+		updatePricing()
+		modelSupportEndpointsLock.Unlock()
 	}
-	return pricingMap
+	result := pricingMap
+	updatePricingLock.Unlock()
+	return result
 }
 
 func InvalidatePricingCache() {
@@ -87,11 +85,15 @@ func InvalidatePricingCache() {
 
 // GetVendors 返回当前定价接口使用到的供应商信息
 func GetVendors() []PricingVendor {
+	updatePricingLock.Lock()
 	if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-		// 保证先刷新一次
-		GetPricing()
+		modelSupportEndpointsLock.Lock()
+		updatePricing()
+		modelSupportEndpointsLock.Unlock()
 	}
-	return vendorsList
+	result := vendorsList
+	updatePricingLock.Unlock()
+	return result
 }
 
 func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
@@ -256,24 +258,26 @@ func updatePricing() {
 		}
 	}
 
-	modelSupportEndpointTypes = make(map[string][]constant.EndpointType)
+	// 先在局部变量里构建，全部完成后才一次性发布到包级缓存。
+	// 直接把半成品赋给包级 map 会让并发读者看到只填了一半的状态。
+	newModelSupportEndpointTypes := make(map[string][]constant.EndpointType)
 	for model, endpoints := range modelSupportEndpointsStr {
 		supportedEndpoints := make([]constant.EndpointType, 0)
 		for _, endpointStr := range endpoints {
 			endpointType := constant.EndpointType(endpointStr)
 			supportedEndpoints = append(supportedEndpoints, endpointType)
 		}
-		modelSupportEndpointTypes[model] = supportedEndpoints
+		newModelSupportEndpointTypes[model] = supportedEndpoints
 	}
 
 	// 构建全局 supportedEndpointMap（默认 + 自定义覆盖）
-	supportedEndpointMap = make(map[string]common.EndpointInfo)
+	newSupportedEndpointMap := make(map[string]common.EndpointInfo)
 	// 1. 默认端点
-	for _, endpoints := range modelSupportEndpointTypes {
+	for _, endpoints := range newModelSupportEndpointTypes {
 		for _, et := range endpoints {
 			if info, ok := common.GetDefaultEndpointInfo(et); ok {
-				if _, exists := supportedEndpointMap[string(et)]; !exists {
-					supportedEndpointMap[string(et)] = info
+				if _, exists := newSupportedEndpointMap[string(et)]; !exists {
+					newSupportedEndpointMap[string(et)] = info
 				}
 			}
 		}
@@ -288,7 +292,7 @@ func updatePricing() {
 			for k, v := range raw {
 				switch val := v.(type) {
 				case string:
-					supportedEndpointMap[k] = common.EndpointInfo{Path: val, Method: "POST"}
+					newSupportedEndpointMap[k] = common.EndpointInfo{Path: val, Method: "POST"}
 				case map[string]interface{}:
 					ep := common.EndpointInfo{Method: "POST"}
 					if p, ok := val["path"].(string); ok {
@@ -297,7 +301,7 @@ func updatePricing() {
 					if m, ok := val["method"].(string); ok {
 						ep.Method = strings.ToUpper(m)
 					}
-					supportedEndpointMap[k] = ep
+					newSupportedEndpointMap[k] = ep
 				default:
 					// ignore unsupported types
 				}
@@ -305,12 +309,12 @@ func updatePricing() {
 		}
 	}
 
-	pricingMap = make([]Pricing, 0)
+	newPricingMap := make([]Pricing, 0)
 	for model, groups := range modelGroupsMap {
 		pricing := Pricing{
 			ModelName:              model,
 			EnableGroup:            groups.Items(),
-			SupportedEndpointTypes: modelSupportEndpointTypes[model],
+			SupportedEndpointTypes: newModelSupportEndpointTypes[model],
 		}
 
 		// 补充模型元数据（描述、标签、供应商、状态）
@@ -352,28 +356,40 @@ func updatePricing() {
 				pricing.BillingExpr = expr
 			}
 		}
-		pricingMap = append(pricingMap, pricing)
+		newPricingMap = append(newPricingMap, pricing)
 	}
 
 	// 防止大更新后数据不通用
-	if len(pricingMap) > 0 {
-		pricingMap[0].PricingVersion = "5a90f2b86c08bd983a9a2e6d66c255f4eaef9c4bc934386d2b6ae84ef0ff1f1f"
+	if len(newPricingMap) > 0 {
+		newPricingMap[0].PricingVersion = "5a90f2b86c08bd983a9a2e6d66c255f4eaef9c4bc934386d2b6ae84ef0ff1f1f"
 	}
 
 	// 刷新缓存映射，供高并发快速查询
-	modelEnableGroupsLock.Lock()
-	modelEnableGroups = make(map[string][]string)
-	modelQuotaTypeMap = make(map[string]int)
-	for _, p := range pricingMap {
-		modelEnableGroups[p.ModelName] = p.EnableGroup
-		modelQuotaTypeMap[p.ModelName] = p.QuotaType
+	newModelEnableGroups := make(map[string][]string, len(newPricingMap))
+	newModelQuotaTypeMap := make(map[string]int, len(newPricingMap))
+	for _, p := range newPricingMap {
+		newModelEnableGroups[p.ModelName] = p.EnableGroup
+		newModelQuotaTypeMap[p.ModelName] = p.QuotaType
 	}
+	modelEnableGroupsLock.Lock()
+	modelEnableGroups = newModelEnableGroups
+	modelQuotaTypeMap = newModelQuotaTypeMap
 	modelEnableGroupsLock.Unlock()
 
+	// 所有构建完成后再一次性发布，读者永远看不到半成品。
+	modelSupportEndpointTypes = newModelSupportEndpointTypes
+	supportedEndpointMap = newSupportedEndpointMap
+	pricingMap = newPricingMap
 	lastGetPricingTime = time.Now()
 }
 
 // GetSupportedEndpointMap 返回全局端点到路径的映射
+//
+// 该 map 与 pricingMap 在同一把锁下整体替换并填充；读者不取锁会在填充过程中
+// 遍历到并发写，触发 Go 运行时的 fatal error。返回值在锁内取快照，发布后的
+// map 不再被修改。
 func GetSupportedEndpointMap() map[string]common.EndpointInfo {
+	updatePricingLock.Lock()
+	defer updatePricingLock.Unlock()
 	return supportedEndpointMap
 }
