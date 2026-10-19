@@ -247,6 +247,15 @@ func PasskeyLoginBegin(c *gin.Context) {
 	})
 }
 
+// passkeyCredentialIsCloned 报告本次认证的签名计数是否表明凭证可能被克隆。
+//
+// go-webauthn 在计数不递增（且两者非零）时只设置 CloneWarning，不返回错误；
+// 平台型 passkey 常驻 0 计数的情况不会触发。调用方必须显式拒绝，否则一份
+// 被复制出来的私钥可以无限次通过认证。
+func passkeyCredentialIsCloned(credential *webauthnlib.Credential) bool {
+	return credential != nil && credential.Authenticator.CloneWarning
+}
+
 func PasskeyLoginFinish(c *gin.Context) {
 	if !system_setting.GetPasskeySettings().Enabled {
 		c.JSON(http.StatusOK, gin.H{
@@ -318,6 +327,14 @@ func PasskeyLoginFinish(c *gin.Context) {
 
 	if modelUser.Status != common.UserStatusEnabled {
 		common.ApiErrorMsg(c, "该用户已被禁用")
+		return
+	}
+
+	// 计数不递增意味着该凭证可能已被克隆（另一份私钥在被使用）。
+	// 库只把这个信号放在 CloneWarning 里，不返回错误，必须由调用方拒绝。
+	if passkeyCredentialIsCloned(credential) {
+		common.SysLog(fmt.Sprintf("PasskeyLogin: clone warning for user %d credential %d", modelUser.Id, credential.ID))
+		common.ApiErrorMsg(c, "Passkey 验证失败，请重新绑定")
 		return
 	}
 
@@ -479,18 +496,30 @@ func PasskeyVerifyFinish(c *gin.Context) {
 	}
 
 	waUser := passkeysvc.NewWebAuthnUser(user, credential)
-	_, err = wa.FinishLogin(waUser, *sessionData, c.Request)
+	// FinishLogin 返回的凭证带着本次认证更新后的 SignCount / CloneWarning。
+	// 之前丢弃了这个返回值、用旧的 credential 整行 upsert，导致 step-up 路径
+	// 的计数器永不前进，后续的克隆检测失去基准。
+	updatedCredential, err := wa.FinishLogin(waUser, *sessionData, c.Request)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-
-	// 更新凭证的最后使用时间
-	now := time.Now()
-	credential.LastUsedAt = &now
-	if err := model.UpsertPasskeyCredential(credential); err != nil {
-		common.ApiError(c, err)
+	if passkeyCredentialIsCloned(updatedCredential) {
+		common.SysLog(fmt.Sprintf("PasskeyVerify: clone warning for user %d credential %d", user.Id, updatedCredential.ID))
+		common.ApiErrorMsg(c, "Passkey 验证失败，请重新绑定")
 		return
+	}
+	if persisted := model.NewPasskeyCredentialFromWebAuthn(user.Id, updatedCredential); persisted == nil {
+		common.ApiErrorMsg(c, "Passkey 凭证更新失败")
+		return
+	} else {
+		// 更新凭证的最后使用时间
+		now := time.Now()
+		persisted.LastUsedAt = &now
+		if err := model.UpsertPasskeyCredential(persisted); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 
 	session := sessions.Default(c)
