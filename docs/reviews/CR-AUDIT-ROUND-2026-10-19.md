@@ -264,3 +264,16 @@ zhipu 去掉原先的重复关闭，保证每个请求只关一次。
   PostgreSQL 上 `UPDATE ... WHERE rowcount` 的语义相同，但未实测。
 - `last_used_step` 依赖启动时的 AutoMigrate 新增列；未验证从旧库升级时
   SQLite 与 MySQL 的列默认值回填是否与 GORM 预期一致。
+
+## 前端测试缺口（2026-10-20，结论修订）
+
+上一节把两个失败的测试当作“测试先于实现的遗留缺口”。复核 `web/default/src`：
+
+- `optionWriteOrder` / `sortOptionWrites` 全仓无任何调用方，写入顺序由
+  `use-settings-form` 的调用方自己决定；服务端只校验每个键的 JSON 形状
+  （`model/option.go` 的 `validateOptionValue`），不依赖写入顺序。
+- `linkifyHtml` 同样不存在任何调用方。
+
+因此这不是待实现的功能，而是两个针对不存在 API 的测试。删除这两个文件后
+`web/default/tests` 全部通过，但仍**没有** `test` 脚本、也没有接入 CI；
+把测试接入门禁是独立的工程任务，本轮不擅自扩大范围。
