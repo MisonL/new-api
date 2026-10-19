@@ -117,6 +117,25 @@ zhipu 去掉原先的重复关闭，保证每个请求只关一次。
 - `SumUsedToken` "没有调用方所以是潜伏缺陷"：确认无调用方，但仍改为 COALESCE，
   避免恢复调用时在 PG 上失败。
 
+## 越权与 IDOR 审计结论（已逐条复核）
+
+审计报告提出四条，逐条核对后的结论：
+
+- "管理员可重置同级管理员的 2FA / Passkey / 绑定"：**不成立**。
+  `controller/twofa.go:521`、`controller/passkey.go:355`、`controller/user.go:676`
+  三处守卫都是 `myRole <= targetUser.Role && myRole != RoleRootUser` 即拒绝，
+  与 `controller/user.go:632` 的 `UpdateUser` 使用同一规则，同级无法互相操作。
+- "`GetUserModels` 读取裸 `:id` 参数可越权"：**不成立**。该 handler 挂在
+  `/api/user/models`（`router/api-router.go:103`），gin 优先匹配静态路由，
+  `Param("id")` 为空，`Atoi` 失败后回落到会话 id。用 gin 最小复现验证：
+  `/api/user/models` 命中静态路由，`/api/user/42/models` 返回 404。
+- "`TryUserAuth` 是伪鉴权，可能被复用成真实越权"：**当前不可达**。三个调用点
+  中 `GetPricing`、`GetUserGroups` 只读，`GetUserGroup(0)` 失败后回落到空分组；
+  `perf metrics` 不读 id。作为模式约束记录，不改代码。
+- "管理员可见渠道 key 前 10 位（`controller/channel.go:2089-2091`），而完整
+  key 要 root"：**属实，属权限模型内暴露**。`/api/channel/multi_key/manage`
+  挂 `AdminAuth`。未改，因为收紧会改变现有管理员可用功能，需产品决策。
+
 ## 本轮未覆盖
 
 - MySQL 实例未启动：MySQL 侧结论（Error 1091、dialector 行为）来自驱动源码与
