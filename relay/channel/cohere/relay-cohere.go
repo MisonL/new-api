@@ -98,6 +98,9 @@ func stopReasonCohere2OpenAI(reason string) string {
 }
 
 func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	// 这个函数原先没有任何关闭点：正常结束、上游提前断开、写盘 panic 都不关
+	// resp.Body，连接一直挂在读循环里。defer 覆盖所有退出路径。
+	defer service.CloseResponseBodyGracefully(resp)
 	responseId := helper.GetResponseID(c)
 	createdTime := common.GetTimestamp()
 	usage := &dto.Usage{}

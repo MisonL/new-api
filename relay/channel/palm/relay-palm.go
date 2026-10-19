@@ -143,6 +143,10 @@ func palmStreamHandler(c *gin.Context, resp *http.Response) (*types.NewAPIError,
 	responseText := ""
 	responseId := helper.GetResponseID(c)
 	createdTime := common.GetTimestamp()
+	// 流式写盘 panic 或客户端断开都会跳过函数末尾的关闭，只有 defer 能覆盖
+	// 所有退出路径。goroutine 的成功分支也会关一次，重复关闭对 http.Body 是
+	// 幂等的。
+	defer service.CloseResponseBodyGracefully(resp)
 	dataChan := make(chan string)
 	stopChan := make(chan bool)
 	go func() {

@@ -102,6 +102,9 @@ func cozeChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 }
 
 func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	// 扫描循环里的任何提前 return（扫描错误、上游 completed、写盘 panic）都会
+	// 跳过函数末尾，只有 defer 能保证响应体在所有路径上被关闭。
+	defer service.CloseResponseBodyGracefully(resp)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
 	// 与共享扫描器同一行上限：裸 NewScanner 的 token 上限是 64KiB，上游一帧

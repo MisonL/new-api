@@ -185,6 +185,9 @@ func streamMetaResponseZhipu2OpenAI(zhipuResponse *ZhipuStreamMetaResponse) (*dt
 func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var usage *dto.Usage
 	sawMeta := false
+	// 末尾的 Close 在 c.Stream 之后执行；客户端提前断开或写盘 panic 会跳过它，
+	// 而读取协程此时仍挂在 dataChan 的发送上。defer 覆盖所有退出路径。
+	defer service.CloseResponseBodyGracefully(resp)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
 	// 与共享扫描器同一行上限：裸 NewScanner 的 token 上限是 64KiB，上游一帧
@@ -249,7 +252,6 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 		}
 	})
 	helper.RecordStreamEnd(c, info, sawMeta)
-	service.CloseResponseBodyGracefully(resp)
 	return usage, nil
 }
 
