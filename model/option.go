@@ -249,6 +249,21 @@ func UpdateOption(key string, value string) error {
 	return updateOptionMap(key, normalizedValue)
 }
 
+// pricingAffectingOptions 列出 updateOptionMap 会改动定价快照内容的配置项。
+//
+// pricingMap 是进程内快照、TTL 一分钟；这些键更新后若不主动失效，/api/pricing
+// 会继续展示旧倍率，而计费侧已按新值执行。
+var pricingAffectingOptions = map[string]struct{}{
+	"ModelRatio":           {},
+	"CompletionRatio":      {},
+	"ModelPrice":           {},
+	"CacheRatio":           {},
+	"CreateCacheRatio":     {},
+	"ImageRatio":           {},
+	"AudioRatio":           {},
+	"AudioCompletionRatio": {},
+}
+
 func updateOptionMap(key string, value string) (err error) {
 	value, err = normalizeOptionValueForInMemoryConfig(key, value)
 	if err != nil {
@@ -257,6 +272,7 @@ func updateOptionMap(key string, value string) (err error) {
 
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
+	previousValue, existed := common.OptionMap[key]
 	common.OptionMap[key] = value
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
@@ -588,6 +604,11 @@ func updateOptionMap(key string, value string) (err error) {
 		// WaffoPayMethods is read directly from OptionMap via setting.GetWaffoPayMethods().
 		// The value is already stored in OptionMap at the top of this function (line: common.OptionMap[key] = value).
 		// No additional in-memory variable to update.
+	}
+	if err == nil && (!existed || previousValue != value) {
+		if _, affectsPricing := pricingAffectingOptions[key]; affectsPricing {
+			InvalidatePricingCache()
+		}
 	}
 	return err
 }
