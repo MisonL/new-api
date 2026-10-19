@@ -1789,7 +1789,10 @@ func FetchModels(c *gin.Context) {
 		return
 	}
 
-	client := &http.Client{}
+	// baseURL 来自请求体，是用户可控的 fetch URL。必须走共享客户端并打上
+	// common.WithSSRFValidation，让传输层按 SSRF 策略校验目的地；裸
+	// &http.Client{} 会让这个接口变成可探测内网的代理，也不受 RelayTimeout 约束。
+	client := service.GetHttpClient()
 	url := fmt.Sprintf("%s/v1/models", baseURL)
 
 	request, err := http.NewRequest("GET", url, nil)
@@ -1800,6 +1803,7 @@ func FetchModels(c *gin.Context) {
 		})
 		return
 	}
+	request = request.WithContext(common.WithSSRFValidation(c.Request.Context()))
 
 	request.Header.Set("Authorization", "Bearer "+key)
 
@@ -1811,6 +1815,7 @@ func FetchModels(c *gin.Context) {
 		})
 		return
 	}
+	defer response.Body.Close()
 	//check status code
 	if response.StatusCode != http.StatusOK {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -1819,7 +1824,6 @@ func FetchModels(c *gin.Context) {
 		})
 		return
 	}
-	defer response.Body.Close()
 
 	var result struct {
 		Data []struct {
