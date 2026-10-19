@@ -368,6 +368,11 @@ func SearchChannels(c *gin.Context) {
 	if pageSize <= 0 {
 		pageSize = 20
 	}
+	// 与 common.GetPageQuery 一致：单页上限 100。这里没走它，此前
+	// page_size 可以任意大，管理员一次请求就能把整表序列化返回。
+	if pageSize > 100 {
+		pageSize = 100
+	}
 
 	total := len(channelData)
 	startIdx := (page - 1) * pageSize
