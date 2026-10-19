@@ -90,10 +90,8 @@ func GetLogByKey(c *gin.Context) {
 	}
 	logs, err := model.GetLogByTokenId(tokenId)
 	if err != nil {
-		c.JSON(200, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
+		common.SysError("failed to get logs by token: " + err.Error())
+		common.ApiError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{

@@ -249,10 +249,41 @@ func GetContextKeyType[T any](c *gin.Context, key constant.ContextKey) (T, bool)
 	return t, false
 }
 
+// databaseErrorSignatures 是数据库驱动错误的可辨识片段。
+// 这些文案只对运维有意义，返回给调用方会泄露表名、列名和数据库文件路径。
+var databaseErrorSignatures = []string{
+	"unable to open database file",
+	"no such table",
+	"no such column",
+	"SQLSTATE",
+	"SQLITE_BUSY",
+	"SQLITE_LOCKED",
+	"database is locked",
+	"Error 1146",
+	"Error 1054",
+	"Error 1064",
+	"Duplicate entry",
+}
+
+// ApiErrorMessage 返回可以安全回写给客户端的错误文案。
+// 数据库驱动错误统一替换为固定文案（原始错误仍由调用方写入系统日志）。
+func ApiErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	for _, signature := range databaseErrorSignatures {
+		if strings.Contains(message, signature) {
+			return "服务暂时不可用，请稍后重试"
+		}
+	}
+	return message
+}
+
 func ApiError(c *gin.Context, err error) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": false,
-		"message": err.Error(),
+		"message": ApiErrorMessage(err),
 	})
 }
 
