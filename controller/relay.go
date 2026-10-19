@@ -133,6 +133,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			helper.WssError(c, ws, types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry()).ToOpenAIError())
 			return
 		}
+		// gorilla 默认不限帧大小，不设上限时单帧即可撑爆堆。
+		ws.SetReadLimit(relay.RealtimeMaxMessageBytes)
 		defer ws.Close()
 	}
 

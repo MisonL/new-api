@@ -13,6 +13,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// RealtimeMaxMessageBytes 限制实时中继单个 WebSocket 消息的大小。
+//
+// gorilla 默认不限制读大小：一个持有 token 的客户端发一帧 100MB 文本帧，
+// 进程就按帧大小分配内存，并发几条即可打爆堆。16MB 足够容纳实时音频分片与
+// 会话配置事件，同时把单连接的可控内存钉死。
+const RealtimeMaxMessageBytes int64 = 16 << 20
+
+// applyRealtimeReadLimit 给与客户端、上游两侧的连接设同一上限。
+func applyRealtimeReadLimit(conn *websocket.Conn) {
+	if conn == nil {
+		return
+	}
+	conn.SetReadLimit(RealtimeMaxMessageBytes)
+}
+
 func WssHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 	// Realtime has no JSON request body for the normal relay mapping helper to
@@ -40,6 +55,7 @@ func WssHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.
 
 	if resp != nil {
 		info.TargetWs = resp.(*websocket.Conn)
+		applyRealtimeReadLimit(info.TargetWs)
 		defer info.TargetWs.Close()
 	}
 
