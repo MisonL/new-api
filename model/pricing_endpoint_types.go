@@ -1,10 +1,10 @@
 package model
 
 import (
-	"encoding/json"
 	"sort"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 )
 
@@ -19,7 +19,7 @@ func endpointTypesFromModelMeta(endpointsJSON string) []constant.EndpointType {
 		return nil
 	}
 	var raw map[string]interface{}
-	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+	if err := common.Unmarshal([]byte(trimmed), &raw); err != nil {
 		return nil
 	}
 	endpoints := make([]constant.EndpointType, 0, len(raw))
