@@ -31,3 +31,13 @@ func TestNotifyTransportErrorMasksGotifyToken(t *testing.T) {
 func TestNotifyTransportErrorPassesNil(t *testing.T) {
 	require.NoError(t, notifyTransportError("bark", nil))
 }
+
+// webhook 地址可能带 userinfo 或 query 中的令牌，同样不能进日志。
+func TestNotifyTransportErrorMasksWebhookURL(t *testing.T) {
+	raw := errors.New(`Post "https://user:pass@hooks.example.com/cb?token=whooksecret": EOF`)
+	err := notifyTransportError("webhook", raw)
+	require.Error(t, err)
+	msg := err.Error()
+	require.NotContains(t, msg, "whooksecret")
+	require.NotContains(t, msg, "pass")
+}

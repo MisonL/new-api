@@ -78,7 +78,7 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 
 		resp, err = DoWorkerRequest(workerReq)
 		if err != nil {
-			return fmt.Errorf("failed to send webhook request through worker: %v", err)
+			return notifyTransportError("webhook", err)
 		}
 		defer resp.Body.Close()
 
@@ -106,7 +106,7 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 		client := GetHttpClient()
 		resp, err = client.Do(req)
 		if err != nil {
-			return fmt.Errorf("failed to send webhook request: %v", err)
+			return notifyTransportError("webhook", err)
 		}
 		defer resp.Body.Close()
 
