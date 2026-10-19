@@ -277,3 +277,43 @@ zhipu 去掉原先的重复关闭，保证每个请求只关一次。
 因此这不是待实现的功能，而是两个针对不存在 API 的测试。删除这两个文件后
 `web/default/tests` 全部通过，但仍**没有** `test` 脚本、也没有接入 CI；
 把测试接入门禁是独立的工程任务，本轮不擅自扩大范围。
+
+## 收尾复核（2026-10-20）
+
+在上述修复之后再跑一轮全量验证，并补记两条结论修订：
+
+- **`common.ApiError` 已改为统一脱敏**（提交 `4a6738faa`）。此前记录为
+  “全局改写会改变大量文案故不改”；实际做法是按错误签名（`no such table`、
+  `SQLSTATE`、`unable to open database file`、MySQL `Error 1146/1054/1064`、
+  `database is locked` 等）替换为固定文案，业务错误原样保留，因此不改变
+  前端提示的可读性。签到与按令牌查日志两处直接回显 `err.Error()` 的入口
+  也一并改为写系统日志 + `ApiError`。
+- **前端两个“永远失败”的测试已删除**（提交 `5747d1889`）。复核确认
+  `optionWriteOrder`/`sortOptionWrites` 与 `linkifyHtml` 在源码中没有任何
+  调用方，服务端也不依赖写入顺序，因此不是待实现功能而是针对不存在 API
+  的测试。删除后 `bun test` 为 262 pass / 0 fail。
+
+### 本轮实际运行过的验证
+
+```bash
+go build ./...
+go vet ./common ./model ./controller ./service ./relay/...
+go test ./common ./model ./controller ./service ./router ./middleware ./types ./logger -count=1
+go test ./relay/... -count=1
+cd web/default && bun test          # 262 pass / 0 fail
+cd web/default && bun run lint      # exit 0
+```
+
+全部退出码为 0。`go test ./...`（含 `main` 包与桌面端相关包）未整体执行，
+只覆盖了上述包。
+
+### 仍未覆盖
+
+- 未启动服务、未对真实上游发请求，接口级结论来自 handler 测试与源码审查。
+- MySQL / PostgreSQL 未实机验证：TOTP 条件更新的 rowcount 语义、新列
+  `last_used_step` 的升级回填、脱敏正则在新方言下的行为均只在 SQLite 与
+  单元测试层面确认。
+- `web/default` 未做浏览器内运行时验证。
+- 已知未改：会话密钥互相回退与最小熵校验、pprof 监听地址、`/api/status`
+  的匿名字段、渠道 key 前 10 位对管理员可见。这四项都需要部署或权限模型
+  层面的决策。
