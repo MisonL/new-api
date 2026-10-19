@@ -173,3 +173,66 @@ zhipu 去掉原先的重复关闭，保证每个请求只关一次。
     `src/components/ai-elements/code-block.tsx` 导出。
 - 前端未做浏览器内运行时验证，只做了构建产物检查与单元测试。
 - 计费、authz/IDOR 两条审计线索的其余条目尚未逐条复现。
+
+## 信息泄露维度（2026-10-20）
+
+并发审计代理提交了 10 条主张，逐条复现后的处理如下。
+
+### 已复现并修复
+
+- **普通用户日志带出管理员字段**（`model/log.go`）。`/api/log/self` 与
+  `/api/log/token` 只清零了顶层 `channel`/`channel_name`，`other` 里的
+  `channel_id`/`channel_name`/`channel_type`（渠道名常是上游域名）、
+  `po`（参数覆盖审计原文，可能含渠道级 system 提示词）、
+  `request_header_policy`、`reject_reason`、`request_conversion` 原样返回。
+  用 sqlite 探针构造日志后 `GetUserLogs` 实测输出包含这些字段；前端
+  `details-dialog.tsx` 对这些区块全部用 `isAdmin` 门控。修复：按既有
+  “管理员字段删除清单”补齐，测试同时断言管理员视图不变。提交
+  `c3106bd6d`。
+- **`MaskSensitiveInfo` 漏掉 JSON 引号键与无标签供应商密钥**
+  （`common/str.go`）。探针实测 `{"secret":"plainsecret"}`、
+  `{"client_secret":"..."}`、`"cookie": "..."`、裸 `AIza...`/`AKIA...`
+  均原样保留。该函数是 `NewAPIError.Error()`、`sanitizeOpenAIError`、
+  上游错误体日志与渠道禁用通知的唯一脱敏层。修复：新增引号 JSON 凭据键
+  模式与无标签供应商密钥模式，普通 JSON 诊断字段不变。提交 `428150d9e`。
+- **DEBUG 日志打印带凭据的完整上游 URL**（`relay/channel/api_request.go`）。
+  Vertex API-key 模式把渠道密钥放在 `?key=`。修复：新增
+  `common.MaskURLCredentials`（只脱敏 userinfo 与 query 值，保留
+  scheme/host/path），两处 `println("fullRequestURL")` 改用它，并加
+  源码级回归测试。提交 `69739150a`。
+- **通知与 worker 下载失败日志带凭据**（`service/user_notify.go`、
+  `service/download.go`）。Go `url.Error` 带完整 URL，Bark 设备 key 在
+  路径、Gotify token 在 query；worker 下载分支裸打印用户可控 URL，而
+  直接下载分支已脱敏。修复：统一走 `common.MaskSensitiveInfo`，行为
+  测试与源码级回归测试各一组。提交 `7179a7696`。
+- **上游错误体整段回显**（Ollama/Dify/Replicate/Gemini）。错误页可能达
+  8MB 且含内部堆栈与路径。修复：新增
+  `common.LocalUpstreamErrorPreview`（脱敏 + 512 字节 UTF-8 安全截断 +
+  原长度标注），替换全部裸拼调用点，源码级测试覆盖五个适配器文件。
+  提交 `2d0784272`。
+- **Midjourney 错误响应未脱敏且裸打印整个错误**。修复：响应体走
+  `MaskSensitiveInfo`，删除 `log.Println(mjErr)`（同一信息已由
+  `LogError` 脱敏记录）。提交 `0d64058d9`。
+- **管理员用户接口返回他人通知凭据**。`/api/user/`、`/api/user/search`、
+  `/api/user/:id` 序列化 `setting` 原文，含 `webhook_secret`、
+  `gotify_token`、带设备 key 的 `bark_url`。修复：新增
+  `User.ForAdminView()`，三个接口统一下发清空凭据的副本，原对象与计费/
+  通知路径不受影响。提交 `273b0e76c`。
+
+### 复核后不改
+
+- **`common.ApiError` 回显 `err.Error()`（约 88 处）**：属实，但全局改写
+  会改变大量接口的错误文案与前端提示，且多数调用点的错误来自业务校验而非
+  SQL。作为已知边界记录，未在本轮改动。
+- **`ENABLE_PPROF=true` 时 pprof 监听 `0.0.0.0:8005` 且无鉴权**：默认关闭、
+  默认 Compose 不发布该端口；是否收敛到 loopback 取决于部署方式，属运维
+  配置决策，未改。
+- **`/api/status` 匿名暴露内部 IdP 地址与性能数据**：登录页与定价页所需
+  的既有设计，未改。
+
+### 验证边界
+
+- 上述修复均在本轮运行了对应包测试：`common`、`model`、`controller`、
+  `service`、`relay/...`。
+- `MaskSensitiveInfo` 的新增模式只做了单元测试，未用真实上游错误体做回归。
+- 未启动服务发送 HTTP 请求，接口级结论来自 handler 级测试与源码审查。
