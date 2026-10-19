@@ -1135,7 +1135,20 @@ func SumUsedQuotaByFilterContext(ctx context.Context, filter LogFilter) (Stat, e
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {
-	tx := LOG_DB.Table("logs").Select("ifnull(sum(prompt_tokens),0) + ifnull(sum(completion_tokens),0)")
+	// 错误在这里被丢弃（历史上该函数没有调用方）。方言不兼容会同样得到 0，
+	// 所以 sumUsedTokenQuery 单独暴露给测试，让测试能在同一查询上取错误。
+	_ = sumUsedTokenQuery(LOG_DB, startTimestamp, endTimestamp, modelName, username, tokenName).
+		Scan(&token).Error
+	return token
+}
+
+// sumUsedTokenQuery 构造 SumUsedToken 的聚合查询。
+//
+// COALESCE 是三个方言的共同函数；ifnull 只有 MySQL 和 SQLite 提供，
+// PostgreSQL 会报 function ifnull(numeric, integer) does not exist。
+// 同文件的 sumLogTokenStats 已经使用 COALESCE。
+func sumUsedTokenQuery(db *gorm.DB, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) *gorm.DB {
+	tx := db.Table("logs").Select("COALESCE(sum(prompt_tokens),0) + COALESCE(sum(completion_tokens),0)")
 	if username != "" {
 		tx = tx.Where("username = ?", username)
 	}
@@ -1151,8 +1164,7 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if modelName != "" {
 		tx = tx.Where("model_name = ?", modelName)
 	}
-	tx.Where("type = ?", LogTypeConsume).Scan(&token)
-	return token
+	return tx.Where("type = ?", LogTypeConsume)
 }
 
 func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {

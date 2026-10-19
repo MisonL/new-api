@@ -15,7 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 
 	"github.com/glebarez/sqlite"
-	"gorm.io/driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -231,7 +231,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		} else {
 			common.LogSqlType = common.DatabaseTypeMySQL
 		}
-		return gorm.Open(mysql.Open(dsn), newGormConfig())
+		return gorm.Open(mysqlOpenDialector(dsn), newGormConfig())
 	}
 	// Use SQLite
 	common.SysLog("SQL_DSN not set, using SQLite as database")
@@ -249,10 +249,90 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 const (
 	defaultSQLMaxIdleConns = 25
 	defaultSQLMaxOpenConns = 50
+	// A container can start before PostgreSQL has completed crash recovery. Keep
+	// the retry bounded and only use it for connection/readiness errors; schema
+	// and authentication failures must still fail startup immediately.
+	defaultSQLStartupRetryAttempts     = 10
+	defaultSQLStartupRetryIntervalSecs = 2
 )
 
+func isTransientDatabaseStartupError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "08000", "08001", "08003", "08004", "08006", "57P01", "57P03", "53300":
+			return true
+		}
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"connection refused",
+		"connection reset",
+		"connection timed out",
+		"i/o timeout",
+		"database system is starting up",
+		"database system is in recovery mode",
+		"server is not ready",
+		"server has gone away",
+		"connection unexpectedly closed",
+		"too many clients already",
+		"too many connections",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func closeUnusableDB(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	sqlDB, err := db.DB()
+	if err == nil {
+		_ = sqlDB.Close()
+	}
+}
+
+func chooseDBWithStartupRetry(envName string, isLog bool) (*gorm.DB, error) {
+	attempts := common.GetEnvOrDefault("SQL_STARTUP_RETRY_ATTEMPTS", defaultSQLStartupRetryAttempts)
+	if attempts < 1 {
+		attempts = 1
+	}
+	interval := time.Duration(common.GetEnvOrDefault(
+		"SQL_STARTUP_RETRY_INTERVAL_SECONDS",
+		defaultSQLStartupRetryIntervalSecs,
+	)) * time.Second
+	if interval < 0 {
+		interval = 0
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		db, err := chooseDB(envName, isLog)
+		if err == nil {
+			return db, nil
+		}
+		closeUnusableDB(db)
+		lastErr = err
+		if !isTransientDatabaseStartupError(err) || attempt == attempts {
+			break
+		}
+		common.SysError(fmt.Sprintf(
+			"database %s is temporarily unavailable (attempt %d/%d), retrying in %s: %v",
+			envName, attempt, attempts, interval, err,
+		))
+		time.Sleep(interval)
+	}
+	return nil, lastErr
+}
+
 func InitDB() (err error) {
-	db, err := chooseDB("SQL_DSN", false)
+	db, err := chooseDBWithStartupRetry("SQL_DSN", false)
 	if err == nil {
 		if common.DebugEnabled {
 			db = db.Debug()
@@ -294,7 +374,7 @@ func InitLogDB() (err error) {
 		}
 		return migrateLogIndexCleanup()
 	}
-	db, err := chooseDB("LOG_SQL_DSN", true)
+	db, err := chooseDBWithStartupRetry("LOG_SQL_DSN", true)
 	if err == nil {
 		if common.DebugEnabled {
 			db = db.Debug()

@@ -35,6 +35,16 @@ func MySQLDialector(dsn string) gorm.Dialector {
 	return mysqlDialector{Dialector: mysql.Open(dsn).(*mysql.Dialector)}
 }
 
+// mysqlOpenDialector is the dialector chooseDB must hand to gorm.Open.
+//
+// It is the single production entry point on purpose: MySQLDialector and its
+// tests can be green while chooseDB still opens the stock driver, in which case
+// the unique-index correction never runs and MySQL startup fails with Error
+// 1091. Keeping one function means the wiring is asserted by calling it.
+func mysqlOpenDialector(dsn string) gorm.Dialector {
+	return MySQLDialector(dsn)
+}
+
 func (d mysqlDialector) Migrator(db *gorm.DB) gorm.Migrator {
 	return mysqlMigrator{Migrator: d.Dialector.Migrator(db).(mysql.Migrator)}
 }
