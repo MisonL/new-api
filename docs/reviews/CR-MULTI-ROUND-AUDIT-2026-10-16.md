@@ -779,3 +779,32 @@ sidecar 门禁调用，对应断言均按预期失败。`web/default` 的 `forma
   **`/api/status` 字段暴露**：维持 7.4 结论，属产品决策。
 - **`braces` 3.0.3**（11 节）：未打进任何 dist 产物，字符串命中来自编辑器
   语法/主题资源，上游无修复版本，且是 `--production` 审计排除的 devDependency。维持接受。
+
+### 11.7 第七批后续：内置 OAuth 提供方注册的并发重复（2026-10-19 复查，未修）
+
+对 `email` 同类缺陷（11.6 礼品码）做全库复查时的相邻发现：
+
+- **事实**：`users.github_id/discord_id/oidc_id/wechat_id/telegram_id/linux_do_id`
+  都只是普通索引。隔离库实测（`pg_indexes`，`new-api-dev`）：
+  `idx_users_git_hub_id` 等全部 `CREATE INDEX`，无 `UNIQUE`；`username`/
+  `access_token`/`aff_code`/`id` 才是唯一约束。
+- **路径**：内置提供方注册先在事务外 `provider.IsUserIDTaken(...)`（`controller/oauth.go`
+  的 `findOrCreateOAuthUserWithOptions`），随后事务内 `InsertWithTx` + 写入提供方
+  ID，事务内不再复查。检查与写入之间没有唯一约束兜底，同一提供方账号的两个
+  并发回调可各自通过检查并各建一行。
+- **后果**：同一提供方身份对应两个账户。两个账户都由该提供方身份持有，不存在
+  跨人接管；但后续登录（`FillUserBy*Id` 用 `First`）会任选其一，额度与用量被拆分。
+  与 11.6 的礼品码不同——那里攻击者可以输入任意邮箱，这里身份值由提供方断言，
+  重复行只能来自并发窗口或历史数据。
+- **不修的原因**：正确修复是跨三库的唯一索引。`github_id` 等列对大多数用户存
+  空串而非 NULL（GORM 零值默认写入 `''`），普通唯一索引会让所有未绑定用户的
+  空串互相冲突；`deleted_at` 语义上还需要"注销后可重新绑定"，需要
+  `uk_..._delete_at` 复合唯一索引（仓库在 vendor/model_meta 上已用该形态），
+  但这要求先把空串改为 `NULL`（指针类型改造，波及全库读取点）。AGENTS.md
+  禁止只适配单一数据库的迁移语句，SQLite 无 `ALTER COLUMN`。半途的"事务内
+  再查一次"在 READ COMMITTED 下不能真正关窗，写成修复就是伪成功路径。
+- **隔离库实况**：六个身份列当前 0 组重复行；生产库未查询（不可触碰）。
+
+**验证**：`docker exec new-api-dev-isolated-postgres-1 psql -U root -d new-api-dev
+-tAc "select ... from pg_indexes where tablename='users'"` 与重复行计数查询，
+输出如上。未修改任何代码。
