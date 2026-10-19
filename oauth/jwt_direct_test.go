@@ -1309,3 +1309,29 @@ func bigEndianExponent(exponent int) []byte {
 	}
 	return bytes
 }
+
+// 外部 IdP 若签发不带 exp 的 token，jwt v5 默认不要求 exp，token 会永久有效。
+// 一次泄漏即可长期重放，因此这里要求 exp 必须存在。
+func TestJWTDirectResolveIdentityRejectsTokenWithoutExpiry(t *testing.T) {
+	privateKey := mustGenerateRSAPrivateKey(t)
+	provider := NewJWTDirectProvider(&model.CustomOAuthProvider{
+		Name:        "Acme SSO",
+		Slug:        "acme-sso",
+		Enabled:     true,
+		Issuer:      "https://issuer.example.com",
+		Audience:    "new-api",
+		PublicKey:   mustEncodeRSAPublicKeyPEM(t, &privateKey.PublicKey),
+		UserIdField: "sub",
+	})
+
+	token := mustSignJWT(t, privateKey, "", jwt.MapClaims{
+		"iss": "https://issuer.example.com",
+		"aud": "new-api",
+		"sub": "external-user-no-exp",
+	})
+
+	_, err := provider.ResolveIdentity(context.Background(), token)
+	if err == nil {
+		t.Fatal("expected a token without exp to be rejected")
+	}
+}

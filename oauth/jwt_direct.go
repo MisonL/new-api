@@ -455,7 +455,11 @@ func (p *JWTDirectProvider) parseAndValidateClaims(ctx context.Context, tokenStr
 			return nil, errors.New("unsupported jwt signing algorithm")
 		}
 		return p.resolveVerificationKey(ctx, token)
-	})
+	},
+		// jwt v5 默认不要求 exp：IdP 若签发不带 exp 的 token，它会永久有效，
+		// 一次泄漏即可长期重放。这里强制要求过期时间。
+		jwt.WithExpirationRequired(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("jwt verification failed: %w", err)
 	}
