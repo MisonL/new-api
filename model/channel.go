@@ -1163,35 +1163,23 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	return true
 }
 
+// EnableChannelByTag enables every channel carrying the tag and its abilities
+// in one transaction. It delegates to the audited implementation so every tag
+// status change, including this legacy entry point, leaves a per-channel audit
+// entry.
 func EnableChannelByTag(tag string) error {
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error; err != nil {
-			return err
-		}
-		return tx.Model(&Ability{}).Where("tag = ?", tag).Update("enabled", true).Error
-	})
-	if err == nil {
-		refreshChannelCacheAfterWrite()
-	}
-	return err
+	return EnableChannelByTagWithActor(tag, ChannelStatusActor{})
 }
 
 // DisableChannelByTag disables every channel carrying the tag and its
 // abilities in one transaction. Splitting the two writes used to commit a
 // half-state — channels disabled while abilities stayed enabled — when the
 // ability write failed, and the status write is what takes the channel out of
-// rotation, so the rollback boundary must cover both.
+// rotation, so the rollback boundary must cover both. It delegates to the
+// audited implementation so this legacy entry point cannot bypass the audit
+// trail.
 func DisableChannelByTag(tag string) error {
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusManuallyDisabled).Error; err != nil {
-			return err
-		}
-		return tx.Model(&Ability{}).Where("tag = ?", tag).Update("enabled", false).Error
-	})
-	if err == nil {
-		refreshChannelCacheAfterWrite()
-	}
-	return err
+	return DisableChannelByTagWithActor(tag, ChannelStatusActor{})
 }
 
 func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, paramOverride *string, headerOverride *string) error {

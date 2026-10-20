@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
 )
 
 // ChannelStatusActor identifies who drove a channel status change. AdminID 0
@@ -106,56 +107,58 @@ func UpdateChannelStatusWithActor(channelId int, usingKey string, status int, re
 	return true
 }
 
-// DisableChannelByTagWithActor disables every channel under a tag and audits
-// each affected channel individually. The username is resolved once for the
-// whole batch; entries are written in bounded chunks so a tag covering
-// hundreds of channels does not build one oversized statement.
-func DisableChannelByTagWithActor(tag string, actor ChannelStatusActor) error {
+// setChannelStatusByTag is the shared implementation of the tag-level status
+// writes. The channel rows and the ability rows move inside one transaction:
+// committing them separately leaves a half-state (channel disabled while its
+// ability stays enabled) when the second write fails, and the status write is
+// what takes the channel out of rotation. Audit entries are written only after
+// the commit, one per channel whose status actually changed, so a rolled-back
+// change leaves no entry claiming it happened. The actor username is resolved
+// once for the whole batch.
+func setChannelStatusByTag(tag string, status int, abilityEnabled bool, actor ChannelStatusActor, source string, contentFormat string) error {
 	channels, err := GetChannelsByTag(tag, false, false)
 	if err != nil {
 		return err
 	}
+	actor = resolveAuditActor(actor)
+	if actor.Source == "" {
+		actor.Source = source
+	}
+	var changed []*Channel
 	for _, channel := range channels {
-		if channel.Status == common.ChannelStatusManuallyDisabled {
+		if channel.Status == status {
 			continue
 		}
-		if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).
-			Update("status", common.ChannelStatusManuallyDisabled).Error; err != nil {
+		changed = append(changed, channel)
+	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Channel{}).Where("tag = ?", tag).Update("status", status).Error; err != nil {
 			return err
 		}
-		statusAuditLog(channel.Id, channel.Status, common.ChannelStatusManuallyDisabled, "", actor, "channel_status_audit",
-			fmt.Sprintf("渠道 %s（%d）随标签 %s 批量禁用，操作者 %s，来源 %s", channel.Name, channel.Id, tag, actorLabel(actor), actor.Source))
-	}
-	if err := UpdateAbilityStatusByTag(tag, false); err != nil {
+		return tx.Model(&Ability{}).Where("tag = ?", tag).Select("enabled").Update("enabled", abilityEnabled).Error
+	})
+	if err != nil {
 		return err
+	}
+	for _, channel := range changed {
+		statusAuditLog(channel.Id, channel.Status, status, "", actor, "channel_status_audit",
+			fmt.Sprintf(contentFormat, channel.Name, channel.Id, tag, actorLabel(actor), actor.Source))
 	}
 	refreshChannelCacheAfterWrite()
 	return nil
+}
+
+// DisableChannelByTagWithActor disables every channel under a tag in one
+// transaction and audits each affected channel individually.
+func DisableChannelByTagWithActor(tag string, actor ChannelStatusActor) error {
+	return setChannelStatusByTag(tag, common.ChannelStatusManuallyDisabled, false, actor, "tag_disable",
+		"渠道 %s（%d）随标签 %s 批量禁用，操作者 %s，来源 %s")
 }
 
 // EnableChannelByTagWithActor is the enable-side mirror of
 // DisableChannelByTagWithActor: 启用同样改变流量走向，逐渠道留审计，
 // 否则审计链可被"禁用有记录、启用无归因"半绕过。
 func EnableChannelByTagWithActor(tag string, actor ChannelStatusActor) error {
-	channels, err := GetChannelsByTag(tag, false, false)
-	if err != nil {
-		return err
-	}
-	actor = resolveAuditActor(actor)
-	for _, channel := range channels {
-		if channel.Status == common.ChannelStatusEnabled {
-			continue
-		}
-		if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).
-			Update("status", common.ChannelStatusEnabled).Error; err != nil {
-			return err
-		}
-		statusAuditLog(channel.Id, channel.Status, common.ChannelStatusEnabled, "", actor, "channel_status_audit",
-			fmt.Sprintf("渠道 %s（%d）随标签 %s 批量启用，操作者 %s，来源 %s", channel.Name, channel.Id, tag, actorLabel(actor), actor.Source))
-	}
-	if err := UpdateAbilityStatusByTag(tag, true); err != nil {
-		return err
-	}
-	refreshChannelCacheAfterWrite()
-	return nil
+	return setChannelStatusByTag(tag, common.ChannelStatusEnabled, true, actor, "tag_enable",
+		"渠道 %s（%d）随标签 %s 批量启用，操作者 %s，来源 %s")
 }

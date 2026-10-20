@@ -16,7 +16,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -129,7 +128,12 @@ func openTokenControllerExternalDB(t *testing.T, dialect string, dsn string) (*g
 	)
 	switch dialect {
 	case "mysql":
-		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+		// Open through the production dialector: MySQL reports a `uniqueIndex`
+		// column as COLUMN_KEY=UNI and the stock migrator reconciles it as a
+		// constraint it never had, aborting AutoMigrate with Error 1091. The
+		// correction lives in model.MySQLDialector, so opening the stock driver
+		// here would test a code path the server never runs.
+		db, err = gorm.Open(model.MySQLDialector(dsn), &gorm.Config{})
 	case "postgres":
 		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	default:
