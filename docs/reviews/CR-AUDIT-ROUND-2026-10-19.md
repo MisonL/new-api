@@ -379,3 +379,65 @@ failed to connect to `user=root database=new-api-dev`:
 `user:76`/`user:77` 均已删除；`ModelRatio` 已按原始 JSON 写回，`/api/pricing`
 与改动前的快照逐项比对一致（64 个模型的 ratio/completion_ratio 完全相同）。
 生产容器 `new-api`、`postgres`、`redis` 全程未启动、未重启、未修改。
+
+## 方言实测补全与标签启停修复（2026-10-20）
+
+上一节"仍未覆盖"列出 MySQL / PostgreSQL 未实机验证。本轮把一次性数据库
+接进来补全，并顺带发现、修复一个只有真实 MySQL 才暴露的缺陷。
+
+### 方言实测结果
+
+```bash
+# 一次性 MySQL 8.4（既有 na-audit-mysql2 容器，端口 13400，四个空库轮换）
+NEW_API_TEST_MYSQL_DSN='root:...@tcp(127.0.0.1:13400)/newapi_test_a?...' \
+  go test ./model -run MySQL -count=1          # 13 项全部 PASS
+TEST_MYSQL_DSN=... go test ./controller -run Migration -count=1
+# 一次性 PostgreSQL 15（隔离实例 5433，newapi_test_pg1/pg2）
+NEW_API_POSTGRES_TEST_DSN='host=127.0.0.1 port=5433 ...' \
+  go test ./model -run Postgres -count=1       # 10 项全部 PASS
+```
+
+新增 `model/twofa_mysql_test.go` 四项，全部在真实 MySQL 上通过：
+
+- `last_used_step` 升级回填：删列后 AutoMigrate 重建，既有行回填 0，
+  首个码不被误拒。
+- 同码重放：第一次成功后第二次被拒，MySQL 的 RowsAffected 语义与
+  条件更新假设一致。
+- 8 并发同码：恰好 1 个成功。
+- 真实 MySQL 驱动错误（`Error 1146`、`Duplicate entry`）被
+  `common.ApiErrorMessage` 归入"服务暂时不可用"。
+
+### 实测发现并修复的两个缺陷
+
+**1. 标签级启停的 WithActor 路径不回滚、审计先写（提交 `71f56a3f4`）。**
+`DisableChannelByTagWithActor`/`EnableChannelByTagWithActor`（生产入口
+`POST /api/channel/tag/disabled|enabled`）此前逐渠道提交状态更新，之后再
+更新 ability；与 `DisableChannelByTag` 的事务实现不一致。ability 写失败时
+渠道已下线而能力仍在，且审计条目在提交前逐条写入，回滚后仍留下"已禁用"
+的记录。修复：两路径统一走 `setChannelStatusByTag`，渠道与 ability 同一
+事务，仅提交成功后对状态实际变化的渠道逐条写审计；legacy 入口
+`DisableChannelByTag`/`EnableChannelByTag` 委托同一实现，不再绕过审计。
+新增 `model/channel_tag_status_actor_atomic_test.go` 先复现（ability 注入
+失败后渠道 97101 已被禁用、审计留 2 条）再转绿。隔离环境实测：
+重建镜像（`commit=71f56a3f4`）后经 `/api/channel/tag/disabled|enabled`
+对双渠道标签操作，状态与逐渠道审计（disable/enable 各 2 条、操作者与
+来源正确）均符合预期，探针数据已删除。
+
+**2. controller 的 MySQL token 迁移测试打开的是 stock driver。**
+`openTokenControllerExternalDB` 用 `mysql.Open` 建连，而生产走
+`model.MySQLDialector`（修正 MySQL 把 `uniqueIndex` 列读回 UNIQUE
+CONSTRAINT 后以 Error 1091 终止 AutoMigrate 的缺陷）。真实 MySQL 上运行
+该测试立即复现 Error 1091——测试的是生产不会走的代码路径。改用
+`model.MySQLDialector` 后通过。PostgreSQL 路径无此问题，未改。
+
+### 边界
+
+- 一次性 MySQL 库与隔离 PG 的测试库已清理（MySQL 侧轮换库名、PG 侧
+  `newapi_test_pg1/pg2` 保留待复用）；`na-audit-mysql2` 为 9 月起既有
+  的审计容器，本轮只 `docker start`，未改其配置。
+- `go build ./...`、`go vet ./model ./controller ./common ./service`、
+  `go test ./model ./controller ./service ./common` 与
+  `go test ./relay/... ./router ./middleware ./types ./logger -count=1`
+  全部通过。
+- 完全隔离环境镜像已重建并跑通 `/api/healthz` 与标签启停链路；
+  生产容器仍未触碰。
