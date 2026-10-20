@@ -263,6 +263,15 @@ var databaseErrorSignatures = []string{
 	"Error 1054",
 	"Error 1064",
 	"Duplicate entry",
+	// 连接层错误会带出 DSN、主机与端口（pgx: failed to connect to
+	// `user=root database=...` / 10.0.0.5:5432），同样只属于运维侧。
+	"failed to connect to `",
+	"dial tcp",
+	"connection refused",
+	"driver: bad connection",
+	"server closed the connection unexpectedly",
+	"i/o timeout",
+	"tls error",
 }
 
 // ApiErrorMessage 返回可以安全回写给客户端的错误文案。

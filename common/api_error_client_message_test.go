@@ -65,3 +65,23 @@ func TestApiErrorFallbackMessageIsStable(t *testing.T) {
 	body := apiErrorMessage(t, errors.New("no such table: options"))
 	require.Contains(t, strings.ReplaceAll(body, `\"`, `"`), "服务暂时不可用")
 }
+
+// 数据库不可达时驱动会给出连接串、主机和端口，例如
+// "failed to connect to `user=root database=new-api-dev`:\n\t198.18.0.204:5432 ..."。
+// 这类连接层错误同样只属于运维侧。
+func TestApiErrorHidesDatabaseConnectionErrors(t *testing.T) {
+	cases := []string{
+		"failed to connect to `user=root database=new-api-dev`:\n\t198.18.0.204:5432 (postgres): tls error: EOF",
+		"dial tcp 10.0.0.5:5432: connect: connection refused",
+		"driver: bad connection",
+		"server closed the connection unexpectedly",
+		"read tcp 172.18.0.2:1234->10.0.0.5:5432: i/o timeout",
+	}
+	for _, raw := range cases {
+		body := apiErrorMessage(t, errors.New(raw))
+		for _, leaked := range []string{"new-api-dev", "postgres", "10.0.0.5", "172.18.0.2", "5432", "bad connection"} {
+			require.NotContains(t, body, leaked, "connection detail %q must not reach the client", leaked)
+		}
+		require.Contains(t, body, "服务暂时不可用")
+	}
+}
