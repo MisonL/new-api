@@ -317,3 +317,65 @@ cd web/default && bun run lint      # exit 0
 - 已知未改：会话密钥互相回退与最小熵校验、pprof 监听地址、`/api/status`
   的匿名字段、渠道 key 前 10 位对管理员可见。这四项都需要部署或权限模型
   层面的决策。
+
+## 完全隔离环境实测（2026-10-20）
+
+按 AGENTS.md 第 7 节，用最新代码重建 `new-api-local:dev` 并重建
+`new-api-dev-isolated-new-api-1`，在其上做真实 HTTP / PostgreSQL / Redis 验证。
+
+```bash
+docker build --build-arg APP_VERSION=v1.1.0 --build-arg EFFECTIVE_APP_VERSION=v1.1.0 \
+  --build-arg VCS_REF=$(git rev-parse HEAD) --build-arg BUILD_DATE=... \
+  --build-arg SOURCE_URL=... -t new-api-local:dev .
+docker compose -f deploy/compose/dev-isolated.yml --env-file deploy/env/dev-isolated.env \
+  up -d --no-deps --force-recreate new-api
+```
+
+`/new-api --build-info` 输出 `commit=25a36d6fd06492ed81b152f0085897ec83eb7dea`，
+与当时 HEAD 一致；`/api/healthz` 返回 200。
+
+### 实测结果（全部通过）
+
+| 项目 | 方法 | 结果 |
+| --- | --- | --- |
+| TOTP 新列迁移 | PG `information_schema.columns` | `two_fas.last_used_step bigint default 0` 已由 AutoMigrate 添加 |
+| 定价缓存立即失效 | 经 `/api/option/` 把 glm-5 从 0.5 改为 0.777 | 下一次 `/api/pricing` 即返回 0.777，未等 60 秒 TTL |
+| 普通用户日志裁剪 | `/api/log/self` 读入含 `channel_name`、`po`、`request_header_policy`、`reject_reason` 的日志 | 只返回 `model_ratio`、`completion_ratio`、`request_path`、`status_code` |
+| 令牌日志裁剪 | `/api/log/token` + 真实 token | 同样只剩非管理员字段 |
+| 管理员用户脱敏 | `/api/user/`、`/api/user/search`、`/api/user/:id` | `webhook_secret`、`gotify_token`、`bark_url` 全部缺席，`webhook_url` 保留；数据库原文未被修改 |
+| Redis 哈希重建 | 删除 `user:76` 后触发一次额度增量 | key 被重建，`TTL=59`，`Quota=1012345` |
+| TOTP 重放 | 同一码先启用，再在 `backup_codes` 与登录 2FA 中各用一次 | 第二次均返回“验证码或备用码错误”，`last_used_step` 前进 |
+| TOTP 并发 | 8 个会话同时提交同一码 | 1 个成功，其余失败（其余请求先被全局限流拦截） |
+| 权限边界 | 普通用户访问 `/api/user/`、`/api/option/`、`/api/channel/` | 均返回 `insufficient privileges` |
+
+### 实测中新发现并修复的缺口
+
+**`ApiError` 只遮蔽查询层错误，未覆盖连接层。** 停掉隔离 PostgreSQL 后，
+`GET /api/user/checkin` 的响应体原样返回：
+
+```text
+failed to connect to `user=root database=new-api-dev`:
+	198.18.0.204:5432 (postgres): tls error: EOF
+```
+
+即 DSN 组成部分、数据库名与内网地址。上一版签名（`no such table`、
+`SQLSTATE` 等）没有覆盖 pgx 的连接错误。修复：补充 `failed to connect to \``、
+`dial tcp`、`connection refused`、`driver: bad connection`、
+`server closed the connection unexpectedly`、`i/o timeout`、`tls error`
+七个签名，并加测试。原始错误仍写入系统日志（已在容器日志中确认）。提交
+`033f4e3a3`。复测后同一请求返回 `服务暂时不可用，请稍后重试`。
+
+### 实测中撤回的一条判断
+
+在 2FA 登录路径上曾观察到一次“已消费的码再次通过”。随后用受控实验复核：
+同一码在第一个会话成功后被步进记录，第二个新会话提交同一码返回
+“验证码或备用码不正确”，`failed_attempts` 递增、`last_used_step` 不变。
+先前那次是码已跨过窗口、相邻窗口容差造成的误判，不是重放漏洞。记录在案，
+避免后来者按错误结论改动。
+
+### 环境复原
+
+测试用户（id 76、77）、其 2FA 记录、备用码、令牌、日志以及 Redis 中的
+`user:76`/`user:77` 均已删除；`ModelRatio` 已按原始 JSON 写回，`/api/pricing`
+与改动前的快照逐项比对一致（64 个模型的 ratio/completion_ratio 完全相同）。
+生产容器 `new-api`、`postgres`、`redis` 全程未启动、未重启、未修改。
