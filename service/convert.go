@@ -279,8 +279,10 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					// UUID 形态的 signature（display=omitted 的产物），该值不承载
 					// 任何可恢复状态，Claude Code 会原样回传。这里按空块处理，
 					// 否则跨协议轮询在遇到这类历史时会整条请求 400。
-					// 其他模型的 signature 可能是真实的 opaque 状态，维持 fail-closed。
-					if strings.TrimSpace(mediaMsg.Signature) != "" && !hasDeepSeekModelName(claudeRequest.Model, info) {
+					// 门控只看映射后的上游模型名：客户端公共名是 deepseek 别名、
+					// 实际转发给真实 Anthropic 模型时，signature 仍是必须保留的
+					// opaque 状态，必须维持 fail-closed。
+					if strings.TrimSpace(mediaMsg.Signature) != "" && !IsDeepSeekModelName(claudeRequest.Model) {
 						return nil, claudeOpaqueThinkingConversionError(messageIndex, contentIndex, "thinking")
 					}
 					emptyThinkingBlock = true
