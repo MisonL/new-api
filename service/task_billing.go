@@ -85,8 +85,14 @@ func taskIsSubscription(task *model.Task) bool {
 }
 
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
-func taskAdjustFunding(task *model.Task, delta int) error {
+//
+// allowSubscriptionOverage 供请求已执行完的差额结算使用：订阅超额必须落账，
+// 否则整笔差额被拒，这次执行就成了免费。退款与预扣路径保持严格拒绝。
+func taskAdjustFunding(task *model.Task, delta int, allowSubscriptionOverage bool) error {
 	if taskIsSubscription(task) {
+		if allowSubscriptionOverage {
+			return model.SettleUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
+		}
 		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
 	}
 	if delta > 0 {
@@ -156,7 +162,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	}
 
 	// 1. 退还资金来源（钱包或订阅）
-	if err := taskAdjustFunding(task, -quota); err != nil {
+	if err := taskAdjustFunding(task, -quota, false); err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}
@@ -205,8 +211,8 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		reason,
 	))
 
-	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
+	// 调整资金来源（任务已执行完，订阅超额必须落账）
+	if err := taskAdjustFunding(task, quotaDelta, true); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}

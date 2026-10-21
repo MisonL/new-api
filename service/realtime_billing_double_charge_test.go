@@ -100,6 +100,10 @@ func TestPreWssConsumeQuota_DebitsImmediately(t *testing.T) {
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(1, 1, "realtime-probe-key")
+	// 生产链路里 ModelPriceHelper 一定会在中继前把冻结倍率写进 PriceData，
+	// 逐 turn 直扣读的就是这份快照。
+	info.PriceData.ModelRatio = 1
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
 
 	require.NoError(t, PreWssConsumeQuota(c, info, realtimeTextTurn(1500)))
 

@@ -1244,7 +1244,25 @@ func GetSubscriptionPlanInfoByUserSubscriptionId(userSubscriptionId int) (*Subsc
 }
 
 // Update subscription used amount by delta (positive consume more, negative refund).
+// PostConsumeUserSubscriptionDelta applies an incremental subscription charge
+// and rejects any delta that would push usage past AmountTotal. Callers use it
+// for mid-request reservations, where exceeding the total must abort the
+// request instead of silently running over budget.
 func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
+	return applyUserSubscriptionDelta(userSubscriptionId, delta, false)
+}
+
+// SettleUserSubscriptionDelta applies the final settlement delta after the
+// request has already run. Usage past AmountTotal is recorded rather than
+// rejected: the upstream work is done, so dropping the charge would hand the
+// caller a free request. The overshoot shows up as a negative remaining quota
+// and blocks the next PreConsumeUserSubscription, which is the real admission
+// gate.
+func SettleUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
+	return applyUserSubscriptionDelta(userSubscriptionId, delta, true)
+}
+
+func applyUserSubscriptionDelta(userSubscriptionId int, delta int64, allowOverage bool) error {
 	if userSubscriptionId <= 0 {
 		return errors.New("invalid userSubscriptionId")
 	}
@@ -1252,7 +1270,7 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 		return nil
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
-		return postConsumeUserSubscriptionDeltaTx(tx, userSubscriptionId, delta)
+		return applyUserSubscriptionDeltaTx(tx, userSubscriptionId, delta, allowOverage)
 	})
 }
 
@@ -1261,6 +1279,10 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 // in its own transaction commits the quota refund even when the surrounding
 // transaction later fails, so a retry would refund a second time.
 func postConsumeUserSubscriptionDeltaTx(tx *gorm.DB, userSubscriptionId int, delta int64) error {
+	return applyUserSubscriptionDeltaTx(tx, userSubscriptionId, delta, false)
+}
+
+func applyUserSubscriptionDeltaTx(tx *gorm.DB, userSubscriptionId int, delta int64, allowOverage bool) error {
 	var sub UserSubscription
 	if err := forUpdate(tx).
 		Where("id = ?", userSubscriptionId).
@@ -1271,7 +1293,7 @@ func postConsumeUserSubscriptionDeltaTx(tx *gorm.DB, userSubscriptionId int, del
 	if newUsed < 0 {
 		newUsed = 0
 	}
-	if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
+	if !allowOverage && sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
 		return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
 	}
 	sub.AmountUsed = newUsed

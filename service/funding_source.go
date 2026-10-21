@@ -105,7 +105,9 @@ func (s *SubscriptionFunding) Settle(delta int) error {
 	if delta == 0 {
 		return nil
 	}
-	return model.PostConsumeUserSubscriptionDelta(s.subscriptionId, int64(delta))
+	// 结算发生在请求已执行完之后：超额必须落账（剩余额度变负，由下一次
+	// 预扣的准入检查拦截），不能让整笔差额失败而白送这次请求。
+	return model.SettleUserSubscriptionDelta(s.subscriptionId, int64(delta))
 }
 
 func (s *SubscriptionFunding) Refund() error {
