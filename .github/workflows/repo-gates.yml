@@ -71,6 +71,11 @@ jobs:
       - name: web/default typecheck
         working-directory: web/default
         run: bun run typecheck
+      # 单元测试此前只在本地跑：38 个文件、275 个用例（含只读守卫与错误
+      # 提示去重的回归）对 CI 不可见，改动破坏了也没人拦。
+      - name: web/default unit tests
+        working-directory: web/default
+        run: bun run test
       - name: web/default build
         working-directory: web/default
         run: bun run build
@@ -89,6 +94,11 @@ jobs:
       - name: web/classic build
         working-directory: web/classic
         run: bun run build
+      # classic 的单元测试与 web/tests 的 node 契约测试是两套，前者此前
+      # 只在本地跑（20 个文件、218 个用例）。
+      - name: web/classic unit tests
+        working-directory: web/classic
+        run: bun test
       - name: web node contract tests
         working-directory: web/classic
         run: bun run test:node

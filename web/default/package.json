@@ -10,6 +10,7 @@
     "build:check": "tsc -b && node ../scripts/run-with-node-options.mjs --optional-node-option=--disable-warning=DEP0205 -- rsbuild build",
     "test:browser-compat": "node ../scripts/browser-cross-verify.mjs --url http://localhost:3000/console",
     "typecheck": "tsc -b",
+    "test": "bun test",
     "lint": "eslint .",
     "preview": "rsbuild preview",
     "format:check": "prettier --check .",
