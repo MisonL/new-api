@@ -6,6 +6,7 @@ import (
 	"log"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -17,7 +18,18 @@ import (
 func openTestDB(t *testing.T, models ...interface{}) *gorm.DB {
 	t.Helper()
 
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	// DSN 必须对每次调用唯一。t.Name() 只在同一个测试函数内稳定，而
+	// -count=N 会把同一函数重跑 N 轮：共享内存库（cache=shared）在上一轮
+	// 没有任何 close 的情况下仍然存活，第二轮 AutoMigrate 与插入直接撞上
+	// 一轮遗留的表和行，报 UNIQUE constraint failed。子测试的 t.Name() 含
+	// 父路径，天然区分；这里补上单调序号覆盖 count 复用。
+	testDBSequenceMu.Lock()
+	testDBSequence++
+	sequence := testDBSequence
+	testDBSequenceMu.Unlock()
+
+	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared",
+		strings.ReplaceAll(t.Name(), "/", "_"), sequence)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{
 			LogLevel:                  gormlogger.Warn,
@@ -33,6 +45,9 @@ func openTestDB(t *testing.T, models ...interface{}) *gorm.DB {
 
 	return db
 }
+
+var testDBSequenceMu sync.Mutex
+var testDBSequence int64
 
 func TestTagRequestHeaderPolicyAutoMigrate(t *testing.T) {
 	db := openTestDB(t, &TagRequestHeaderPolicy{}, &RequestHeaderStrategyState{}, &UserHeaderTemplate{})

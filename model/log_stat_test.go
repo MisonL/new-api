@@ -143,6 +143,7 @@ func TestSumUsedQuotaLeavesCacheRateUnavailableWithoutInput(t *testing.T) {
 }
 
 func TestSumUsedQuotaCacheRateTelemetry(t *testing.T) {
+	truncateTables(t)
 	for _, tc := range []struct {
 		name  string
 		other string
@@ -192,6 +193,7 @@ func TestLogTokenCountSaturatesUnsafeNumbers(t *testing.T) {
 }
 
 func TestSumUsedQuotaClampsOversizedCacheTelemetry(t *testing.T) {
+	truncateTables(t)
 	require.NoError(t, LOG_DB.Exec("DELETE FROM logs").Error)
 	require.NoError(t, LOG_DB.Create(&Log{
 		Type:         LogTypeConsume,
@@ -209,6 +211,7 @@ func TestSumUsedQuotaClampsOversizedCacheTelemetry(t *testing.T) {
 }
 
 func TestSumUsedQuotaCacheRateIgnoresMissingTelemetryInMixedLogs(t *testing.T) {
+	truncateTables(t)
 	require.NoError(t, LOG_DB.Exec("DELETE FROM logs").Error)
 	require.NoError(t, LOG_DB.Create([]Log{
 		{Type: LogTypeConsume, PromptTokens: 100, Other: `{"cache_tokens":50}`},

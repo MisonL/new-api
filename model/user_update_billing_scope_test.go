@@ -38,7 +38,9 @@ func newBillingScopeTestUser() *User {
 
 func TestUpdateDoesNotClobberConcurrentQuotaSettle(t *testing.T) {
 	db := openTestDB(t, &User{})
+	previousDB := DB
 	DB = db
+	t.Cleanup(func() { DB = previousDB })
 
 	user := newBillingScopeTestUser()
 	require.NoError(t, db.Create(user).Error)
@@ -71,7 +73,9 @@ func TestUpdateDoesNotClobberConcurrentQuotaSettle(t *testing.T) {
 // Update 仍要写调用方真正修改的普通列——上面的保护不能靠"整体不写"来实现。
 func TestUpdateStillWritesCallerColumns(t *testing.T) {
 	db := openTestDB(t, &User{})
+	previousDB := DB
 	DB = db
+	t.Cleanup(func() { DB = previousDB })
 
 	user := newBillingScopeTestUser()
 	require.NoError(t, db.Create(user).Error)

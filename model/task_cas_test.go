@@ -41,21 +41,28 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// truncateTables 在测试开始与结束各清一次主库。只在结束时清，任何忘记
+// 清理的测试都会把行留给后面所有测试：-shuffle 与 -count 下会出现只有特定
+// 顺序才复现的失败（例如 log_stat 的用例留下一条 consume 日志，随后断言
+// "日志表为空"的用例就随机失败）。开始也清一次，使每个调用方拿到干净起点。
 func truncateTables(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() {
-		DB.Exec("DELETE FROM tasks")
-		DB.Exec("DELETE FROM users")
-		DB.Exec("DELETE FROM tokens")
-		DB.Exec("DELETE FROM logs")
-		DB.Exec("DELETE FROM channels")
-		DB.Exec("DELETE FROM quota_data")
-		DB.Exec("DELETE FROM top_ups")
-		DB.Exec("DELETE FROM subscription_plans")
-		DB.Exec("DELETE FROM subscription_orders")
-		DB.Exec("DELETE FROM user_subscriptions")
-		DB.Exec("DELETE FROM perf_metrics")
-	})
+	truncateMainTestDB()
+	t.Cleanup(truncateMainTestDB)
+}
+
+func truncateMainTestDB() {
+	DB.Exec("DELETE FROM tasks")
+	DB.Exec("DELETE FROM users")
+	DB.Exec("DELETE FROM tokens")
+	DB.Exec("DELETE FROM logs")
+	DB.Exec("DELETE FROM channels")
+	DB.Exec("DELETE FROM quota_data")
+	DB.Exec("DELETE FROM top_ups")
+	DB.Exec("DELETE FROM subscription_plans")
+	DB.Exec("DELETE FROM subscription_orders")
+	DB.Exec("DELETE FROM user_subscriptions")
+	DB.Exec("DELETE FROM perf_metrics")
 }
 
 func insertTask(t *testing.T, task *Task) {
