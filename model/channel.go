@@ -1142,7 +1142,10 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 		shouldUpdateAbilities = true
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Omit("key").Save(channel).Error; err != nil {
+		// channel 是改状态前读出的快照：读与保存之间可能已有计费落库，
+		// 整行 Save 会把 used_quota / balance 写回快照值。这两列只由运行时
+		// 累加，任何保存路径都必须排除；key 则是永远不写回的敏感列。
+		if err := tx.Omit("key", "used_quota", "balance").Save(channel).Error; err != nil {
 			return err
 		}
 		if shouldUpdateAbilities {
