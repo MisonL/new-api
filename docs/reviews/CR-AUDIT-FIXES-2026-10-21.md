@@ -231,3 +231,58 @@ cd web/classic && bun run build && bunx prettier --check .
   日志与前端展示按「剩余 = total - used」计算，会显示负数；这是有意为之的
   真实反映，未额外做 UI 提示。
 - 前端依赖只剩 `braces@3.0.3`，上游尚无修复版本，本轮无法消除。
+
+## 第二轮：多 agent 调研后的补充修复
+
+第一轮修复完成后，按测试隔离、数据库 schema、后端 service/controller、
+前端、协议转换五个方向各派一个只读调研 agent，结论逐条独立复核后才动手。
+
+### 已修复
+
+| 提交 | 内容 | 复核方式 |
+|---|---|---|
+| `9bd09cc16` | `Type` 恢复六个 `*_type_created_at` 的 priority:2 声明 | 解析 19 个索引，修复前有 6 对列序列相同 |
+| `c335c9d83` | `UpdateChannelStatus` 的整行 Save 排除 `used_quota`/`balance` | gorm 回调在保存前写入并发计费，回退即失败 |
+| `11912c2fc` | `ensureLogIndexesMatchModel`：AutoMigrate 前按名字+列顺序+indisvalid 对齐 logs 索引，PG 上 CONCURRENTLY | PG 门控 5 例 + 反向验证（预建两列退化索引，断言重建为三列） |
+| `d8625c5c9` | 上述功能的 SQLite / MySQL 分支门控测试 | 真实 SQLite 内存库与一次性 MySQL 库 |
+| `d7e2b48f4` | 流式 OpenAI→Claude 的 `message_delta` stop_reason 走严格映射 | 改前实测输出 `stop_reason":"function_call"`（不在 Anthropic 枚举） |
+| `28077bc8b` | model 包测试隔离：DSN 唯一化、`DB` 恢复、truncateTables 两端清理 | 修复前 `-count=2` 137 个 `--- FAIL`；修复后 `-count=3`、`-count=2 -shuffle=on`、5 个随机 shuffle 全绿 |
+| `4bb585c9d` | 订阅超额状态下退款不再被拒 | 探针复现：超额后 refund 报 `used exceeds total`，失败请求预扣退不回 |
+| `0d35b8304` | 两个前端 `bun test` 接入 repo-gates | 本地 275 + 218 用例；CI 此前零覆盖 |
+| `023e32463` | 桌面 OAuth 提示补 fr/ja/ru/vi 译文 | 逐文件单行插入，JSON 转义未被改写 |
+
+### 调研中推翻或判定不修的结论
+
+- **MySQL `CreateIndex` 会 panic**（schema agent）：推翻。`mysql.Migrator` 内嵌
+  `migrator.Migrator`，`BuildIndexOptions` 定义在 gorm 基础类型上；真实 MySQL
+  8.4 上 `TestEnsureLogIndexesMatchModelOnMySQL` 执行了 CREATE INDEX 并通过。
+- **仅 `user_update_billing_scope_test.go` 漏恢复 `DB`**（测试隔离 agent）：
+  机制判断不完整。该文件确为触发点之一，但 `log_stat_test.go` 三个用例只清理
+  开头不清理结尾，是另一个独立且可固定 seed 复现的污染源。
+- **`tool_choice:"any"` 应转 `required`**：不改。上游实际行为未实测，改成
+  `required` 可能把一个被忽略的值变成必然报错的值。
+- **Claude 入站 tools 在 OpenAI adaptor 层被清空**：不改。仅静态读到的形状，
+  未在运行时证实。
+- **quota_data / ability 冗余索引、passkey/twofa 软删墓碑占唯一键**：不改。
+  前两者是标准前缀索引与低优先级维护债；后者当前所有删除路径已 `Unscoped()`
+  硬删，改造 MySQL 生成列方案的收益低于风险。
+- **只读守卫不覆盖 SSE/WebSocket**：不改。两侧 `new WebSocket` /
+  `new EventSource` / `XMLHttpRequest` 全为零命中，无可触发路径，记为潜在缺口。
+
+### 验证记录
+
+```bash
+go build ./... && go test ./... -count=1                       # 退出码 0
+go test ./model -count=3                                       # 退出码 0
+go test ./model -count=2 -shuffle=on                           # 退出码 0
+NEW_API_TEST_MYSQL_DSN=<newapi_test_i/j>  go test ./model -run MySQL -count=1
+NEW_API_POSTGRES_TEST_DSN=<newapi_test_pg1/2> go test ./model -run 'Postgres|PostgreSQL' -count=1
+cd web/default && bun test && bun run lint && bun run build    # 275 通过，构建通过
+cd web/classic && bun test && bun run build                    # 218 通过，构建通过
+```
+
+### 本轮未覆盖
+
+- CI 新增两步只在本地跑通，未等一次真实 PR 运行（无法在本机构造 GitHub Actions）。
+- `repo-gates` 的 classic 单测用 `bun test` 直接调用；若将来 classic 的
+  `bun test` 需要额外环境变量，CI 会暴露出来，本地绿色不代表 CI 绿色。
