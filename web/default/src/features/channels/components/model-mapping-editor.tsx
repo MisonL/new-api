@@ -1,21 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Code, Table, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  isOwnModelMappingEcho,
+  nextModelMappingRowId,
+  parseModelMappingRows,
+  rowsToModelMappingJson,
+  type ModelMappingRow,
+} from '../lib/model-mapping-rows'
 
 type ModelMappingEditorProps = {
   value: string
   onChange: (value: string) => void
   disabled?: boolean
-}
-
-type MappingRow = {
-  id: string
-  from: string
-  to: string
 }
 
 export function ModelMappingEditor({
@@ -25,65 +26,42 @@ export function ModelMappingEditor({
 }: ModelMappingEditorProps) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<'visual' | 'json'>('visual')
-  const [rows, setRows] = useState<MappingRow[]>([])
+  const [rows, setRows] = useState<ModelMappingRow[]>([])
   const [jsonValue, setJsonValue] = useState(value)
+  // 记录本组件最近一次交给父级的值。父级把它作为 value 传回来时必须跳过，
+  // 否则每次按键都重新解析行、行 id 变化、输入框重新挂载，焦点丢失。
+  const lastEmittedRef = useRef<string | null>(null)
 
-  const parseJsonToRows = (json: string) => {
-    try {
-      if (!json.trim()) {
-        setRows([])
-        return
-      }
-      const parsed = JSON.parse(json)
-      const newRows: MappingRow[] = Object.entries(parsed).map(
-        ([from, to], index) => ({
-          id: `${Date.now()}-${index}`,
-          from,
-          to: String(to),
-        })
-      )
-      setRows(newRows)
-    } catch (_error) {
-      // Invalid JSON, keep current rows
-    }
+  const emit = (next: string) => {
+    lastEmittedRef.current = next
+    setJsonValue(next)
+    onChange(next)
   }
 
   // Parse JSON to rows when value changes externally
   useEffect(() => {
+    if (isOwnModelMappingEcho(value, lastEmittedRef.current)) {
+      return
+    }
+    lastEmittedRef.current = null
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setJsonValue(value)
-    parseJsonToRows(value)
+    setRows((current) => parseModelMappingRows(value) ?? current)
   }, [value])
 
-  const convertRowsToJson = (updatedRows: MappingRow[]): string => {
-    if (updatedRows.length === 0) {
-      return ''
-    }
-    const obj: Record<string, string> = {}
-    updatedRows.forEach((row) => {
-      if (row.from.trim()) {
-        obj[row.from.trim()] = row.to.trim()
-      }
-    })
-    return JSON.stringify(obj, null, 2)
-  }
-
   const handleAddRow = () => {
-    const newRow: MappingRow = {
-      id: `${Date.now()}`,
+    const newRow: ModelMappingRow = {
+      id: nextModelMappingRowId(),
       from: '',
       to: '',
     }
-    const updatedRows = [...rows, newRow]
-    setRows(updatedRows)
+    setRows([...rows, newRow])
   }
 
   const handleDeleteRow = (id: string) => {
     const updatedRows = rows.filter((row) => row.id !== id)
     setRows(updatedRows)
-    const json = convertRowsToJson(updatedRows)
-    setJsonValue(json)
-    onChange(json)
+    emit(rowsToModelMappingJson(updatedRows))
   }
 
   const handleRowChange = (
@@ -95,15 +73,15 @@ export function ModelMappingEditor({
       row.id === id ? { ...row, [field]: newValue } : row
     )
     setRows(updatedRows)
-    const json = convertRowsToJson(updatedRows)
-    setJsonValue(json)
-    onChange(json)
+    emit(rowsToModelMappingJson(updatedRows))
   }
 
   const handleJsonChange = (newJson: string) => {
-    setJsonValue(newJson)
-    onChange(newJson)
-    parseJsonToRows(newJson)
+    emit(newJson)
+    const parsedRows = parseModelMappingRows(newJson)
+    if (parsedRows) {
+      setRows(parsedRows)
+    }
   }
 
   const handleFillTemplate = () => {
@@ -112,21 +90,18 @@ export function ModelMappingEditor({
       null,
       2
     )
-    setJsonValue(template)
-    onChange(template)
-    parseJsonToRows(template)
+    emit(template)
+    setRows(parseModelMappingRows(template) ?? [])
   }
 
   const toggleMode = () => {
     if (mode === 'visual') {
       // Switching to JSON mode: sync rows to JSON
-      const json = convertRowsToJson(rows)
-      setJsonValue(json)
-      onChange(json)
+      emit(rowsToModelMappingJson(rows))
       setMode('json')
     } else {
       // Switching to visual mode: sync JSON to rows
-      parseJsonToRows(jsonValue)
+      setRows(parseModelMappingRows(jsonValue) ?? rows)
       setMode('visual')
     }
   }
