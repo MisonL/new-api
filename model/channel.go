@@ -922,7 +922,14 @@ func (channel *Channel) Update() error {
 		}
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(channel).Updates(channel).Error; err != nil {
+		// used_quota 与 balance 由运行时累加（计费、余额查询），不是编辑表单的
+		// 可写字段：前端回传的是打开弹窗时的快照，刷新计数与提交之间可能又有
+		// 流量经过，旧值会把累计值改回去；调用方也可以伪造一个更大的值。
+		// GORM 的 Updates(struct) 默认跳过零值，所以这里必须显式 Omit 掉它们，
+		// 否则 payload 里非零的旧值仍会写回。
+		if err := tx.Model(channel).
+			Omit("used_quota", "balance").
+			Updates(channel).Error; err != nil {
 			return err
 		}
 		if err := tx.First(channel, "id = ?", channel.Id).Error; err != nil {
