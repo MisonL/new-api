@@ -569,13 +569,15 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					if realtimeUsage != nil {
 						addRealtimeUsage(usage, realtimeUsage)
 						err := preConsumeUsage(c, info, usage, sumUsage)
+						// 无论扣费成功与否，本 turn 的用量都已并入 sumUsage，
+						// 必须清空 usage；否则函数尾部的兜底 preConsumeUsage 会把
+						// 同一 turn 再加一次，sumUsage 翻倍并按翻倍值终态结算。
+						usage = &dto.RealtimeUsage{}
 						if err != nil {
 							errChan <- fmt.Errorf("error consume usage: %v", err)
 							return
 						}
 						// 本次计费完成，清除
-						usage = &dto.RealtimeUsage{}
-
 						localUsage = &dto.RealtimeUsage{}
 					} else {
 						textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
@@ -590,12 +592,13 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 						localUsage.InputTokenDetails.TextTokens += textToken
 						localUsage.InputTokenDetails.AudioTokens += audioToken
 						err = preConsumeUsage(c, info, localUsage, sumUsage)
+						// 同 ResponseDone 分支：用量已并入 sumUsage，先清空再判断错误，
+						// 避免尾部兜底重复累计。
+						localUsage = &dto.RealtimeUsage{}
 						if err != nil {
 							errChan <- fmt.Errorf("error consume usage: %v", err)
 							return
 						}
-						// 本次计费完成，清除
-						localUsage = &dto.RealtimeUsage{}
 						// print now usage
 					}
 					logger.LogInfo(c, fmt.Sprintf("realtime streaming sumUsage: %v", sumUsage))
