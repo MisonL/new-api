@@ -3,8 +3,8 @@ import i18n from 'i18next'
 import { useAuthStore } from '@/stores/auth-store'
 import { getSelf } from '@/lib/api'
 import type { User } from '@/features/users/types'
-import { saveUserId } from '../lib/storage'
 import { normalizeLoginRedirectTarget } from '../lib/redirect-target'
+import { saveUserId } from '../lib/storage'
 
 function getSavedLanguage(user: User): string | undefined {
   const userData = user as Record<string, unknown>
@@ -69,8 +69,7 @@ export function useAuthRedirect() {
     }
 
     // Navigate to target page
-    const targetPath =
-      normalizeLoginRedirectTarget(redirectTo) || '/dashboard'
+    const targetPath = normalizeLoginRedirectTarget(redirectTo) || '/dashboard'
     navigate({ to: targetPath, replace: true })
   }
 
