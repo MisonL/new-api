@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -22,7 +21,7 @@ func openSubscriptionMySQLDB(t *testing.T) *gorm.DB {
 	if dsn == "" {
 		t.Skip("NEW_API_TEST_MYSQL_DSN not set; MySQL duplicate-key semantics not covered by this run")
 	}
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: logger.Discard})
+	db, err := gorm.Open(MySQLDialector(dsn), &gorm.Config{Logger: logger.Discard})
 	require.NoError(t, err)
 
 	previousDB := DB

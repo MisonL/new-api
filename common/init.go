@@ -77,7 +77,7 @@ func InitEnv() {
 	SessionSecret = sessionSecret
 	CryptoSecret = cryptoSecret
 	if os.Getenv("SQLITE_PATH") != "" {
-		SQLitePath = os.Getenv("SQLITE_PATH")
+		SQLitePath = NormalizeSQLitePath(os.Getenv("SQLITE_PATH"))
 	}
 	if *LogDir != "" {
 		var err error
