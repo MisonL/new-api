@@ -43,12 +43,12 @@ func TestPreConsumeUserSubscriptionIdempotentFallbackOnPostgres(t *testing.T) {
 	const userId = 9001
 
 	plan := &SubscriptionPlan{
-		Id:              990101,
-		Title:           "pg-idempotency",
-		DurationUnit:    "month",
-		DurationValue:   1,
-		Enabled:         true,
-		TotalAmount:     1_000_000,
+		Id:               990101,
+		Title:            "pg-idempotency",
+		DurationUnit:     "month",
+		DurationValue:    1,
+		Enabled:          true,
+		TotalAmount:      1_000_000,
 		QuotaResetPeriod: SubscriptionResetNever,
 	}
 	require.NoError(t, DB.Create(plan).Error)

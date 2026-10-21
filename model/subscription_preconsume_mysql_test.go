@@ -43,12 +43,12 @@ func TestPreConsumeUserSubscriptionIdempotentFallbackOnMySQL(t *testing.T) {
 	const userId = 9101
 
 	plan := &SubscriptionPlan{
-		Id:              990201,
-		Title:           "mysql-idempotency",
-		DurationUnit:    "month",
-		DurationValue:   1,
-		Enabled:         true,
-		TotalAmount:     1_000_000,
+		Id:               990201,
+		Title:            "mysql-idempotency",
+		DurationUnit:     "month",
+		DurationValue:    1,
+		Enabled:          true,
+		TotalAmount:      1_000_000,
 		QuotaResetPeriod: SubscriptionResetNever,
 	}
 	require.NoError(t, db.Create(plan).Error)
