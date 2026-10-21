@@ -328,3 +328,69 @@ func requireClaudeStreamBlocksWellFormed(t *testing.T, responses []*dto.ClaudeRe
 		}
 	}
 }
+
+// 上游的 finish_reason="function_call"（旧式函数调用终止帧）在入口预检里被
+// stopReasonOpenAI2ClaudeStrict 接受并映射为 tool_use，但 message_delta 的
+// 产出点用的是非严格映射，其表里没有 function_call，原样透传。Anthropic
+// SDK 的 stop_reason 枚举没有这个值，客户端会反序列化失败或走未知分支。
+// 非流式路径走严格映射，同一上游状态流式却给出非法值，必须是同一个值。
+func TestStreamResponseOpenAI2ClaudeFunctionCallFinishReasonMapsToToolUse(t *testing.T) {
+	info := newClaudeStreamInfo(1)
+
+	toolStart := StreamResponseOpenAI2Claude(&dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-test",
+		Model: "claude-test",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+				ToolCalls: []dto.ToolCallResponse{{
+					Index:    testPtr(0),
+					ID:       "call_1",
+					Type:     "function",
+					Function: dto.FunctionResponse{Name: "Read", Arguments: "{}"},
+				}},
+			},
+		}},
+	}, info)
+	require.NotEmpty(t, toolStart)
+
+	info.SendResponseCount = 2
+	final := StreamResponseOpenAI2Claude(&dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-test",
+		Model: "claude-test",
+		Choices: []dto.ChatCompletionsStreamResponseChoice{{
+			FinishReason: testPtr("function_call"),
+		}},
+		Usage: &dto.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3},
+	}, info)
+
+	var stopReason string
+	for _, response := range final {
+		if response.Type == "message_delta" && response.Delta != nil && response.Delta.StopReason != nil {
+			stopReason = *response.Delta.StopReason
+		}
+	}
+	require.Equal(t, "tool_use", stopReason,
+		"流式与非流式必须给出同一 stop_reason；function_call 不在 Anthropic 枚举里")
+	requireClaudeStreamBlocksWellFormed(t, append(toolStart, final...))
+}
+
+// usage-only 终端帧（choices 为空）同样携带 info.FinishReason，走的是同一
+// 非严格映射，也要被钉住。
+func TestStreamResponseOpenAI2ClaudeUsageOnlyFunctionCallFinishReasonMapsToToolUse(t *testing.T) {
+	info := newClaudeStreamInfo(2)
+	info.FinishReason = "function_call"
+
+	final := StreamResponseOpenAI2Claude(&dto.ChatCompletionsStreamResponse{
+		Id:    "chatcmpl-test",
+		Model: "claude-test",
+		Usage: &dto.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3},
+	}, info)
+
+	var stopReason string
+	for _, response := range final {
+		if response.Type == "message_delta" && response.Delta != nil && response.Delta.StopReason != nil {
+			stopReason = *response.Delta.StopReason
+		}
+	}
+	require.Equal(t, "tool_use", stopReason)
+}

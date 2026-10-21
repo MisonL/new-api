@@ -1008,7 +1008,7 @@ func streamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 					Type:  "message_delta",
 					Usage: buildClaudeUsageFromOpenAIUsage(oaiUsage),
 					Delta: &dto.ClaudeMediaMessage{
-						StopReason: common.GetPointer[string](stopReasonOpenAI2Claude(info.FinishReason)),
+						StopReason: common.GetPointer[string](claudeStopReasonForStream(info)),
 					},
 				})
 				claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
@@ -1028,15 +1028,11 @@ func streamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 		}
 		if oaiUsage != nil {
 			stopOpenBlocks()
-			stopReason := stopReasonOpenAI2Claude(info.FinishReason)
-			if stopReason == "" {
-				stopReason = "end_turn"
-			}
 			claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
 				Type:  "message_delta",
 				Usage: buildClaudeUsageFromOpenAIUsage(oaiUsage),
 				Delta: &dto.ClaudeMediaMessage{
-					StopReason: common.GetPointer[string](stopReason),
+					StopReason: common.GetPointer[string](claudeStopReasonForStream(info)),
 				},
 			})
 			claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
@@ -1073,7 +1069,7 @@ func streamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 					Type:  "message_delta",
 					Usage: buildClaudeUsageFromOpenAIUsage(oaiUsage),
 					Delta: &dto.ClaudeMediaMessage{
-						StopReason: common.GetPointer[string](stopReasonOpenAI2Claude(info.FinishReason)),
+						StopReason: common.GetPointer[string](claudeStopReasonForStream(info)),
 					},
 				})
 			}
@@ -1198,6 +1194,20 @@ func ResponseOpenAI2ClaudeWithError(openAIResponse *dto.OpenAITextResponse, info
 
 func stopReasonOpenAI2Claude(reason string) string {
 	return reasonmap.OpenAIFinishReasonToClaudeStopReason(reason)
+}
+
+// claudeStopReasonForStream 是流式 message_delta 唯一允许的 stop_reason 来源。
+// 入口已用 stopReasonOpenAI2ClaudeStrict 拒绝过 Anthropic 无法表达的
+// finish_reason，这里若改用非严格映射，就会把入口放过的 function_call 原样
+// 透传出去——同一上游状态流式与非流式给出不同 stop_reason，客户端按 Anthropic
+// 枚举解析即失败。无法识别的值回落 end_turn：这是正常终止的语义，也不是
+// 上游给过的词，但至少是合法枚举成员。
+func claudeStopReasonForStream(info *relaycommon.RelayInfo) string {
+	stopReason, err := stopReasonOpenAI2ClaudeStrict(info.FinishReason)
+	if err != nil || stopReason == "" {
+		return "end_turn"
+	}
+	return stopReason
 }
 
 func stopReasonOpenAI2ClaudeStrict(reason string) (string, error) {
