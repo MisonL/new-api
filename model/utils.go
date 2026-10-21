@@ -2,12 +2,12 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
 )
 
@@ -23,6 +23,15 @@ const (
 var batchUpdateStores []map[int]int
 var batchUpdateLocks []sync.Mutex
 
+// batchUpdateRunMu serializes the periodic updater with the shutdown flush.
+// Without it, CloseDB could run while a ticker-triggered write is still using
+// the SQL connection pool.
+var batchUpdateRunMu sync.Mutex
+
+var batchUpdaterLifecycleMu sync.Mutex
+var batchUpdaterStop chan struct{}
+var batchUpdaterDone chan struct{}
+
 type userBatchDelta struct {
 	quota        int
 	usedQuota    int
@@ -37,12 +46,69 @@ func init() {
 }
 
 func InitBatchUpdater() {
-	gopool.Go(func() {
-		for {
-			time.Sleep(time.Duration(common.BatchUpdateInterval) * time.Second)
-			batchUpdate()
+	batchUpdaterLifecycleMu.Lock()
+	if batchUpdaterStop != nil {
+		batchUpdaterLifecycleMu.Unlock()
+		return
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	batchUpdaterStop = stop
+	batchUpdaterDone = done
+	batchUpdaterLifecycleMu.Unlock()
+
+	go func() {
+		defer close(done)
+		interval := time.Duration(common.BatchUpdateInterval) * time.Second
+		if interval <= 0 {
+			interval = time.Second
 		}
-	})
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				runBatchUpdateSafely()
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+// runBatchUpdateSafely runs one periodic batch and contains a panic inside the
+// updater goroutine. This loop previously ran inside gopool, whose worker
+// recovers per task; a plain goroutine must recover itself, otherwise a panic
+// in a single batch write takes the whole process down — the opposite of what
+// the crash-resilience work is for. The panicking batch is lost (it was already
+// swapped out of the stores), so the error is logged loudly rather than
+// swallowed.
+func runBatchUpdateSafely() {
+	defer func() {
+		if r := recover(); r != nil {
+			common.SysError(fmt.Sprintf("panic in batch update: %v", r))
+		}
+	}()
+	batchUpdate()
+}
+
+// StopBatchUpdater stops the periodic writer and waits for an in-flight batch
+// to finish. Call it before FlushBatchUpdates and CloseDB during shutdown.
+// It is safe to call when the updater was never started or was already stopped.
+func StopBatchUpdater() {
+	batchUpdaterLifecycleMu.Lock()
+	stop := batchUpdaterStop
+	done := batchUpdaterDone
+	if stop == nil {
+		batchUpdaterLifecycleMu.Unlock()
+		return
+	}
+	batchUpdaterStop = nil
+	batchUpdaterDone = nil
+	close(stop)
+	batchUpdaterLifecycleMu.Unlock()
+
+	<-done
 }
 
 func addNewRecord(type_ int, id int, value int) {
@@ -66,6 +132,13 @@ func FlushBatchUpdates() {
 }
 
 func batchUpdate() {
+	batchUpdateRunMu.Lock()
+	defer batchUpdateRunMu.Unlock()
+
+	batchUpdateOnce()
+}
+
+func batchUpdateOnce() {
 	stores := make([]map[int]int, BatchUpdateTypeCount)
 	hasData := false
 	for i := 0; i < BatchUpdateTypeCount; i++ {
@@ -81,23 +154,55 @@ func batchUpdate() {
 	if !hasData {
 		return
 	}
+	if DB == nil {
+		requeueBatchUpdates(stores)
+		common.SysError("batch update skipped: database is not initialized")
+		return
+	}
 
 	common.SysLog("batch update started")
 
 	for userId, delta := range collectUserBatchDeltas(stores) {
 		if err := updateUserBatchDelta(userId, delta); err != nil {
+			requeueUserBatchDelta(userId, delta)
 			common.SysLog("failed to batch update user counters: " + err.Error())
 		}
 	}
 	for key, value := range stores[BatchUpdateTypeTokenQuota] {
 		if err := increaseTokenQuota(key, value); err != nil {
+			requeueBatchDelta(BatchUpdateTypeTokenQuota, key, value)
 			common.SysLog("failed to batch update token quota: " + err.Error())
 		}
 	}
 	for key, value := range stores[BatchUpdateTypeChannelUsedQuota] {
-		updateChannelUsedQuota(key, value)
+		if err := updateChannelUsedQuota(key, value); err != nil {
+			requeueBatchDelta(BatchUpdateTypeChannelUsedQuota, key, value)
+		}
 	}
 	common.SysLog("batch update finished")
+}
+
+func requeueUserBatchDelta(id int, delta userBatchDelta) {
+	requeueBatchDelta(BatchUpdateTypeUserQuota, id, delta.quota)
+	requeueBatchDelta(BatchUpdateTypeUsedQuota, id, delta.usedQuota)
+	requeueBatchDelta(BatchUpdateTypeRequestCount, id, delta.requestCount)
+}
+
+func requeueBatchUpdates(stores []map[int]int) {
+	for type_, records := range stores {
+		for id, value := range records {
+			requeueBatchDelta(type_, id, value)
+		}
+	}
+}
+
+func requeueBatchDelta(type_ int, id int, value int) {
+	if value == 0 {
+		return
+	}
+	batchUpdateLocks[type_].Lock()
+	batchUpdateStores[type_][id] += value
+	batchUpdateLocks[type_].Unlock()
 }
 
 func collectUserBatchDeltas(stores []map[int]int) map[int]userBatchDelta {

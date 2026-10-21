@@ -58,3 +58,36 @@ func TestFlushBatchUpdatesIsIdempotentWhenNothingIsPending(t *testing.T) {
 	require.NoError(t, DB.First(&after, user.Id).Error)
 	require.Equal(t, 900, after.Quota)
 }
+
+func TestBatchUpdateRequeuesFailedUserDelta(t *testing.T) {
+	previousDB := DB
+	db := openTestDB(t)
+	DB = db
+	t.Cleanup(func() {
+		DB = previousDB
+		resetBatchUpdateStoresForTest()
+	})
+	resetBatchUpdateStoresForTest()
+
+	addNewRecord(BatchUpdateTypeUserQuota, 1, -125)
+	batchUpdate()
+
+	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
+	requeued := batchUpdateStores[BatchUpdateTypeUserQuota][1]
+	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
+	require.Equal(t, -125, requeued, "a failed database write must remain pending")
+
+	require.NoError(t, db.AutoMigrate(&User{}))
+	user := User{Id: 1, Username: "requeue_user", Password: "password", Quota: 1000}
+	require.NoError(t, db.Create(&user).Error)
+	batchUpdate()
+
+	var after User
+	require.NoError(t, db.First(&after, user.Id).Error)
+	require.Equal(t, 875, after.Quota, "the failed delta must be applied after the database recovers")
+
+	addNewRecord(BatchUpdateTypeUserQuota, user.Id, -125)
+	batchUpdate()
+	require.NoError(t, db.First(&after, user.Id).Error)
+	require.Equal(t, 750, after.Quota)
+}
