@@ -114,9 +114,12 @@
   },
   "overrides": {
     "@ai-sdk/provider-utils": "4.0.33",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "browserslist": "4.28.8",
     "decode-uri-component": "0.5.0",
     "fast-uri": "3.1.8",
+    "follow-redirects": "1.16.1",
+    "hono": "4.13.13",
     "ip-address": "10.7.3",
     "minimist": "1.2.6",
     "katex": "^0.18.11"
