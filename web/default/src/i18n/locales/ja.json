@@ -419,6 +419,7 @@
     "Authenticator code": "認証コード",
     "Authorization Endpoint": "認可エンドポイント",
     "Authorization Endpoint (Optional)": "認証エンドポイント (オプション)",
+    "Authorization complete. Return to the desktop app.": "認証が完了しました。デスクトップアプリに戻ってください。",
     "Authorize": "認証",
     "Auto": "自動",
     "Auto (Circuit Breaker)": "自動（サーキットブレーカー）",

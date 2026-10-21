@@ -419,6 +419,7 @@
     "Authenticator code": "Mã xác thực",
     "Authorization Endpoint": "Điểm cuối ủy quyền",
     "Authorization Endpoint (Optional)": "Điểm cuối ủy quyền (Tùy chọn)",
+    "Authorization complete. Return to the desktop app.": "Đã hoàn tất ủy quyền. Hãy quay lại ứng dụng trên máy tính.",
     "Authorize": "Ủy quyền",
     "Auto": "Tự động",
     "Auto (Circuit Breaker)": "Tự động (Bộ ngắt mạch)",

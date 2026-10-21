@@ -419,6 +419,7 @@
     "Authenticator code": "Код аутентификатора",
     "Authorization Endpoint": "Конечная точка авторизации",
     "Authorization Endpoint (Optional)": "Конечная точка авторизации (необязательно)",
+    "Authorization complete. Return to the desktop app.": "Авторизация завершена. Вернитесь в настольное приложение.",
     "Authorize": "Авторизовать",
     "Auto": "Авто",
     "Auto (Circuit Breaker)": "Авто (Автовыключатель)",

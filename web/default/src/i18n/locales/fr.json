@@ -419,6 +419,7 @@
     "Authenticator code": "Code d'authentification",
     "Authorization Endpoint": "Point de terminaison d'autorisation",
     "Authorization Endpoint (Optional)": "Point de terminaison d'autorisation (Facultatif)",
+    "Authorization complete. Return to the desktop app.": "Autorisation terminée. Revenez à l'application de bureau.",
     "Authorize": "Autoriser",
     "Auto": "Auto",
     "Auto (Circuit Breaker)": "Auto (Disjoncteur)",
