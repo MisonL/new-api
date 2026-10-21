@@ -431,6 +431,10 @@ func migrateDB() error {
 	if err := migrateRequestHeaderStrategyStateScopeTypeLength(); err != nil {
 		return err
 	}
+	// logs 大表的缺失索引先并发建出，AutoMigrate 随后跳过已存在项。
+	if err := ensureLogIndexesMatchModel(DB); err != nil {
+		return err
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -490,6 +494,9 @@ func migrateDB() error {
 
 func migrateDBFast() error {
 	if err := migrateRequestHeaderStrategyStateScopeTypeLength(); err != nil {
+		return err
+	}
+	if err := ensureLogIndexesMatchModel(DB); err != nil {
 		return err
 	}
 
@@ -577,6 +584,10 @@ func migrateDBFast() error {
 
 func migrateLOGDB() error {
 	var err error
+	// 独立日志库同样先并发建缺失索引，再交给 AutoMigrate。
+	if err = ensureLogIndexesMatchModel(LOG_DB); err != nil {
+		return err
+	}
 	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
 		return err
 	}
