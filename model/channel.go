@@ -509,18 +509,6 @@ func (channel *Channel) GetAutoBan() bool {
 	return *channel.AutoBan == 1
 }
 
-func (channel *Channel) Save() error {
-	if err := DB.Save(channel).Error; err != nil {
-		return err
-	}
-	if channel.Id > 0 {
-		CacheReloadChannel(channel.Id)
-	} else {
-		refreshChannelCacheAfterWrite()
-	}
-	return nil
-}
-
 func (channel *Channel) SaveWithoutKey() error {
 	if channel.Id == 0 {
 		return errors.New("channel ID is 0")
