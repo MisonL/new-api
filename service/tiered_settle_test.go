@@ -558,6 +558,81 @@ func TestBuildTieredTokenParams_Claude_WithCache(t *testing.T) {
 	}
 }
 
+// Anthropic 的 cache_creation_input_tokens 是聚合值，cache_creation 里的
+// ephemeral_5m/1h 只是拆分。上游不返回 cache_creation 对象时 5m/1h 均为 0，
+// 若表达式变量只取 5m，整段缓存写入会以 CC=0 计费，等于免费。
+func TestBuildTieredTokenParams_Claude_AggregateCacheCreationWithoutSplit(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     800,
+		CompletionTokens: 500,
+		UsageSemantic:    "anthropic",
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         200,
+			CachedCreationTokens: 1500,
+			TextTokens:           800,
+		},
+	}
+	expr := `tier("base", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6)`
+	params := BuildTieredTokenParams(usage, true, billingexpr.UsedVars(expr))
+
+	if params.CC != 1500 {
+		t.Fatalf("CC = %f, want 1500 (aggregate cache creation without split)", params.CC)
+	}
+	if params.CC1h != 0 {
+		t.Fatalf("CC1h = %f, want 0", params.CC1h)
+	}
+	if wantLen := float64(800 + 200 + 1500); params.Len != wantLen {
+		t.Fatalf("Len = %f, want %f", params.Len, wantLen)
+	}
+}
+
+// 拆分只覆盖部分聚合值时，未归类部分必须按通用缓存写入价计入 cc，
+// 不能随 5m 拆分一起丢失。
+func TestBuildTieredTokenParams_Claude_UnsplitRemainderBilledAsGeneric(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     800,
+		CompletionTokens: 500,
+		UsageSemantic:    "anthropic",
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         200,
+			CachedCreationTokens: 1500,
+			TextTokens:           800,
+		},
+		ClaudeCacheCreation5mTokens: 1000,
+	}
+	expr := `tier("base", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6)`
+	params := BuildTieredTokenParams(usage, true, billingexpr.UsedVars(expr))
+
+	if params.CC != 1500 {
+		t.Fatalf("CC = %f, want 1500 (1000 5m split + 500 unsplit remainder)", params.CC)
+	}
+	if params.CC1h != 0 {
+		t.Fatalf("CC1h = %f, want 0", params.CC1h)
+	}
+}
+
+// 完整拆分时行为不变：cc 只含 5m 部分，cc1h 单独计价。
+func TestBuildTieredTokenParams_Claude_FullSplitUnchanged(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     800,
+		CompletionTokens: 500,
+		UsageSemantic:    "anthropic",
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         200,
+			CachedCreationTokens: 1500,
+			TextTokens:           800,
+		},
+		ClaudeCacheCreation5mTokens: 1000,
+		ClaudeCacheCreation1hTokens: 500,
+	}
+	expr := `tier("base", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6)`
+	params := BuildTieredTokenParams(usage, true, billingexpr.UsedVars(expr))
+
+	if params.CC != 1000 || params.CC1h != 500 {
+		t.Fatalf("CC=%f CC1h=%f, want 1000/500", params.CC, params.CC1h)
+	}
+}
+
 func TestBuildTieredTokenParams_GPT_AudioOutput(t *testing.T) {
 	usage := &dto.Usage{
 		PromptTokens:     1000,

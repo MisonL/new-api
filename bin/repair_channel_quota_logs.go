@@ -824,9 +824,19 @@ func repairOpenAITieredFallback(row logRow, other map[string]interface{}, origin
 	if claudeUsage {
 		// Claude-format input_tokens is text-only. The tier condition must see
 		// the complete context, while the split cache-write fields map to the
-		// expression's dedicated cache variables.
-		params.Len = float64(row.PromptTokens + cacheTokens + cacheCreationTokens5m + cacheCreationTokens1h)
-		params.CC = float64(cacheCreationTokens5m)
+		// expression's dedicated cache variables. cache_creation_tokens is the
+		// aggregate; when the 5m/1h split is absent or partial, the remainder
+		// must stay in cc instead of being dropped.
+		aggregate := cacheCreationTokens
+		if aggregate <= 0 {
+			aggregate = cacheCreationTokens5m + cacheCreationTokens1h
+		}
+		cc := aggregate - cacheCreationTokens1h
+		if cc < 0 {
+			cc = 0
+		}
+		params.Len = float64(row.PromptTokens + cacheTokens + aggregate)
+		params.CC = float64(cc)
 		params.CC1h = float64(cacheCreationTokens1h)
 	} else {
 		// OpenAI-format prompt_tokens includes cache categories. Match

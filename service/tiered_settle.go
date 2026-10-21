@@ -26,8 +26,20 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	cc1h := float64(0)
 
 	if usage.UsageSemantic == "anthropic" {
+		// Claude 的 cache_creation_input_tokens 是聚合值，cache_creation 里的
+		// 5m/1h 只是拆分；上游不返回 cache_creation 对象时拆分字段为 0，
+		// 直接拿 5m 字段当 cc 会把整段缓存写入按 0 计费。cc 的口径是
+		// 「5 分钟 TTL / 通用」，因此取聚合值减去 1h 拆分，未归类部分归入 cc；
+		// 聚合值缺失（部分代理只回拆分）时退回拆分之和。
 		cc1h = float64(usage.ClaudeCacheCreation1hTokens)
-		cc5m = float64(usage.ClaudeCacheCreation5mTokens)
+		aggregate := float64(usage.PromptTokensDetails.CachedCreationTokens)
+		if aggregate <= 0 {
+			aggregate = float64(usage.ClaudeCacheCreation5mTokens) + cc1h
+		}
+		cc5m = aggregate - cc1h
+		if cc5m < 0 {
+			cc5m = 0
+		}
 	}
 
 	img := float64(usage.PromptTokensDetails.ImageTokens)
