@@ -78,6 +78,7 @@
 | [CR-PRICING-UNSET-FALLBACK-GEMMA-2026-09-19.md](CR-PRICING-UNSET-FALLBACK-GEMMA-2026-09-19.md) | 未定价模型兜底与 Gemma |
 | [CR-CACHE-STATS-CLOSEOUT-2026-09-07.md](CR-CACHE-STATS-CLOSEOUT-2026-09-07.md) | 缓存统计 |
 | [CR-LOG-CACHE-TOKEN-STATS-2026-09-01.md](CR-LOG-CACHE-TOKEN-STATS-2026-09-01.md) | 日志缓存 token 统计 |
+| [CR-AUDIT-FIXES-2026-10-21.md](CR-AUDIT-FIXES-2026-10-21.md) | 计费、方言兼容与 OAuth 回调修复：订阅预扣幂等回退在 PG 上真正生效（ON CONFLICT 分派）、tiered 保留聚合 cache creation、订阅超额结算落账、realtime 逐轮定价改用冻结快照、MySQL prefill 部分唯一索引用生成列等价实现、桌面 OAuth 登录 CSRF、前端 format/bun audit/映射丢焦点/OAuth 回调判定 |
 
 价格维护的现行口径见 `docs/operations/pricing-maintenance.md`，本目录记录只作为过程证据。
 

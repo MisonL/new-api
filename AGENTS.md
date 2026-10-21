@@ -177,6 +177,7 @@ bun run dev --host 0.0.0.0 --port 5173
 - 重要验证和阶段性事实优先放到 `docs/reviews/CR-*.md`。
 - 当前高价值索引：
   - `docs/reviews/CR-MULTI-ROUND-AUDIT-2026-10-16.md`
+  - `docs/reviews/CR-AUDIT-FIXES-2026-10-21.md`
   - `docs/reviews/CR-AUDIT-FIXES-2026-10-11.md`
   - `docs/reviews/CR-FULL-AUDIT-LATEST-SOURCE-AND-DEV-SERVICE-2026-10-14.md`
   - `docs/reviews/CR-FULL-AUDIT-LATEST-SOURCE-AND-DEV-SERVICE-2026-10-14-2.md`
