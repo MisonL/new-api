@@ -92,6 +92,12 @@ func runBatchUpdateSafely() {
 	batchUpdate()
 }
 
+// batchUpdaterStopWaitUpperBound 是等待写入协程收尾的上限。超时后返回并记录
+// 错误，而不是永久挂起：FlushBatchUpdates 用 batchUpdateRunMu 与在途的写入
+// 串行化，继续关闭仍不会与它并发写库；真正的兜底是进程外的终止信号。
+// 无界等待会让一次数据库故障把整个关闭流程挂死，超时值之外的等待没有意义。
+var batchUpdaterStopWaitUpperBound = 15 * time.Second
+
 // StopBatchUpdater stops the periodic writer and waits for an in-flight batch
 // to finish. Call it before FlushBatchUpdates and CloseDB during shutdown.
 // It is safe to call when the updater was never started or was already stopped.
@@ -108,7 +114,14 @@ func StopBatchUpdater() {
 	close(stop)
 	batchUpdaterLifecycleMu.Unlock()
 
-	<-done
+	select {
+	case <-done:
+	case <-time.After(batchUpdaterStopWaitUpperBound):
+		common.SysError(fmt.Sprintf(
+			"batch updater did not stop within %s, continuing shutdown anyway",
+			batchUpdaterStopWaitUpperBound,
+		))
+	}
 }
 
 func addNewRecord(type_ int, id int, value int) {
@@ -127,8 +140,29 @@ func addNewRecord(type_ int, id int, value int) {
 // store out under its lock before writing, so a concurrent ticker call and this
 // one cannot double-apply a delta, and a call with nothing pending returns
 // without touching the database.
+//
+// After StopBatchUpdater the periodic writer is gone, so the only thing that can
+// hold batchUpdateRunMu here is an in-flight batch from before shutdown. If that
+// write hangs on a dead database, blocking here forever would hang the whole
+// shutdown, so the wait is bounded: the in-flight write carries its own already
+// swapped deltas, and losing them is the same failure as that write failing.
 func FlushBatchUpdates() {
-	batchUpdate()
+	deadline := time.Now().Add(batchUpdaterStopWaitUpperBound)
+	for {
+		if batchUpdateRunMu.TryLock() {
+			defer batchUpdateRunMu.Unlock()
+			batchUpdateOnce()
+			return
+		}
+		if time.Now().After(deadline) {
+			common.SysError(fmt.Sprintf(
+				"flush skipped: previous batch write still running after %s",
+				batchUpdaterStopWaitUpperBound,
+			))
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func batchUpdate() {
