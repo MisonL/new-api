@@ -13,6 +13,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/samber/hot"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Subscription duration units
@@ -983,6 +984,25 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 	return tx.Save(sub).Error
 }
 
+// lookupSubscriptionPreConsumeRecord reads the idempotency record through the
+// root connection. It is used after an ON CONFLICT no-op: the insert itself
+// succeeded syntactically, so the transaction is healthy, but a consistent read
+// on the transaction handle can still miss the winner row. PostgreSQL's COMMIT
+// after any failed statement turns into ROLLBACK, and MySQL's REPEATABLE READ
+// snapshot does not see rows committed after the transaction's first read, so
+// the duplicate path must not depend on either.
+func lookupSubscriptionPreConsumeRecord(requestId string) (*SubscriptionPreConsumeRecord, error) {
+	var dup SubscriptionPreConsumeRecord
+	err := DB.Where("request_id = ?", requestId).First(&dup).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &dup, nil
+}
+
 // PreConsumeUserSubscription pre-consumes from any active subscription total quota.
 func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
 	if userId <= 0 {
@@ -1053,20 +1073,47 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 				PreConsumed:        amount,
 				Status:             "consumed",
 			}
-			if err := tx.Create(record).Error; err != nil {
-				var dup SubscriptionPreConsumeRecord
-				if err2 := tx.Where("request_id = ?", requestId).First(&dup).Error; err2 == nil {
-					if dup.Status == "refunded" {
-						return errors.New("subscription pre-consume already refunded")
-					}
-					returnValue.UserSubscriptionId = sub.Id
-					returnValue.PreConsumed = dup.PreConsumed
-					returnValue.AmountTotal = sub.AmountTotal
-					returnValue.AmountUsedBefore = sub.AmountUsed
-					returnValue.AmountUsedAfter = sub.AmountUsed
-					return nil
+			// 并发同 requestId 时唯一键必然冲突，回退路径要读已提交的胜者记录。
+			idempotentFallback := func() error {
+				dup, lookupErr := lookupSubscriptionPreConsumeRecord(requestId)
+				if lookupErr != nil {
+					return lookupErr
 				}
-				return err
+				if dup == nil {
+					return fmt.Errorf("subscription pre-consume conflict but record not found, requestId=%s", requestId)
+				}
+				if dup.Status == "refunded" {
+					return errors.New("subscription pre-consume already refunded")
+				}
+				returnValue.UserSubscriptionId = dup.UserSubscriptionId
+				returnValue.PreConsumed = dup.PreConsumed
+				returnValue.AmountTotal = sub.AmountTotal
+				returnValue.AmountUsedBefore = sub.AmountUsed
+				returnValue.AmountUsedAfter = sub.AmountUsed
+				return nil
+			}
+			if tx.Dialector != nil && tx.Dialector.Name() == "postgres" {
+				// PostgreSQL 在语句失败后把整个事务标记为 aborted，之后的 COMMIT
+				// 实际变成 ROLLBACK，普通 INSERT + 错误回退在这里必然失败。
+				// ON CONFLICT DO NOTHING 让语句本身成功，事务保持健康。
+				createResult := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(record)
+				if createResult.Error != nil {
+					return createResult.Error
+				}
+				if createResult.RowsAffected == 0 {
+					return idempotentFallback()
+				}
+			} else {
+				// MySQL 与 SQLite 的重复键不会中止事务，保留报错回退；
+				// 不用 ON DUPLICATE KEY UPDATE id=id，是因为该语句在 DSN 带
+				// clientFoundRows=true 时把冲突报成 RowsAffected=1，会被误判为
+				// 插入成功并重复累加订阅额度。
+				if err := tx.Create(record).Error; err != nil {
+					if fallbackResult := idempotentFallback(); fallbackResult == nil {
+						return nil
+					}
+					return err
+				}
 			}
 			sub.AmountUsed += amount
 			if err := tx.Save(&sub).Error; err != nil {
