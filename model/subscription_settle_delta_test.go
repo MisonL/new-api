@@ -83,3 +83,34 @@ func TestSettleUserSubscriptionDeltaUnlimitedDoesNotReject(t *testing.T) {
 	require.NoError(t, SettleUserSubscriptionDelta(sub.Id, 5000))
 	require.Equal(t, int64(5000), readSubscriptionUsed(t, sub.Id))
 }
+
+// 订阅一旦被终态结算推到超额（used > total），严格路径上的退款必须仍然
+// 生效：失败请求的预扣要能退回。原检查对任何 delta 都做 newUsed > total
+// 判定，退款算出 1200 > 1000 同样被拒，用户多扣的钱永远退不回来，而且
+// 后续预扣也被负剩余挡住，等于双重损失。
+func TestPostConsumeRefundAcceptedAfterOverage(t *testing.T) {
+	// total = 1000：先用到 900，再超额结算 400 -> 1300。
+	sub, cleanup := openSubscriptionSettleDB(t, 900)
+	defer cleanup()
+
+	require.NoError(t, SettleUserSubscriptionDelta(sub.Id, 400))
+	require.Equal(t, int64(1300), readSubscriptionUsed(t, sub.Id))
+
+	// 另一失败请求退还其预扣：1300 - 200 = 1100，仍高于 total。
+	require.NoError(t, PostConsumeUserSubscriptionDelta(sub.Id, -200),
+		"超额状态下的退款必须被接受，否则用户多扣的额度无法退回")
+	require.Equal(t, int64(1100), readSubscriptionUsed(t, sub.Id))
+}
+
+// 超额状态下的全额退款（退到仍高于 total）同样必须接受。
+func TestPostConsumePartialRefundStillAboveTotalAccepted(t *testing.T) {
+	sub, cleanup := openSubscriptionSettleDB(t, 100)
+	defer cleanup()
+
+	require.NoError(t, SettleUserSubscriptionDelta(sub.Id, 1200))
+	require.Equal(t, int64(1300), readSubscriptionUsed(t, sub.Id))
+
+	require.NoError(t, PostConsumeUserSubscriptionDelta(sub.Id, -100))
+	require.Equal(t, int64(1200), readSubscriptionUsed(t, sub.Id),
+		"退款后仍高于 total 也必须落账")
+}

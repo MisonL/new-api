@@ -1293,7 +1293,11 @@ func applyUserSubscriptionDeltaTx(tx *gorm.DB, userSubscriptionId int, delta int
 	if newUsed < 0 {
 		newUsed = 0
 	}
-	if !allowOverage && sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
+	// 超额检查只拦正向 delta：它的职责是挡住绕过预扣准入、把用量推过
+	// total 的结算。退款（负 delta）只会减少用量；订阅已被终态结算推到
+	// 超额时，退款算出的 newUsed 仍然高于 total，若一并拒绝，失败请求的
+	// 预扣永远退不回来，用户为没跑成的请求持续付费。
+	if delta > 0 && !allowOverage && sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
 		return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
 	}
 	sub.AmountUsed = newUsed
