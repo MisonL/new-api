@@ -75,6 +75,12 @@ const OAuth2Callback = (props) => {
   };
 
   const handleCallbackSuccess = (data) => {
+    if (data?.desktop_handoff) {
+      // 桌面端 login 的回调跑在系统浏览器里，后端不在这里签发会话；
+      // 会话由桌面应用自己轮询 handoff 拿到。提示用户切回应用即可。
+      showSuccess(t('授权完成，请返回桌面应用'));
+      return;
+    }
     if (data?.action === 'bind') {
       showSuccess(t('绑定成功！'));
       navigate('/console/personal');

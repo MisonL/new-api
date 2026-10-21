@@ -419,6 +419,7 @@
     "Authenticator code": "身份验证器代码",
     "Authorization Endpoint": "授权端点",
     "Authorization Endpoint (Optional)": "授权端点（可选）",
+    "Authorization complete. Return to the desktop app.": "授权完成，请返回桌面应用",
     "Authorize": "授权",
     "Auto": "自动",
     "Auto (Circuit Breaker)": "自动分组（熔断）",

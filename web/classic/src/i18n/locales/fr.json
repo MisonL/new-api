@@ -2638,6 +2638,7 @@
     "换脸": "Remplacement de visage",
     "授权，需在遵守": " et doit être utilisé conformément au ",
     "授权入口回调参数名": "Nom du paramètre de rappel de l'entrée d'autorisation",
+    "授权完成，请返回桌面应用": "Autorisation terminée. Revenez à l'application de bureau",
     "授权失败": "Échec de l'autorisation",
     "授权端点": "Endpoint d'autorisation",
     "授权端点必须是完整的 URL（以 http:// 或 https:// 开头）": "L'endpoint d'autorisation doit être une URL complète (commençant par http:// ou https://)",

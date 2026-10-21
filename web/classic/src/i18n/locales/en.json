@@ -2579,6 +2579,7 @@
     "换脸": "Face swap",
     "授权，需在遵守": " and must be used in compliance with the ",
     "授权入口回调参数名": "Authorization entry callback parameter name",
+    "授权完成，请返回桌面应用": "Authorization complete. Return to the desktop app",
     "授权失败": "Authorization failed",
     "授权端点": "Authorization Endpoint",
     "授权端点必须是完整的 URL（以 http:// 或 https:// 开头）": "The authorization endpoint must be a complete URL (starting with http:// or https://)",

@@ -159,6 +159,14 @@ function OAuthCallback() {
         if (res?.data?.success) {
           const { message } = res.data
           const loginUser = (res.data?.data ?? null) as AuthUser | null
+          // 桌面端 login 的回调跑在系统浏览器里，后端不在这里签发会话；
+          // 会话由桌面应用自己轮询 handoff 拿到。提示用户切回应用即可。
+          if ((loginUser as { desktop_handoff?: boolean })?.desktop_handoff) {
+            toast.success(
+              i18next.t('Authorization complete. Return to the desktop app.')
+            )
+            return
+          }
           // Check if this is a bind operation
           if (message === 'bind') {
             toast.success(i18next.t('Binding successful!'))

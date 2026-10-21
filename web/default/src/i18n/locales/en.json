@@ -419,6 +419,7 @@
     "Authenticator code": "Authenticator code",
     "Authorization Endpoint": "Authorization Endpoint",
     "Authorization Endpoint (Optional)": "Authorization Endpoint (Optional)",
+    "Authorization complete. Return to the desktop app.": "Authorization complete. Return to the desktop app.",
     "Authorize": "Authorize",
     "Auto": "Auto",
     "Auto (Circuit Breaker)": "Auto (Circuit Breaker)",

@@ -198,6 +198,21 @@ func HandleOAuth(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+		// 桌面端 login 的回调跑在系统浏览器里，桌面应用自己的会话由 poll 在
+		// 桌面 webview 内签发。这里不能给系统浏览器 setupLogin：
+		//
+		//   - state 只与状态存储比对，不绑定任何浏览器会话，第三方页面拿一个
+		//     自己发起的 state 拼出回调 URL 就能让受害者浏览器登录进攻击者
+		//     账号（登录 CSRF）；而签发在这台浏览器上的会话对桌面端毫无用途。
+		//   - 二次验证门控也在 setupLoginWithResult 内，跳过它不会削弱 2FA：
+		//     poll 走的是同一收口，桌面端仍会收到 require_2fa。
+		//
+		// 回调只回一个标记，由前端提示用户返回桌面应用等待 poll 完成。
+		common.ApiSuccess(c, gin.H{
+			"desktop_handoff": true,
+			"action":          desktopOAuthModeLogin,
+		})
+		return
 	}
 
 	// 9. Setup login
