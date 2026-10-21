@@ -47,7 +47,9 @@ services:
       - REDIS_CONN_STRING=${REDIS_CONN_STRING:?set REDIS_CONN_STRING}
       - TZ=${TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${ERROR_LOG_ENABLED:-true} # 是否启用错误日志记录 (Whether to enable error log recording)
-      - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}  # 是否启用批量更新 (Whether to enable batch update)
+      # true reduces database write pressure; false avoids volatile in-memory quota deltas
+      # when strict persistence is more important than throughput.
+      - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}
       # 全局限流阈值（仅环境变量生效，后台设置页无对应选项）
       - GLOBAL_API_RATE_LIMIT=${GLOBAL_API_RATE_LIMIT:-180}
       - GLOBAL_API_RATE_LIMIT_DURATION=${GLOBAL_API_RATE_LIMIT_DURATION:-180}
@@ -93,6 +95,11 @@ services:
       - SQL_MAX_OPEN_CONNS=${SQL_MAX_OPEN_CONNS:-50}
       - SQL_MAX_IDLE_CONNS=${SQL_MAX_IDLE_CONNS:-25}
       - SQL_MAX_LIFETIME=${SQL_MAX_LIFETIME:-60}
+      # PostgreSQL may need a short crash-recovery window before accepting
+      # application connections. The Go startup retry is bounded and does not
+      # retry schema or authentication errors.
+      - SQL_STARTUP_RETRY_ATTEMPTS=${SQL_STARTUP_RETRY_ATTEMPTS:-10}
+      - SQL_STARTUP_RETRY_INTERVAL_SECONDS=${SQL_STARTUP_RETRY_INTERVAL_SECONDS:-2}
       - REDIS_POOL_SIZE=${REDIS_POOL_SIZE:-10}
       - STREAM_SCANNER_MAX_BUFFER_MB=${STREAM_SCANNER_MAX_BUFFER_MB:-}
       - MAX_REQUEST_BODY_MB=${MAX_REQUEST_BODY_MB:-}
