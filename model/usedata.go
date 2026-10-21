@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -147,41 +148,63 @@ func LogQuotaData(userId int, username string, modelName string, quota int, crea
 	logQuotaDataCache(userId, username, modelName, quota, createdAt, tokenUsed)
 }
 
+// SaveQuotaDataCache 把内存里的看板聚合刷进 quota_data。
+//
+// 只有真正写成功的条目才从缓存移除：这条路径同样是优雅关闭时的最后一次
+// 落盘，一次数据库抖动就清空整个缓存会丢掉整窗（默认 5 分钟）的聚合，而且
+// 没有任何重试机会。失败的条目保留在缓存里，等下一次定时器或下次关闭重试。
 func SaveQuotaDataCache() {
 	CacheQuotaDataLock.Lock()
 	defer CacheQuotaDataLock.Unlock()
 	size := len(CacheQuotaData)
-	// 如果缓存中有数据，就保存到数据库中
-	// 1. 先查询数据库中是否有数据
-	// 2. 如果有数据，就更新数据
-	// 3. 如果没有数据，就插入数据
-	for _, quotaData := range CacheQuotaData {
+	if size == 0 {
+		return
+	}
+	saved := make(map[string]*QuotaData, size)
+	for key, quotaData := range CacheQuotaData {
 		quotaDataDB := &QuotaData{}
-		DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
-			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt).First(quotaDataDB)
+		queryErr := DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
+			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt).First(quotaDataDB).Error
+		if queryErr != nil && !errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			common.SysLog(fmt.Sprintf("保存数据看板数据失败（查询阶段，保留待重试）: %s", queryErr))
+			continue
+		}
 		if quotaDataDB.Id > 0 {
 			//quotaDataDB.Count += quotaData.Count
 			//quotaDataDB.Quota += quotaData.Quota
 			//DB.Table("quota_data").Save(quotaDataDB)
-			increaseQuotaData(quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.Count, quotaData.Quota, quotaData.CreatedAt, quotaData.TokenUsed)
+			if err := increaseQuotaData(quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.Count, quotaData.Quota, quotaData.CreatedAt, quotaData.TokenUsed); err != nil {
+				common.SysLog(fmt.Sprintf("保存数据看板数据失败（更新阶段，保留待重试）: %s", err))
+				continue
+			}
 		} else {
-			DB.Table("quota_data").Create(quotaData)
+			if err := DB.Table("quota_data").Create(quotaData).Error; err != nil {
+				common.SysLog(fmt.Sprintf("保存数据看板数据失败（写入阶段，保留待重试）: %s", err))
+				continue
+			}
 		}
+		saved[key] = quotaData
 	}
-	CacheQuotaData = make(map[string]*QuotaData)
+	for key := range saved {
+		delete(CacheQuotaData, key)
+	}
+	failed := size - len(saved)
+	if failed > 0 {
+		common.SysLog(fmt.Sprintf("保存数据看板数据部分失败：成功 %d 条，待重试 %d 条", len(saved), failed))
+		return
+	}
 	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", size))
 }
 
-func increaseQuotaData(userId int, username string, modelName string, count int, quota int, createdAt int64, tokenUsed int) {
-	err := DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
+// increaseQuotaData 返回错误供调用方决定是否保留缓存条目；原实现只记日志，
+// 上层无法区分成功与失败。
+func increaseQuotaData(userId int, username string, modelName string, count int, quota int, createdAt int64, tokenUsed int) error {
+	return DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
 		userId, username, modelName, createdAt).Updates(map[string]interface{}{
 		"count":      gorm.Expr("count + ?", count),
 		"quota":      gorm.Expr("quota + ?", quota),
 		"token_used": gorm.Expr("token_used + ?", tokenUsed),
 	}).Error
-	if err != nil {
-		common.SysLog(fmt.Sprintf("increaseQuotaData error: %s", err))
-	}
 }
 
 func getQuotaDataGroupedByModel(baseQuery *gorm.DB, defaultTime string) (quotaData []*QuotaData, err error) {
