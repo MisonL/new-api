@@ -717,3 +717,71 @@ func TestStreamResponseClaude2OpenAIHandlesMissingPartialJSON(t *testing.T) {
 
 	require.Nil(t, response)
 }
+
+// An OpenAI-protocol client (Codex and similar) sends tool_calls without any
+// reasoning field. DeepSeek's Anthropic endpoint rejects that history, so the
+// conversion has to materialize the empty thinking block the upstream expects.
+func TestRequestOpenAI2ClaudeMessage_AddsEmptyThinkingForDeepSeekToolCalls(t *testing.T) {
+	message := dto.Message{Role: "assistant"}
+	message.SetToolCalls([]dto.ToolCallRequest{
+		{
+			ID:   "call_bare",
+			Type: "function",
+			Function: dto.FunctionRequest{
+				Name:      "get_weather",
+				Arguments: `{"city":"Hangzhou"}`,
+			},
+		},
+	})
+	request := dto.GeneralOpenAIRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []dto.Message{
+			{Role: "user", Content: "How is the weather?"},
+			message,
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.Len(t, claudeRequest.Messages, 2)
+
+	content, ok := claudeRequest.Messages[1].Content.([]dto.ClaudeMediaMessage)
+	require.True(t, ok)
+	require.Len(t, content, 2)
+	require.Equal(t, "thinking", content[0].Type)
+	require.NotNil(t, content[0].Thinking)
+	require.Empty(t, *content[0].Thinking)
+	require.Equal(t, "tool_use", content[1].Type)
+	require.Equal(t, "call_bare", content[1].Id)
+}
+
+// Non-DeepSeek Anthropic models do not impose the rule.
+func TestRequestOpenAI2ClaudeMessage_DoesNotAddThinkingForOtherModels(t *testing.T) {
+	message := dto.Message{Role: "assistant"}
+	message.SetToolCalls([]dto.ToolCallRequest{
+		{
+			ID:   "call_bare",
+			Type: "function",
+			Function: dto.FunctionRequest{
+				Name:      "get_weather",
+				Arguments: `{"city":"Hangzhou"}`,
+			},
+		},
+	})
+	request := dto.GeneralOpenAIRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []dto.Message{
+			{Role: "user", Content: "How is the weather?"},
+			message,
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.Len(t, claudeRequest.Messages, 2)
+
+	content, ok := claudeRequest.Messages[1].Content.([]dto.ClaudeMediaMessage)
+	require.True(t, ok)
+	require.Len(t, content, 1)
+	require.Equal(t, "tool_use", content[0].Type)
+}

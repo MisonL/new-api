@@ -684,6 +684,14 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 							Type:     "thinking",
 							Thinking: common.GetPointer[string](reasoningContent),
 						})
+					} else if hasNonEmptyToolCalls(message) && service.IsDeepSeekModelName(textRequest.Model) {
+						// OpenAI 协议客户端（Codex 等）的工具循环历史不带 reasoning，
+						// 而 DeepSeek 的 Anthropic 端点要求 tool_use 轮次回传 thinking
+						// 块。补一个空块满足该要求，不伪造任何推理文本。
+						claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+							Type:     "thinking",
+							Thinking: common.GetPointer[string](""),
+						})
 					}
 				}
 				content, err := message.ParseContentStrict()

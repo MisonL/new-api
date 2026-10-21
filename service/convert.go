@@ -275,7 +275,12 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 						appendReasoningText(&reasoningBuilder, *mediaMsg.Thinking)
 						break
 					}
-					if strings.TrimSpace(mediaMsg.Signature) != "" {
+					// DeepSeek 的 Anthropic 兼容端点会在空 thinking 块上带一个
+					// UUID 形态的 signature（display=omitted 的产物），该值不承载
+					// 任何可恢复状态，Claude Code 会原样回传。这里按空块处理，
+					// 否则跨协议轮询在遇到这类历史时会整条请求 400。
+					// 其他模型的 signature 可能是真实的 opaque 状态，维持 fail-closed。
+					if strings.TrimSpace(mediaMsg.Signature) != "" && !hasDeepSeekModelName(claudeRequest.Model, info) {
 						return nil, claudeOpaqueThinkingConversionError(messageIndex, contentIndex, "thinking")
 					}
 					emptyThinkingBlock = true

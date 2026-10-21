@@ -345,7 +345,7 @@ func TestClaudeToOpenAIRequestPreservesThinkingBlockWhitespace(t *testing.T) {
 
 func TestClaudeToOpenAIRequestRejectsOmittedThinkingSignature(t *testing.T) {
 	claudeRequest := dto.ClaudeRequest{
-		Model: "deepseek-v4-flash",
+		Model: "claude-sonnet-4-5-20250929",
 		Messages: []dto.ClaudeMessage{
 			{Role: "user", Content: "Call the tool."},
 			{
@@ -370,7 +370,7 @@ func TestClaudeToOpenAIRequestRejectsOmittedThinkingSignature(t *testing.T) {
 	}
 
 	_, err := ClaudeToOpenAIRequest(claudeRequest, &relaycommon.RelayInfo{
-		OriginModelName: "deepseek-v4-flash",
+		OriginModelName: "claude-sonnet-4-5-20250929",
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType: constant.ChannelTypeOpenAI,
 		},
