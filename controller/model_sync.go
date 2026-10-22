@@ -26,11 +26,20 @@ const (
 	upstreamVendorsURL = "https://basellm.github.io/llm-metadata/api/newapi/vendors.json"
 )
 
+// normalizeLocale 把请求里的 locale 归一化成上游 i18n 路径片段。
+// 返回的是可拼进 URL 的形式（zh-CN 而不是 zh-cn）：上游按大小写敏感的
+// 目录名提供 i18n 数据，转小写只用于比较，不能用于拼接。
 func normalizeLocale(locale string) (string, bool) {
-	l := strings.ToLower(strings.TrimSpace(locale))
-	switch l {
-	case "en", "zh-CN", "zh-TW", "ja":
-		return l, true
+	l := strings.TrimSpace(locale)
+	switch strings.ToLower(l) {
+	case "en":
+		return "en", true
+	case "zh-cn":
+		return "zh-CN", true
+	case "zh-tw":
+		return "zh-TW", true
+	case "ja":
+		return "ja", true
 	default:
 		return "", false
 	}
@@ -50,9 +59,43 @@ func getUpstreamURLs(locale string) (modelsURL, vendorsURL string) {
 }
 
 type upstreamEnvelope[T any] struct {
-	Success bool   `json:"success"`
+	// Success 用指针区分"字段缺失"与"显式 false"：上游用 HTTP 200 加
+	// success:false 表达限流、拒绝等失败，只按状态码判断会把拒绝当作
+	// 空列表继续同步并回报成功。
+	Success *bool  `json:"success"`
 	Message string `json:"message"`
 	Data    []T    `json:"data"`
+}
+
+// normalize 校验 envelope 是否明确可用。字段缺失视为隐式 envelope
+// （兼容不带 success 的静态数据与裸数组）；显式 success:false，或只有
+// message 没有任何数据，都按失败处理。
+func (e *upstreamEnvelope[T]) normalize() error {
+	if e.Success != nil && !*e.Success {
+		if msg := strings.TrimSpace(e.Message); msg != "" {
+			return errors.New("上游返回失败: " + msg)
+		}
+		return errors.New("上游返回 success=false")
+	}
+	if e.Success == nil && strings.TrimSpace(e.Message) != "" && len(e.Data) == 0 {
+		return errors.New("上游返回失败: " + strings.TrimSpace(e.Message))
+	}
+	return nil
+}
+
+// decodeUpstreamEnvelope 解出 envelope，失败时回退到裸数组。
+func decodeUpstreamEnvelope[T any](buf []byte, out *upstreamEnvelope[T]) error {
+	if err := common.Unmarshal(buf, out); err != nil {
+		var arr []T
+		if err2 := common.Unmarshal(buf, &arr); err2 != nil {
+			return err
+		}
+		out.Success = common.GetPointer(true)
+		out.Data = arr
+		out.Message = ""
+		return nil
+	}
+	return out.normalize()
 }
 
 type upstreamModel struct {
@@ -179,21 +222,9 @@ func fetchJSON[T any](ctx context.Context, url string, out *upstreamEnvelope[T])
 				bodyCache[url] = buf
 				cacheMutex.Unlock()
 
-				// Try decode as envelope first
-				if err := common.Unmarshal(buf, out); err != nil {
-					// Try decode as pure array
-					var arr []T
-					if err2 := common.Unmarshal(buf, &arr); err2 != nil {
-						lastErr = err
-						return
-					}
-					out.Success = true
-					out.Data = arr
-					out.Message = ""
-				} else {
-					if !out.Success && len(out.Data) == 0 && out.Message == "" {
-						out.Success = true
-					}
+				if err := decodeUpstreamEnvelope(buf, out); err != nil {
+					lastErr = err
+					return
 				}
 				lastErr = nil
 			case http.StatusNotModified:
@@ -205,19 +236,9 @@ func fetchJSON[T any](ctx context.Context, url string, out *upstreamEnvelope[T])
 					lastErr = errors.New("cache miss for 304 response")
 					return
 				}
-				if err := common.Unmarshal(buf, out); err != nil {
-					var arr []T
-					if err2 := common.Unmarshal(buf, &arr); err2 != nil {
-						lastErr = err
-						return
-					}
-					out.Success = true
-					out.Data = arr
-					out.Message = ""
-				} else {
-					if !out.Success && len(out.Data) == 0 && out.Message == "" {
-						out.Success = true
-					}
+				if err := decodeUpstreamEnvelope(buf, out); err != nil {
+					lastErr = err
+					return
 				}
 				lastErr = nil
 			default:
