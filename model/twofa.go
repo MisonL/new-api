@@ -181,13 +181,23 @@ func ValidateBackupCode(userId int, code string) (bool, error) {
 	// 验证备用码
 	for _, bc := range backupCodes {
 		if common.ValidatePasswordAndHash(normalizedCode, bc.CodeHash) {
-			// 标记为已使用
+			// 标记为已使用必须带条件写：备用码是单次凭证，而上面的查询与
+			// 这里的更新之间存在窗口，并发提交同一个备用码时，多个请求都能
+			// 通过校验并各自登录成功。条件写让只有一个请求真正消费到它。
+			// 这与 TOTP 路径用 last_used_step 条件写解决同一竞态的做法一致。
 			now := time.Now()
-			bc.IsUsed = true
-			bc.UsedAt = &now
-
-			if err := DB.Save(&bc).Error; err != nil {
-				return false, err
+			result := DB.Model(&TwoFABackupCode{}).
+				Where("id = ? AND is_used = ?", bc.Id, false).
+				Updates(map[string]interface{}{
+					"is_used": true,
+					"used_at": &now,
+				})
+			if result.Error != nil {
+				return false, result.Error
+			}
+			if result.RowsAffected == 0 {
+				// 另一个并发请求已经消费了这个备用码。
+				return false, nil
 			}
 
 			return true, nil

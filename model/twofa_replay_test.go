@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -107,4 +108,45 @@ func TestValidateTOTPAndUpdateUsageConcurrentSameCodeAllowsOne(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, succeeded, "exactly one concurrent submission of the same code may succeed")
+}
+
+// 备用码同样是单次凭证。ValidateBackupCode 先查 is_used=false 再标记已用，
+// 两步之间没有原子性：并发提交同一个备用码时，多个请求可以同时通过校验
+// 并各自登录成功。TOTP 路径已经用条件写 + RowsAffected 判定解决了同样的
+// 竞态，备用码路径必须对齐。
+func TestValidateBackupCodeConcurrentSameCodeAllowsOne(t *testing.T) {
+	require.NoError(t, DB.AutoMigrate(&TwoFA{}, &TwoFABackupCode{}))
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM two_fa_backup_codes")
+		DB.Exec("DELETE FROM two_fas")
+	})
+
+	const userId = 601
+	require.NoError(t, DB.Create(&TwoFA{UserId: userId, IsEnabled: true}).Error)
+
+	codes, err := common.GenerateBackupCodes()
+	require.NoError(t, err)
+	require.NoError(t, CreateBackupCodes(userId, codes[:1]))
+
+	const workers = 8
+	results := make(chan bool, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ok, _ := ValidateBackupCode(userId, codes[0])
+			results <- ok
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	succeeded := 0
+	for ok := range results {
+		if ok {
+			succeeded++
+		}
+	}
+	require.Equal(t, 1, succeeded, "exactly one concurrent submission of the same backup code may succeed")
 }
