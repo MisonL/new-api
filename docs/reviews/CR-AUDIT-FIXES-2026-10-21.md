@@ -362,3 +362,171 @@ NEW_API_POSTGRES_TEST_DSN=<newapi_test_pg2> go test ./model -run 'Postgres|Postg
 三项门控均退出码 0。`TestChannelHealthConcurrentHalfOpenSelectionHasSingleProbe`
 在包级并发跑时出现过一次失败，单独重跑 3 次通过、`./service` 单包通过；
 未定位到根因，不归因于本轮改动。
+
+## 第四轮：测试隔离与并发凭证
+
+### 已修复
+
+| 提交 | 内容 |
+|---|---|
+| `28077bc8b` | 消除 `model` 包的跨测试污染（详见下节） |
+| `61db9879c` | 备用码并发消费竞态 |
+
+### 测试隔离：一条悬案的根因
+
+前几轮反复出现"`go test ./model` 偶发 `FAIL` 但没有 `--- FAIL:` 行"的现象。
+定位结果：这不是 flake，而是**跨测试污染**，且 `-count=1` 时污染发生在全部
+测试跑完之后，所以标准跑法看不见。
+
+两个独立污染源：
+
+- `model/user_update_billing_scope_test.go` 用 `previousDB` 换过 `DB` 但没
+  注册 `t.Cleanup`，后续测试继续用被替换过的库句柄。
+- `model/log_stat_test.go` 的三个用例只在测试**开头** `DELETE FROM logs`，
+  不在结尾清理。第三个用例的日志被后续测试读到。
+- `model/tag_request_header_policy_test.go` 的 `openTestDB` 用固定 DSN，
+  `-count=N` 时同名共享内存库跨轮次复用。
+
+修法：`openTestDB` 的 DSN 加单调序号；`truncateTables` 改为开始与结束各清
+一次；两个漏 cleanup 的测试补上。
+
+证据：修复前 `go test ./model -count=2` 有 137 个 `--- FAIL`；修复后
+`-count=3`、`-count=2 -shuffle=on` 与 5 个随机 shuffle 全部退出码 0。
+
+一次失败尝试记录在此以免重蹈：曾在 `openTestDB` 里加
+`t.Cleanup(func(){ sqlDB.Close() })`，导致 153 个 `sql: database is closed`。
+原因是 TestMain 的 `:memory:` 库被替换后连接池被关掉。唯一序号方案不触碰
+连接生命周期。
+
+### 备用码并发消费
+
+`ValidateBackupCode` 先 `WHERE user_id = ? AND is_used = false` 查出候选、
+逐条校验哈希、再 `Save` 标记已用。查询与更新之间没有原子性，并发提交同一
+个备用码时每个请求都能通过校验。
+
+实测：8 个并发提交同一备用码，改前 `succeeded = 8`，期望 1。
+
+改为条件写 `WHERE id = ? AND is_used = false` + `Updates`，以
+`RowsAffected == 0` 判定"已被别的请求消费"，返回 `false, nil`（与其他
+失败路径一致，计一次失败尝试）。调用方只有
+`model/twofa.go:291`（`ValidateBackupCodeAndUpdateUsage`），影响面就是
+同一备用码的并发提交。这与 TOTP 路径已确立的 `last_used_step` 条件写
+契约对齐。
+
+测试 `TestValidateBackupCodeConcurrentSameCodeAllowsOne` 并入
+`model/twofa_replay_test.go`，与 TOTP 的同名并发测试放在一起。
+
+### 第四轮验证记录
+
+```bash
+go build ./...                                  # 退出码 0
+go test ./... -count=1                          # 退出码 0
+go test ./model -count=2 -shuffle=on            # 退出码 0
+go test ./model -run 'TestValidateBackupCode|TestValidateTOTP' -count=3
+```
+
+
+## 第五轮：controller 剩余文件的穷尽扫描
+
+第四轮之后按 AGENTS.md §9 的索引继续扫 `controller/` 中尚未逐行读过的九个
+文件：`channel-test.go`、`channel_upstream_update.go`、`ratio_sync.go`、
+`model_sync.go`、`custom_oauth.go`、`passkey.go`、`deployment.go`、
+`video_proxy.go`、`twofa.go`（另有 `channel-billing.go` 作为 `GetResponseBody`
+的被调方一并核查）。
+
+### 已修复
+
+| 提交 | 内容 | 级别 |
+|---|---|---|
+| `56718a365` | 视频代理重试时保留 SSRF 校验标记 | P0 |
+| `a80d06c84` | 2FA 失败计数与状态更新改增量写，消除快照回滚 | P1 |
+| `c61953908` | Passkey 注册对已有凭证要求 step-up | P1 |
+| `43c250eef` | 渠道测试错误响应脱敏；巡检不再因缺 context 中断 | P1 / P2 |
+| `c914a8657` | 自定义 OAuth slug 冲突检查改用归一化值 | P2 |
+| `372f2339e` | 模型同步的 locale 回退与上游拒绝的伪成功 | P2 |
+| `3fbd397e7` | 同步创建的模型保留官方同步资格；覆盖失败不再静默 | P2 |
+| `605b4ba6c` | 倍率同步过滤 NaN/Inf 与负值，避免响应变空体 | P2 |
+| `4ebfd3338` | 上游模型同步加 30s 超时，避免巡检永久卡死 | P2 |
+| `c93544082` | 编辑自定义 OAuth 提供商不再清空未改动的 client_secret | P2 |
+
+### 各条的判据与反向验证
+
+`video_proxy.go`：`doVideoProxyRequest` 的每次尝试用调用方请求上下文派生
+`attemptContext`，再 `req.Clone(attemptContext)`。Clone 只复制请求头与 body，
+不复制 context，于是调用方打的 `common.WithSSRFValidation` 标记被整体替换，
+共享 transport 的第一道门（`service/http_client.go:119`）随之失效。三条测试：
+标记保留、未标记请求不被误加标记、真实 transport 下回环监听端零命中。去掉
+修复后第三条以 "loopback listener must never be reached" 失败。
+
+`twofa.go`：失败路径与备用码成功路径都用 `DB.Save(t)` 整行写回，`t` 是调用方
+早先加载的快照。gorm 的 Save 写所有字段含零值，因此并发时会把别人刚推进的
+`last_used_step` 覆盖回旧值（已消费的 TOTP 码重新可用），把刚触发的
+`locked_until` 抹成 nil（锁定被解除），并让多个并发失败请求互相覆盖计数
+（探针实测 8 次并发只记到 3 次，永远到不了 `MaxFailAttempts`）。四条测试先红
+后绿，原实现下得到 `last_used_step=0`（期望 1000）、`locked_until=nil`、
+并发计数 3（期望 8）。
+
+`passkey.go`：`UpsertPasskeyCredential` 先按 user_id 硬删再插入，即"注册"等于
+"替换"。删除路径在未开 2FA 时要求 passkey step-up，注册路径却直接放行，
+使会话失陷可升级为长期免密登录（改密码也无效）。门禁对齐删除路径，只有
+首次绑定才直接放行。四条测试覆盖首次绑定、替换被拒、step-up 后放行、开了
+2FA 时拒绝；原实现下"替换被拒"一条失败。
+
+`channel-test.go`：本地错误 `result.localErr.Error()` 裸回显，而该错误可能来自
+URL 解析失败，Go 的错误文本原样嵌入完整 URL（已用探针确认
+`http.NewRequest` 的错误含 `?key=AIzaSECRETKEY...`），Vertex 的 api_key 模式与
+Baidu 的 access_token 都把密钥放在 URL 里，因此普通管理员可借测试接口读出
+root 管理的渠道密钥。同级分支用 `newAPIError.Error()`（内部已脱敏）。另一处：
+启用/禁用分支解引用可能为 nil 的 `result.context`（早退路径不填），nil
+`*gin.Context` 解引用会 panic 并中断整个巡检循环（gin 1.9.1 的 `Context.Get`
+在 nil 接收者上取 RLock，已用探针确认）。
+
+`ratio_sync.go`：`strconv.ParseFloat` 对 `"NaN"`/`"Infinity"` 返回 nil error，
+而 NaN 与任何值比较都是 false，能绕过"负值跳过"与"prompt<=0 跳过"两道过滤；
+NaN 进入候选倍率后 `json.Marshal` 报错，gin 已发过状态头，整个 `/fetch` 响应
+只剩空体，所有渠道结果一起丢失。type1 原始 map 与 type2 的数字同样无校验。
+三处统一用 models.dev 分支已有的 `isValidNonNegativeCost`。
+
+`model_sync.go`：`strings.ToLower` 后再与含大写的常量 `zh-CN`/`zh-TW` 比较，
+中文 locale 静默回退英文；envelope 的 `Success` 从不被读取，上游 HTTP 200 +
+`success:false` 被当作空列表继续同步并回报成功；`Model.Insert` 会把零值写回，
+同步创建的模型落成 `sync_official=0`，而 0 的语义是"不参与官方同步"，之后永久
+不再被更新；覆盖事务错误被 `_ =` 丢弃且计数在提交前自增。
+
+`channel_upstream_update.go`：`GetResponseBody` 用共享客户端，在
+`RELAY_TIMEOUT=0`（默认）时无 Timeout，transport 也无 ResponseHeaderTimeout；
+后台巡检用 `CompareAndSwap` 做互斥，卡住后所有周期被跳过。抽出
+`GetResponseBodyWithTimeout`（其余 12 个余额查询调用点不受影响），模型拉取
+用 30s。测试用只接受连接不写字节的本地监听端验证。
+
+`custom_oauth.go`：slug 冲突检查用未归一化输入，而落库与 registry 键都是
+小写，`"GitHub"` 这类变体可覆盖内置 provider，删除时还会把内置项一并从注册表
+删掉。前端表单把服务端不回显的 `client_secret` 以空串回填并原样提交，
+编辑任意字段都会清空已配置的 secret。
+
+### 判定为正确、不修的条目
+
+- `deployment.go` 只操作 io.net 远程 API，无本地文件读写、无 `os/exec`；
+  `container_id` 未做 `url.PathEscape` 可改写上游路径与查询参数，但接口在
+  `AdminAuth()` 下且用的是同一把服务端密钥，属管理员自伤，风险低于修复引入
+  的兼容成本，记录不修。
+- `custom_oauth.go` 的 `AutoMergeByEmail` 依赖 IdP 是否真的验证邮箱，代码侧
+  从不读 `email_verified`。这是信任模型选择（默认关闭），不是无条件缺陷。
+- `rate-limit.go` 的 `CriticalRateLimit` 对 2FA 登录是 20 次/20 分钟按 IP，
+  只能减缓暴力破解；并发计数修复后 `MaxFailAttempts` 才真正生效。
+- 渠道 base_url 被当作管理员可信配置，渠道测试与上游同步都不 opt-in SSRF
+  校验；不存在非管理员写入 base_url 的路径，因此不构成越权 SSRF 绕过。
+- 兑换码 `Redeem` 用 `forUpdate` 行锁（SQLite 上退化为普通查询，但 SQLite 的
+  写事务本身串行）；8 并发探针实测 `success=1, finalQuota=500`，3 轮一致。
+
+### 第五轮验证记录
+
+```bash
+go build ./...                                  # 退出码 0
+go test ./... -count=1                          # 退出码 0，66 个包 ok
+go test ./model -count=2 -shuffle=on            # 退出码 0
+go test ./controller -count=1                   # 退出码 0
+NEW_API_TEST_MYSQL_DSN=<newapi_test_k>   go test ./model -run 'MySQL' -count=1
+NEW_API_POSTGRES_TEST_DSN=<newapi_test_pg3> go test ./model -run 'Postgres|PostgreSQL' -count=1
+cd web/default && bun run lint                  # 退出码 0
+```
