@@ -144,3 +144,46 @@ func TestApiErrorMessageHidesMySQLDriverErrors(t *testing.T) {
 	require.Contains(t, err.Error(), "Duplicate entry", "precondition: MySQL must report a duplicate-key error")
 	require.Equal(t, "服务暂时不可用，请稍后重试", common.ApiErrorMessage(err))
 }
+
+// 备用码的并发消费同样依赖 UPDATE ... WHERE is_used = false 的 RowsAffected
+// 判定归属。MySQL 默认返回"实际改变"的行数而不是匹配行数，必须在真实
+// MySQL 上确认条件写语义：同一备用码被并发提交时只有一个请求消费成功，
+// 且落库后确为已用。
+func TestValidateBackupCodeConcurrentSameCodeOnMySQL(t *testing.T) {
+	db := openTwoFAMySQLDB(t)
+	require.NoError(t, db.AutoMigrate(&TwoFABackupCode{}))
+	t.Cleanup(func() {
+		_ = db.Exec("DELETE FROM two_fa_backup_codes").Error
+	})
+
+	const userId = 701
+	codes, err := common.GenerateBackupCodes()
+	require.NoError(t, err)
+	require.NoError(t, CreateBackupCodes(userId, codes[:1]))
+
+	const workers = 8
+	results := make(chan bool, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			ok, _ := ValidateBackupCode(userId, codes[0])
+			results <- ok
+		}()
+	}
+	succeeded := 0
+	for i := 0; i < workers; i++ {
+		if <-results {
+			succeeded++
+		}
+	}
+	require.Equal(t, 1, succeeded,
+		"MySQL changed-rows semantics must not let two requests consume the same backup code")
+
+	var stored TwoFABackupCode
+	require.NoError(t, db.Where("user_id = ?", userId).First(&stored).Error)
+	require.True(t, stored.IsUsed)
+	require.NotNil(t, stored.UsedAt)
+
+	ok, err := ValidateBackupCode(userId, codes[0])
+	require.NoError(t, err)
+	require.False(t, ok, "a consumed backup code must reject sequential replay too")
+}
