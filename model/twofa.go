@@ -108,22 +108,44 @@ func (t *TwoFA) Delete() error {
 
 // ResetFailedAttempts 重置失败尝试次数
 func (t *TwoFA) ResetFailedAttempts() error {
+	// 只写这两个字段：整行 Save 会把调用方加载时的快照整体写回，
+	// 包括并发的成功路径刚推进的 last_used_step。
+	result := DB.Model(&TwoFA{}).Where("id = ?", t.Id).
+		Updates(map[string]interface{}{"failed_attempts": 0, "locked_until": nil})
+	if result.Error != nil {
+		return result.Error
+	}
 	t.FailedAttempts = 0
 	t.LockedUntil = nil
-	return t.Update()
+	return nil
 }
 
 // IncrementFailedAttempts 增加失败尝试次数
 func (t *TwoFA) IncrementFailedAttempts() error {
-	t.FailedAttempts++
-
-	// 检查是否需要锁定
-	if t.FailedAttempts >= common.MaxFailAttempts {
-		lockUntil := time.Now().Add(time.Duration(common.LockoutDuration) * time.Second)
-		t.LockedUntil = &lockUntil
+	// 失败计数必须是增量写：t 是调用方早先加载的快照，用 Save 落库会把
+	// last_used_step 写回旧值（重放保护失效），也会把并发刚触发的
+	// locked_until 抹成 nil（锁定被解除）。两个探针都能稳定复现这两点。
+	lockUntil := time.Now().Add(time.Duration(common.LockoutDuration) * time.Second)
+	if err := DB.Model(&TwoFA{}).Where("id = ?", t.Id).
+		Updates(map[string]interface{}{"failed_attempts": gorm.Expr("failed_attempts + 1")}).Error; err != nil {
+		return err
+	}
+	// 锁定判定用写后的真实值，不用本地快照的算术结果：并发失败请求各自
+	// 只知道自己那一次，靠 SQL 里的比较才能让第 N 次真正触发锁定。
+	if err := DB.Model(&TwoFA{}).
+		Where("id = ? AND failed_attempts >= ?", t.Id, common.MaxFailAttempts).
+		Where("locked_until IS NULL OR locked_until < ?", time.Now()).
+		Updates(map[string]interface{}{"locked_until": lockUntil}).Error; err != nil {
+		return err
 	}
 
-	return t.Update()
+	var stored TwoFA
+	if err := DB.Select("failed_attempts", "locked_until").Where("id = ?", t.Id).First(&stored).Error; err != nil {
+		return err
+	}
+	t.FailedAttempts = stored.FailedAttempts
+	t.LockedUntil = stored.LockedUntil
+	return nil
 }
 
 // IsLocked 检查账户是否被锁定
@@ -230,10 +252,30 @@ func DisableTwoFA(userId int) error {
 
 // EnableTwoFA 启用2FA
 func (t *TwoFA) Enable() error {
+	// 启用时会消费调用方算出的时间步进（controller 把 LastUsedStep 设为
+	// 本次启用的步进）。步进必须条件写：并发请求可能已经把步进推到更后面，
+	// 整行 Save 会把它写回旧值，重放保护随之失效。
+	if t.LastUsedStep > 0 {
+		result := DB.Model(&TwoFA{}).
+			Where("id = ? AND (last_used_step IS NULL OR last_used_step < ?)", t.Id, t.LastUsedStep).
+			Updates(map[string]interface{}{"last_used_step": t.LastUsedStep})
+		if result.Error != nil {
+			return result.Error
+		}
+	}
+	result := DB.Model(&TwoFA{}).Where("id = ?", t.Id).
+		Updates(map[string]interface{}{
+			"is_enabled":      true,
+			"failed_attempts": 0,
+			"locked_until":    nil,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
 	t.IsEnabled = true
 	t.FailedAttempts = 0
 	t.LockedUntil = nil
-	return t.Update()
+	return nil
 }
 
 // ValidateTOTPAndUpdateUsage 验证TOTP并更新使用记录
@@ -301,15 +343,24 @@ func (t *TwoFA) ValidateBackupCodeAndUpdateUsage(code string) (bool, error) {
 		return false, nil
 	}
 
-	// 验证成功，重置失败次数并更新最后使用时间
+	// 验证成功，重置失败次数并更新最后使用时间。这里同样不能整行 Save：
+	// 备用码路径与 TOTP 路径会交错执行，整行写回会把 TOTP 路径刚推进的
+	// last_used_step 覆盖成 t 里的旧值，重放保护随之失效。
 	now := time.Now()
+	result := DB.Model(&TwoFA{}).Where("id = ?", t.Id).
+		Updates(map[string]interface{}{
+			"failed_attempts": 0,
+			"locked_until":    nil,
+			"last_used_at":    &now,
+		})
+	if result.Error != nil {
+		common.SysLog("更新2FA使用记录失败: " + result.Error.Error())
+		return true, nil
+	}
+
 	t.FailedAttempts = 0
 	t.LockedUntil = nil
 	t.LastUsedAt = &now
-
-	if err := t.Update(); err != nil {
-		common.SysLog("更新2FA使用记录失败: " + err.Error())
-	}
 
 	return true, nil
 }
