@@ -558,16 +558,34 @@ func getSessionUser(c *gin.Context) (*model.User, error) {
 	return user, nil
 }
 
+// requirePasskeyRegistrationVerification 决定一次 Passkey 注册是否放行。
+//
+// UpsertPasskeyCredential 是"替换"而不是"追加"：它先按 user_id 硬删再插入。
+// 因此对已有凭证的账户，注册等同于换绑第二因子——与删除 Passkey 同级，必须
+// 先通过 step-up。只有首次绑定（尚无凭证）才允许直接注册：此时没有可被
+// 替换的凭证，浏览器侧的 Passkey 提示本身就是到场证明。
 func requirePasskeyRegistrationVerification(c *gin.Context, userID int) bool {
 	twoFA, err := model.GetTwoFAByUserId(userID)
 	if err != nil {
 		common.ApiError(c, err)
 		return false
 	}
-	if twoFA == nil || !twoFA.IsEnabled {
-		return true
+	if twoFA != nil && twoFA.IsEnabled {
+		return requireSecureVerificationMethod(c, secureVerificationMethod2FA)
 	}
-	return requireSecureVerificationMethod(c, secureVerificationMethod2FA)
+
+	_, err = model.GetPasskeyByUserID(userID)
+	if err != nil {
+		if errors.Is(err, model.ErrPasskeyNotFound) {
+			// 首次绑定。
+			return true
+		}
+		common.ApiError(c, err)
+		return false
+	}
+
+	// 已有 Passkey 且未开 2FA：只能用现有 Passkey 完成 step-up。
+	return requireSecureVerificationMethod(c, secureVerificationMethodPasskey)
 }
 
 func requirePasskeyDeleteVerification(c *gin.Context, userID int) bool {
