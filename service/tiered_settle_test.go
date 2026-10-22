@@ -66,7 +66,7 @@ func TestBuildTieredTokenParamsFromRealtime_NormalizesSubcategories(t *testing.T
 			ImageTokens:  0,
 		},
 		OutputTokenDetails: dto.OutputTokenDetails{
-			TextTokens: 10,
+			TextTokens:  10,
 			AudioTokens: 40,
 			ImageTokens: 0,
 		},
