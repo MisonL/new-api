@@ -175,6 +175,13 @@ func doVideoProxyRequest(ctx context.Context, client *http.Client, req *http.Req
 			return nil, err
 		}
 		attemptContext, cancelAttempt := context.WithCancel(ctx)
+		// req 携带的 SSRF 标记必须跟着每次尝试的上下文一起走：这里的
+		// attemptContext 派生于调用方的请求上下文（不带标记），而 Clone 只
+		// 复制请求头与 body，不复制 context。标记一旦丢失，共享 transport 的
+		// 第一道门就会放行整个回环与内网地址。
+		if common.RequiresSSRFValidation(req.Context()) {
+			attemptContext = common.WithSSRFValidation(attemptContext)
+		}
 		timedOut := atomic.Bool{}
 		timeoutTimer := time.AfterFunc(videoProxyResponseHeaderTimeout, func() {
 			timedOut.Store(true)
