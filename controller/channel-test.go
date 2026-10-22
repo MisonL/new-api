@@ -47,6 +47,16 @@ type testResult struct {
 	runtimeConfig *channelTestRuntimeSummary
 }
 
+// channelKeyFromTestResult 安全读取测试上下文里的渠道密钥。
+// 部分早退分支（不支持的渠道类型、用户缓存读取失败）不会创建 context，
+// 直接解引用会 panic 并中断整个巡检循环，后续渠道再也不会被测试。
+func channelKeyFromTestResult(result testResult) string {
+	if result.context == nil {
+		return ""
+	}
+	return common.GetContextKeyString(result.context, constant.ContextKeyChannelKey)
+}
+
 const responsesCompactChannelTestCapabilityError = "OpenAI Responses Compact is disabled on this channel."
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
@@ -1321,8 +1331,12 @@ func TestChannel(c *gin.Context) {
 			result.runtimeConfig.ErrorDiagnosis = diagnosis
 		}
 		resp := gin.H{
-			"success":        false,
-			"message":        result.localErr.Error(),
+			"success": false,
+			// localErr 可能来自 URL 解析或构造请求失败，Go 的错误文本会原样
+			// 嵌入完整 URL；Vertex 的 api_key 模式与 Baidu 的 access_token
+			// 都把密钥放在 URL 里，因此这里必须脱敏。同级分支用
+			// newAPIError.Error()（内部已脱敏），只有这一处是裸回显。
+			"message":        common.MaskSensitiveInfo(result.localErr.Error()),
 			"time":           0.0,
 			"runtime_config": result.runtimeConfig,
 		}
@@ -1422,12 +1436,12 @@ func testAllChannels(notify bool) error {
 
 			// disable channel
 			if isChannelEnabled && shouldBanChannel && channel.GetAutoBan() {
-				processChannelError(result.context, result.relayInfo, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+				processChannelError(result.context, result.relayInfo, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, channelKeyFromTestResult(result), channel.GetAutoBan()), newAPIError)
 			}
 
 			// enable channel
 			if !isChannelEnabled && service.ShouldEnableChannel(newAPIError, channel.Status) {
-				service.EnableChannel(channel.Id, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.Name)
+				service.EnableChannel(channel.Id, channelKeyFromTestResult(result), channel.Name)
 			}
 
 			channel.UpdateResponseTime(milliseconds)
