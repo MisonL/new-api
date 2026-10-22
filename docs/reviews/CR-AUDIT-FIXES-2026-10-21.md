@@ -519,6 +519,21 @@ NaN 进入候选倍率后 `json.Marshal` 报错，gin 已发过状态头，整�
 - 兑换码 `Redeem` 用 `forUpdate` 行锁（SQLite 上退化为普通查询，但 SQLite 的
   写事务本身串行）；8 并发探针实测 `success=1, finalQuota=500`，3 轮一致。
 
+### 记录但暂未修的条目（附理由）
+
+- `ratio_sync.go` 的 `body.Success` 是 `bool`（非指针），上游返回不带
+  `success` 字段的裸静态数据时被零值判成 false，该渠道以空错误串进结果、
+  最终显示 success 但什么都没同步；同时 `success:false` 且 message 为空时
+  错误串也是空，收集侧按 `r.Err != ""` 判成功。这条伪成功通道与 model_sync
+  的同类缺陷同源。修复需要同时决定"不带 success 字段的载荷算不算合法
+  type1"，且真实上游（本仓库自身的 /api/ratio_config）始终带该字段，默认
+  行为无观测损害，故先记录不改，避免在没有上游样本的情况下猜语义。
+- 差异表"应用"由前端逐条 `PUT /api/option`（最多 10 个 key），服务端每个
+  key 独立落库、无跨 key 事务。中途失败会留下新旧混合的倍率状态，需人工
+  比对修复。原子应用需要后端新增批量端点，属功能设计，不在缺陷修复范围。
+- `adminCanActOnSubscriptionOwner`、`FetchCustomOAuthDiscovery`（RootAuth
+  下可请求任意 http/https）等"特权角色自伤"面，判定为可接受的信任边界。
+
 ### 第五轮验证记录
 
 ```bash
