@@ -69,3 +69,50 @@ func TestClaudeToOpenAIRequestForwardsToolChoice(t *testing.T) {
 		require.Nil(t, converted.ToolChoice)
 	})
 }
+
+// Claude 的 {"type":"any"} 表示"必须调用某个工具"，OpenAI 的等价物是
+// "required"。"any" 不在 OpenAI tool_choice 的封闭枚举里，原样透传要么被
+// 上游拒绝（400），要么被当作未知值退化成 auto——两种结果都让"强制工具"
+// 的语义丢失。本仓库的反向映射（relay/channel/claude 的 mapToolChoice）
+// 已经把 OpenAI 的 "required" 映射成 Claude 的 "any"，这一对是既定契约。
+func TestClaudeToOpenAIRequestMapsAnyToolChoiceToRequired(t *testing.T) {
+	base := dto.ClaudeRequest{
+		Model:     "claude-test",
+		MaxTokens: func() *uint { v := uint(256); return &v }(),
+		Tools: []any{map[string]any{
+			"name":         "get_weather",
+			"description":  "Get weather by city",
+			"input_schema": map[string]any{"type": "object"},
+		}},
+	}
+
+	req := base
+	req.ToolChoice = map[string]any{"type": "any"}
+	converted, err := ClaudeToOpenAIRequest(req, newClaudeToolChoiceRelayInfo())
+	require.NoError(t, err)
+	require.Equal(t, "required", converted.ToolChoice,
+		"Claude 的 any 必须映射成 OpenAI 的 required")
+}
+
+// Claude 的 disable_parallel_tool_use 表示"不允许并行调用多个工具"，OpenAI
+// 的等价物是 parallel_tool_calls=false。丢弃它会让上游按可并行执行，
+// 与客户端的明确要求相反。
+func TestClaudeToOpenAIRequestMapsDisableParallelToolUse(t *testing.T) {
+	base := dto.ClaudeRequest{
+		Model:     "claude-test",
+		MaxTokens: func() *uint { v := uint(256); return &v }(),
+		Tools: []any{map[string]any{
+			"name":         "get_weather",
+			"description":  "Get weather by city",
+			"input_schema": map[string]any{"type": "object"},
+		}},
+	}
+
+	req := base
+	req.ToolChoice = map[string]any{"type": "any", "disable_parallel_tool_use": true}
+	converted, err := ClaudeToOpenAIRequest(req, newClaudeToolChoiceRelayInfo())
+	require.NoError(t, err)
+	require.NotNil(t, converted.ParallelTooCalls, "parallel_tool_calls 不得被丢弃")
+	require.False(t, *converted.ParallelTooCalls,
+		"disable_parallel_tool_use 必须映射成 parallel_tool_calls=false")
+}

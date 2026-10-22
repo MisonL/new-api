@@ -104,12 +104,18 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	openAIRequest.Tools = openAITools
 
 	// tool_choice 与 tools 是一对：只转发 tools 会把客户端的强制/禁用选择
-	// 悄悄改成上游默认 auto。三种 Claude 形态映射到 OpenAI 等价物：
-	// {"type":"auto"/"any"} 是字面值；{"type":"tool","name":N} 变
-	// {"type":"function","function":{"name":N}}；{"type":"none"} 也是字面值。
+	// 悄悄改成上游默认 auto。各 Claude 形态映射到 OpenAI 等价物：
+	// {"type":"auto"} / {"type":"none"} 是字面值；{"type":"any"} 表示"必须
+	// 调用工具"，对应 OpenAI 的 "required"（"any" 不在 OpenAI 的封闭枚举里，
+	// 原样透传会被拒绝或退化成 auto）；{"type":"tool","name":N} 变
+	// {"type":"function","function":{"name":N}}。
+	// disable_parallel_tool_use=true 对应 parallel_tool_calls=false。
 	if claudeRequest.ToolChoice != nil {
 		switch choice := claudeRequest.ToolChoice.(type) {
 		case map[string]any:
+			if disableParallel, _ := choice["disable_parallel_tool_use"].(bool); disableParallel {
+				openAIRequest.ParallelTooCalls = common.GetPointer(false)
+			}
 			switch choiceType, _ := choice["type"].(string); choiceType {
 			case "tool":
 				name, _ := choice["name"].(string)
@@ -120,7 +126,9 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					"type":     "function",
 					"function": map[string]any{"name": name},
 				}
-			case "auto", "any", "none":
+			case "any":
+				openAIRequest.ToolChoice = "required"
+			case "auto", "none":
 				openAIRequest.ToolChoice = choiceType
 			default:
 				return nil, fmt.Errorf("unsupported tool_choice type %q", choiceType)
