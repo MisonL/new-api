@@ -31,6 +31,11 @@ const (
 	channelUpstreamModelUpdateNotifyMaxChannelDetails     = 8
 	channelUpstreamModelUpdateNotifyMaxModelDetails       = 12
 	channelUpstreamModelUpdateNotifyMaxFailedChannelIDs   = 10
+	// 单次上游模型拉取的超时。共享客户端在 RELAY_TIMEOUT=0（默认）时没有
+	// Timeout，transport 也没有 ResponseHeaderTimeout；上游接受连接后不发
+	// 响应头会让请求一直挂住。后台巡检用运行标志做 CompareAndSwap，一旦
+	// 卡住就再也不会被调度，单个挂起的上游即可让全局巡检停摆。
+	channelUpstreamModelFetchTimeout = 30 * time.Second
 )
 
 var channelUpstreamModelUpdateSelectFields = []string{
@@ -341,7 +346,7 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		return nil, err
 	}
 
-	body, err := GetResponseBody(http.MethodGet, url, channel, headers)
+	body, err := GetResponseBodyWithTimeout(http.MethodGet, url, channel, headers, channelUpstreamModelFetchTimeout)
 	if err != nil {
 		return nil, err
 	}

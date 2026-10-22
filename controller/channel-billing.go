@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -159,9 +160,23 @@ func GetClaudeAuthHeader(token string) http.Header {
 const maxUpstreamJSONResponseBodyBytes int64 = 10 << 20
 
 func GetResponseBody(method, url string, channel *model.Channel, headers http.Header) ([]byte, error) {
+	return GetResponseBodyWithTimeout(method, url, channel, headers, 0)
+}
+
+// GetResponseBodyWithTimeout 与 GetResponseBody 相同，但为单次请求设置上限。
+// 默认共享客户端在 RELAY_TIMEOUT=0（默认值）时没有 Timeout，transport 也未设
+// ResponseHeaderTimeout：上游接受连接后不发响应头，请求会一直挂住。后台巡检
+// 用运行标志做 CompareAndSwap，一旦卡住就再也不会被调度，单个挂起的上游即可
+// 让全局模型巡检停摆。timeout<=0 表示沿用旧行为。
+func GetResponseBodyWithTimeout(method, url string, channel *model.Channel, headers http.Header, timeout time.Duration) ([]byte, error) {
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(req.Context(), timeout)
+		defer cancel()
+		req = req.WithContext(ctx)
 	}
 	service.ApplyRuntimeRequestHeaders(req, headers)
 	client, err := service.NewProxyHttpClient(channel.GetSetting().Proxy)
