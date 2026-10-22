@@ -130,9 +130,18 @@ export function ProviderFormDialog(props: ProviderFormDialogProps) {
 
   const onSubmit = async (values: CustomOAuthFormValues) => {
     if (isEditing && props.provider) {
+      // 服务端不回显 client_secret（响应体里没有该字段），表单因此以空串
+      // 回填。若原样提交，服务端会把空串当作"显式清空"，管理员只改别的
+      // 字段也会把已配置的 secret 抹掉，之后 token 交换全部失败。
+      // 编辑时留空即"不修改"，不提交该字段；要清空需显式提供新值。
+      const { client_secret: clientSecret, ...rest } = values
+      const data =
+        clientSecret === '' || clientSecret === undefined
+          ? rest
+          : { ...rest, client_secret: clientSecret }
       const res = await updateProvider.mutateAsync({
         id: props.provider.id,
-        data: values,
+        data,
       })
       if (res.success) {
         props.onOpenChange(false)
