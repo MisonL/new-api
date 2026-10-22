@@ -286,3 +286,79 @@ cd web/classic && bun test && bun run build                    # 218 通过，�
 - CI 新增两步只在本地跑通，未等一次真实 PR 运行（无法在本机构造 GitHub Actions）。
 - `repo-gates` 的 classic 单测用 `bun test` 直接调用；若将来 classic 的
   `bun test` 需要额外环境变量，CI 会暴露出来，本地绿色不代表 CI 绿色。
+
+## 第三轮：controller 与 openaicompat 穷尽扫描
+
+第二轮结束后继续查 `controller/`（96 文件）与 `service/openaicompat/`
+（协议转换最密的一层）。这一轮的判断标准是"仓库内可自证的契约"，不再
+等上游实测。
+
+### 已修复
+
+| 提交 | 内容 |
+|---|---|
+| `e549557f0` | Claude `tool_choice:{"type":"any"}` 映射为 OpenAI `required`；`disable_parallel_tool_use` 映射为 `parallel_tool_calls:false` |
+| `5ed329ebf` | 补齐 `service/tiered_settle_test.go` 的 gofmt 对齐 |
+
+`any` → `required` 这条第二轮列为"待上游实测，不改"，本轮改变结论的依据是
+仓库内证据而非猜测：`relay/channel/claude/relay-claude.go:1433` 的
+`mapToolChoice` 已经把 OpenAI 的 `required` 映射成 Claude 的 `any`，正向
+映射应与反向一致；而 `any` 不在 OpenAI `tool_choice` 的封闭枚举中，原样
+透传的两种可能落点（400 或退化成 auto）都丢失"必须调用工具"的语义。
+`disable_parallel_tool_use` 原本在 auto/any/tool 三个分支都被静默丢弃。
+
+两条测试先红后绿：改前分别得到 `"any"` 与 `nil`。
+
+### 已核查并判定正确（含判据）
+
+`service/openaicompat/`：
+
+- 请求方向对无法忠实表达的字段是拒绝而非静默丢：`previous_response_id`、
+  `conversation`、`context_management`、`truncation`、`max_tool_calls`、
+  `prompt`、`preset`、`reasoning.context/mode/扩展` 全部显式报错。
+- `include` 只放行 `reasoning.encrypted_content`，其余值报错。
+- 响应方向 `validateResponsesResponseForChat` 对 `failed` 状态与未知输出
+  类型报错；内建工具调用与压缩输出按注释有意省略而保留文本。
+- `tool_choice` 对象形态会校验引用的函数确实在 tools 中
+  （`validateChatToolChoice`），`required` 在无工具时报错
+  （`normalizeChatToolChoiceForTools`）。
+- 工具名扁平化可能让 `namespace=a,name=b__c` 与 `namespace=a__b,name=c`
+  压成同一个名字；`toolState.register` 在"同名且定义不同"时报错退出，
+  不静默串号。
+- 流式与聚合共用 `responsesStatusFromChatFinishReason`，`length` 与
+  `content_filter` 的终态一致。
+
+`controller/`：
+
+- 支付回调（订阅 Epay notify/return、Stripe、Creem、Waffo）签名校验后
+  才进 `CompleteSubscriptionOrder`；后者 `forUpdate` 锁行，success 幂等
+  返回、非 pending 拒绝。
+- 渠道密钥读取：`/api/channel/:id/key` 需 `RootAuth` + 限流 + 安全验证，
+  并写系统日志；其余列表与详情一律 `Omit("key")`。
+- 管理端订阅操作统一经 `adminCanActOnSubscriptionOwner` 角色比对。
+- self 系列端点全部从会话取 `c.GetInt("id")`，不接受外部传入的用户 ID。
+- `User.Update` 显式 `Omit(billingColumns...)`，六个计费列不被编辑写回。
+- `ManageUser` 的 delete 分支提前返回，不把已软删用户写回 Redis。
+- `main.go` 显式 `SetTrustedProxies`，默认为空即完全不信任转发头。
+
+### 本轮未覆盖
+
+`controller/` 中 `channel-test.go`、`channel_upstream_update.go`、
+`ratio_sync.go`、`model_sync.go`、`custom_oauth.go`、`twofa.go`、
+`passkey.go`、`deployment.go`、`video_proxy.go` 的剩余分支未逐行读。
+
+`any` → `required` 的映射未在真实 OpenAI 兼容渠道上做端到端请求验证；
+本结论的依据是仓库内正反向映射一致性与 OpenAI 的封闭枚举，不是上游响应。
+
+### 第三轮验证记录
+
+```bash
+go build ./... && go test ./... -count=1        # 退出码 0
+go test ./model -count=2 -shuffle=on            # 退出码 0
+NEW_API_TEST_MYSQL_DSN=<newapi_test_j>  go test ./model -run 'MySQL' -count=1
+NEW_API_POSTGRES_TEST_DSN=<newapi_test_pg2> go test ./model -run 'Postgres|PostgreSQL' -count=1
+```
+
+三项门控均退出码 0。`TestChannelHealthConcurrentHalfOpenSelectionHasSingleProbe`
+在包级并发跑时出现过一次失败，单独重跑 3 次通过、`./service` 单包通过；
+未定位到根因，不归因于本轮改动。
