@@ -369,6 +369,7 @@ func SyncUpstreamModels(c *gin.Context) {
 	skipped := make([]string, 0)
 	createdList := make([]string, 0)
 	updatedList := make([]string, 0)
+	failedUpdates := make([]gin.H, 0)
 
 	// 本地缓存：vendorName -> id
 	vendorIDCache := make(map[string]int)
@@ -392,15 +393,19 @@ func SyncUpstreamModels(c *gin.Context) {
 		// 确保 vendor 存在
 		vendorID := ensureVendorID(up.VendorName, vendorByName, vendorIDCache, &createdVendors)
 
-		// 创建模型
+		// 创建模型。SyncOfficial 必须显式给 1：Model.Insert 会把调用方的
+		// 零值原样写回库（它先用 Updates 覆盖 gorm 的 default 标签），而
+		// 零值语义是"不参与官方同步"。同步创建出来的模型若落成 0，就会被
+		// 本函数后面的两处跳过逻辑永久排除，再也不会被更新。
 		mi := &model.Model{
-			ModelName:   name,
-			Description: up.Description,
-			Icon:        up.Icon,
-			Tags:        up.Tags,
-			VendorID:    vendorID,
-			Status:      chooseStatus(up.Status, 1),
-			NameRule:    up.NameRule,
+			ModelName:    name,
+			Description:  up.Description,
+			Icon:         up.Icon,
+			Tags:         up.Tags,
+			VendorID:     vendorID,
+			Status:       chooseStatus(up.Status, 1),
+			SyncOfficial: 1,
+			NameRule:     up.NameRule,
 		}
 		if err := mi.Insert(); err == nil {
 			createdModels++
@@ -431,8 +436,10 @@ func SyncUpstreamModels(c *gin.Context) {
 			// 映射 vendor
 			newVendorID := ensureVendorID(up.VendorName, vendorByName, vendorIDCache, &createdVendors)
 
-			// 应用字段覆盖（事务）
-			_ = model.DB.Transaction(func(tx *gorm.DB) error {
+			// 应用字段覆盖（事务）。事务错误必须回报：吞掉它会让"部分模型
+			// 已改、部分未改"的状态以 success:true 返回，调用方无从发现。
+			updated := false
+			if err := model.DB.Transaction(func(tx *gorm.DB) error {
 				needUpdate := false
 				if containsField(ow.Fields, "description") {
 					local.Description = up.Description
@@ -464,10 +471,20 @@ func SyncUpstreamModels(c *gin.Context) {
 				if err := tx.Save(&local).Error; err != nil {
 					return err
 				}
+				updated = true
+				return nil
+			}); err != nil {
+				skipped = append(skipped, ow.ModelName)
+				failedUpdates = append(failedUpdates, gin.H{
+					"model": ow.ModelName,
+					"error": common.ApiErrorMessage(err),
+				})
+				common.SysError("sync upstream models: update failed for " + ow.ModelName + ": " + err.Error())
+			} else if updated {
+				// 计数只在事务提交成功后生效，回滚不报"已更新"。
 				updatedModels++
 				updatedList = append(updatedList, ow.ModelName)
-				return nil
-			})
+			}
 		}
 	}
 
@@ -480,6 +497,7 @@ func SyncUpstreamModels(c *gin.Context) {
 			"skipped_models":  skipped,
 			"created_list":    createdList,
 			"updated_list":    updatedList,
+			"failed_updates":  failedUpdates,
 			"source": gin.H{
 				"locale":      req.Locale,
 				"models_url":  modelsURL,

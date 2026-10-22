@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,4 +115,38 @@ func TestFetchJSONRejectsSuccessFalseWithoutMessage(t *testing.T) {
 	_, err := fetchProbeEnvelope(t, server)
 	require.Error(t, err)
 	require.False(t, strings.Contains(err.Error(), "<nil>"))
+}
+
+// Model.Insert 会把调用方的零值写回库（先 Create 再用 Updates 覆盖 gorm 的
+// default 标签）。同步创建时若不显式给 SyncOfficial=1，模型会以 0 落库，
+// 而 0 的语义是"不参与官方同步"——它会立刻被本函数的跳过逻辑排除，之后
+// 再也不会被更新，只能人工逐个改回。
+func TestModelInsertPersistsSyncOfficialZeroFromStruct(t *testing.T) {
+	db := setupHeaderPolicyControllerTestDB(t, &model.Model{}, &model.Vendor{})
+
+	mi := &model.Model{ModelName: "probe-model", Status: 1}
+	require.NoError(t, mi.Insert())
+
+	var stored model.Model
+	require.NoError(t, db.Where("model_name = ?", "probe-model").First(&stored).Error)
+	require.Equal(t, 0, stored.SyncOfficial,
+		"precondition: a zero-value struct field is persisted as 0, not replaced by the default tag")
+}
+
+// 创建路径必须显式给 SyncOfficial=1。
+func TestSyncUpstreamModelsCreatedModelsParticipateInOfficialSync(t *testing.T) {
+	db := setupHeaderPolicyControllerTestDB(t, &model.Model{}, &model.Vendor{})
+	require.NoError(t, db.AutoMigrate(&model.Model{}, &model.Vendor{}))
+
+	mi := &model.Model{
+		ModelName:    "created-by-sync",
+		Status:       1,
+		SyncOfficial: 1,
+	}
+	require.NoError(t, mi.Insert())
+
+	var stored model.Model
+	require.NoError(t, db.Where("model_name = ?", "created-by-sync").First(&stored).Error)
+	require.Equal(t, 1, stored.SyncOfficial,
+		"models created by the official sync must stay eligible for future syncs")
 }
