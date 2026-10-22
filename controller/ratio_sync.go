@@ -122,6 +122,39 @@ func asFloat64(value any) (float64, bool) {
 	}
 }
 
+// sanitizeType1RatioData 剔除 type1 数据里不可用的数值：负值会把计费方向
+// 反过来，NaN/Inf 无法序列化成 JSON（会让整个响应变成空体）。非数值字段
+// 原样保留。
+func sanitizeType1RatioData(data map[string]any) map[string]any {
+	cleaned := make(map[string]any, len(data))
+	for field, value := range data {
+		if !numericPricingSyncFields[field] {
+			cleaned[field] = value
+			continue
+		}
+		entries, ok := value.(map[string]any)
+		if !ok {
+			cleaned[field] = value
+			continue
+		}
+		filtered := make(map[string]any, len(entries))
+		for modelName, raw := range entries {
+			numeric, ok := asFloat64(raw)
+			if !ok {
+				// 非数值（如字符串倍率）交给下游按原样处理，保持原有兼容性。
+				filtered[modelName] = raw
+				continue
+			}
+			if !isValidNonNegativeCost(numeric) {
+				continue
+			}
+			filtered[modelName] = raw
+		}
+		cleaned[field] = filtered
+	}
+	return cleaned
+}
+
 func normalizeSyncValue(field string, value any) any {
 	if numericPricingSyncFields[field] {
 		if parsed, ok := asFloat64(value); ok {
@@ -372,7 +405,10 @@ func FetchUpstreamRatios(c *gin.Context) {
 					}
 				}
 				if isType1 {
-					ch <- upstreamResult{Name: uniqueName, Data: type1Data}
+					// type1 的数据会原样进入差异表，因此负值与 NaN/Inf 必须
+					// 在这里剔除。NaN/Inf 无法被 json 序列化，会让整个 /fetch
+					// 响应变成空体；负倍率会把计费方向反过来。
+					ch <- upstreamResult{Name: uniqueName, Data: sanitizeType1RatioData(type1Data)}
 					return
 				}
 			}
@@ -411,6 +447,29 @@ func FetchUpstreamRatios(c *gin.Context) {
 
 			for _, item := range pricingItems {
 				if item.ModelName == "" {
+					continue
+				}
+				// 上游返回的数字直接进候选倍率，必须在这里过滤：负倍率会把
+				// 计费方向反过来，NaN/Inf 会让整个响应无法序列化，零值则等于
+				// 把模型改成免费。判据与 models.dev 分支一致。
+				if !isValidNonNegativeCost(item.ModelRatio) ||
+					!isValidNonNegativeCost(item.ModelPrice) ||
+					!isValidNonNegativeCost(item.CompletionRatio) {
+					continue
+				}
+				if item.CacheRatio != nil && !isValidNonNegativeCost(*item.CacheRatio) {
+					continue
+				}
+				if item.CreateCacheRatio != nil && !isValidNonNegativeCost(*item.CreateCacheRatio) {
+					continue
+				}
+				if item.ImageRatio != nil && !isValidNonNegativeCost(*item.ImageRatio) {
+					continue
+				}
+				if item.AudioRatio != nil && !isValidNonNegativeCost(*item.AudioRatio) {
+					continue
+				}
+				if item.AudioCompletionRatio != nil && !isValidNonNegativeCost(*item.AudioCompletionRatio) {
 					continue
 				}
 				if item.BillingMode == billing_setting.BillingModeTieredExpr && strings.TrimSpace(item.BillingExpr) != "" {
@@ -756,6 +815,13 @@ func convertOpenRouterToRatioData(reader io.Reader) (map[string]any, error) {
 		}
 		if compErr != nil {
 			completionPrice = 0
+		}
+
+		// NaN 与 Inf 能通过 ParseFloat 且绕过下面所有比较（NaN 与任何值比较
+		// 都是 false），最终让整个 /fetch 响应无法序列化而变成 200 空体。
+		// 与 models.dev 分支使用同一个判据。
+		if !isValidNonNegativeCost(promptPrice) || !isValidNonNegativeCost(completionPrice) {
+			continue
 		}
 
 		// Negative values are sentinel values (e.g., -1 for dynamic/variable pricing) - skip
