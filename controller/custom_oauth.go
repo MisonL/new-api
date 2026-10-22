@@ -87,6 +87,13 @@ type UserOAuthBindingResponse struct {
 	ProviderUserId string `json:"provider_user_id"`
 }
 
+// normalizeCustomOAuthSlug 返回 slug 的归一化形式。落库（model 的
+// validateCustomOAuthProvider）与 registry 键都以小写为准，所有冲突检查
+// 都必须使用同一个值，否则大小写变体会绕过检查。
+func normalizeCustomOAuthSlug(slug string) string {
+	return strings.ToLower(strings.TrimSpace(slug))
+}
+
 func toCustomOAuthProviderResponse(p *model.CustomOAuthProvider) *CustomOAuthProviderResponse {
 	sanitized := *p
 	model.NormalizeCustomOAuthProviderForRead(&sanitized)
@@ -376,14 +383,18 @@ func CreateCustomOAuthProvider(c *gin.Context) {
 		return
 	}
 
-	// Check if slug is already taken
-	if model.IsSlugTaken(req.Slug, 0) {
+	// Check if slug is already taken. 归一化必须在这里完成：
+	// model.validateCustomOAuthProvider 会把 slug 转小写后落库，registry 也以
+	// 小写为键，用原始输入检查会让 "GitHub" 这类变体绕过内置冲突检查并覆盖
+	// 内置 provider。
+	normalizedSlug := normalizeCustomOAuthSlug(req.Slug)
+	if model.IsSlugTaken(normalizedSlug, 0) {
 		common.ApiErrorMsg(c, "该 Slug 已被使用")
 		return
 	}
 
 	// Check if slug conflicts with built-in providers
-	if oauth.IsProviderRegistered(req.Slug) && !oauth.IsCustomProvider(req.Slug) {
+	if oauth.IsProviderRegistered(normalizedSlug) && !oauth.IsCustomProvider(normalizedSlug) {
 		common.ApiErrorMsg(c, "该 Slug 与内置 OAuth 提供商冲突")
 		return
 	}
@@ -557,14 +568,16 @@ func UpdateCustomOAuthProvider(c *gin.Context) {
 
 	oldSlug := provider.Slug
 
-	// Check if new slug is taken by another provider
-	if req.Slug != nil && *req.Slug != provider.Slug {
-		if model.IsSlugTaken(*req.Slug, id) {
+	// Check if new slug is taken by another provider. 与创建路径相同，
+	// 冲突检查必须基于归一化后的 slug。
+	if req.Slug != nil && normalizeCustomOAuthSlug(*req.Slug) != provider.Slug {
+		normalizedSlug := normalizeCustomOAuthSlug(*req.Slug)
+		if model.IsSlugTaken(normalizedSlug, id) {
 			common.ApiErrorMsg(c, "该 Slug 已被使用")
 			return
 		}
 		// Check if slug conflicts with built-in providers
-		if oauth.IsProviderRegistered(*req.Slug) && !oauth.IsCustomProvider(*req.Slug) {
+		if oauth.IsProviderRegistered(normalizedSlug) && !oauth.IsCustomProvider(normalizedSlug) {
 			common.ApiErrorMsg(c, "该 Slug 与内置 OAuth 提供商冲突")
 			return
 		}
