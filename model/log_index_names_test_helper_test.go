@@ -16,8 +16,8 @@ func parsedLogIndexNames(t *testing.T) map[string]struct{} {
 		t.Fatalf("failed to parse Log schema: %v", err)
 	}
 	names := make(map[string]struct{})
-	for name := range s.ParseIndexes() {
-		names[name] = struct{}{}
+	for _, index := range s.ParseIndexes() {
+		names[index.Name] = struct{}{}
 	}
 	return names
 }

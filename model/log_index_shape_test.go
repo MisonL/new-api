@@ -19,12 +19,12 @@ func parsedLogIndexColumns(t *testing.T) map[string][]string {
 	require.NoError(t, err)
 
 	columns := make(map[string][]string)
-	for name, idx := range s.ParseIndexes() {
+	for _, idx := range s.ParseIndexes() {
 		cols := make([]string, 0, len(idx.Fields))
 		for _, field := range idx.Fields {
 			cols = append(cols, field.DBName)
 		}
-		columns[name] = cols
+		columns[idx.Name] = cols
 	}
 	return columns
 }

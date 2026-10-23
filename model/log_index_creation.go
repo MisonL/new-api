@@ -59,7 +59,7 @@ func ensureLogIndexesMatchModel(db *gorm.DB) error {
 	return nil
 }
 
-func declaredIndexColumns(index schema.Index) []string {
+func declaredIndexColumns(index *schema.Index) []string {
 	columns := make([]string, 0, len(index.Fields))
 	for _, field := range index.Fields {
 		columns = append(columns, field.DBName)
@@ -79,7 +79,7 @@ func sameColumns(a, b []string) bool {
 	return true
 }
 
-func indexColumnsExist(index schema.Index, columns map[string]struct{}) bool {
+func indexColumnsExist(index *schema.Index, columns map[string]struct{}) bool {
 	for _, field := range index.Fields {
 		if field.Expression != "" {
 			// 表达式索引无法从字段名判断依赖，交给 AutoMigrate 处理。
@@ -216,7 +216,7 @@ func dropLogIndex(db *gorm.DB, name string) error {
 // 这里只支持 Log 当前用到的索引属性。where / comment 等属性如果将来被加到
 // Log 上，直接报错而不是建成一个与模型声明不同的索引：AutoMigrate 只按
 // 名字判断，形状不一致不会被发现。
-func createLogIndex(db *gorm.DB, table string, index schema.Index) error {
+func createLogIndex(db *gorm.DB, table string, index *schema.Index) error {
 	if index.Where != "" || index.Comment != "" || index.Option != "" {
 		return fmt.Errorf(
 			"log index %s declares attributes (where/comment/option) the explicit creation path does not support",
