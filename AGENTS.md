@@ -176,6 +176,7 @@ bun run dev --host 0.0.0.0 --port 5173
 - 修改运行状态类文档时，必须写清楚采样时间、命令、结果和边界。服务 `healthy` 与“运行最新代码”必须分开表述。
 - 重要验证和阶段性事实优先放到 `docs/reviews/CR-*.md`。
 - 当前高价值索引：
+  - `docs/reviews/CR-DEPS-LATEST-RELEASE-2026-10-24.md`
   - `docs/reviews/CR-MULTI-ROUND-AUDIT-2026-10-16.md`
   - `docs/reviews/CR-AUDIT-FIXES-2026-10-21.md`
   - `docs/reviews/CR-AUDIT-FIXES-2026-10-11.md`
