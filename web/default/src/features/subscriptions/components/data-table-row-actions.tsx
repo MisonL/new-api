@@ -1,4 +1,4 @@
-import { type Row } from '@tanstack/react-table'
+import { type Row } from '@/lib/table-compat'
 import { MoreHorizontal, Pencil, Power, PowerOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'

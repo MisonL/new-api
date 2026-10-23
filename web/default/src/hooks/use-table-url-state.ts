@@ -3,7 +3,7 @@ import type {
   ColumnFiltersState,
   OnChangeFn,
   PaginationState,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 
 type SearchRecord = Record<string, unknown>
 

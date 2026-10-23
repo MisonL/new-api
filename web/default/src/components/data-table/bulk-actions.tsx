@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { type Table } from '@tanstack/react-table'
+import { type Table } from '@/lib/table-compat'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'

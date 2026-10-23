@@ -3,7 +3,7 @@ import {
   type Cell,
   type Row,
   type Table,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { Database } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'

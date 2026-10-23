@@ -1,8 +1,10 @@
-import '@tanstack/react-table'
+import '@tanstack/table-core'
 
-declare module '@tanstack/react-table' {
-  // Extended column metadata for enhanced table functionality
-  interface ColumnMeta<_TData, _TValue> {
+// v8 的 ColumnMeta 是两个类型参数（TData, TValue）；v9 改成三个
+// （TFeatures, TData, TValue）。合并声明必须跟上新的签名，否则列定义里的
+// meta 字段会全部退化成空接口，取值时全报 "property does not exist"。
+declare module '@tanstack/table-core' {
+  interface ColumnMeta<_TFeatures, _TData, _TValue> {
     // Human-readable label for the column
     label?: string
     // Optional description shown in tooltips or help text

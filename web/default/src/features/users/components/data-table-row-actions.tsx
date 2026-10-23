@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { type Row } from '@tanstack/react-table'
+import { type Row } from '@/lib/table-compat'
 import {
   MoreHorizontal,
   Pencil,

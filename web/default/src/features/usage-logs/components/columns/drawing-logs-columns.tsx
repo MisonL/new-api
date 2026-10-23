@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@/lib/table-compat'
 import {
   Blend,
   FileText,

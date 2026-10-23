@@ -8,7 +8,7 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { useMediaQuery } from '@/hooks'
 import { useTranslation } from 'react-i18next'
 import {

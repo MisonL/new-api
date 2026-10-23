@@ -4,7 +4,7 @@ import {
   getCoreRowModel,
   getPaginationRowModel,
   useReactTable,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { Loader2, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Input } from '@/components/ui/input'
@@ -168,7 +168,7 @@ export function UpstreamRatioSyncTable({
     getPaginationRowModel: getPaginationRowModel(),
     getRowId: (row) => row.key,
     initialState: {
-      pagination: { pageSize: 10 },
+      pagination: { pageIndex: 0, pageSize: 10 },
     },
   })
 

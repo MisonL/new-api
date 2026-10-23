@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { type ColumnDef } from '@tanstack/react-table'
+import { type ColumnDef } from '@/lib/table-compat'
 import { CircleAlert, Sparkles, KeyRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'

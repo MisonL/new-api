@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
-import { type Row } from '@tanstack/react-table'
+import { type Row } from '@/lib/table-compat'
 import {
   Trash2,
   Edit,

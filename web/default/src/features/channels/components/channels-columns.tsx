@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ColumnDef } from '@tanstack/react-table'
+import { type ColumnDef } from '@/lib/table-compat'
 import {
   AlertTriangle,
   ChevronDown,

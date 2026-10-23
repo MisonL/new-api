@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { Column, Table } from '@tanstack/react-table'
+import type { Column, Table } from '@/lib/table-compat'
 import { ArrowDown, ArrowUp, ArrowDownUp, GripVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'

@@ -6,7 +6,7 @@ import {
   useReactTable,
   type ColumnDef,
   type RowSelectionState,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import {
   Search,
   Info,

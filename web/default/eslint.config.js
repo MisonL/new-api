@@ -26,6 +26,11 @@ export default defineConfig(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-hooks/incompatible-library': 'off',
+      // react-hooks 7.x 起把 React Compiler 的 set-state-in-effect 并入
+      // recommended（error）。仓库里 21 处是「弹窗 open/依赖变化时在 effect
+      // 里重置 state」的既有惯用法，逐处改派生状态是独立的行为重构，
+      // 不与本次依赖升级混做，先降级为 warn 保留可见性。
+      'react-hooks/set-state-in-effect': 'warn',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },

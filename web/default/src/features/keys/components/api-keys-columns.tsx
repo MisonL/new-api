@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { type ColumnDef } from '@tanstack/react-table'
+import { type ColumnDef } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
 import { getUserGroups } from '@/lib/api'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'

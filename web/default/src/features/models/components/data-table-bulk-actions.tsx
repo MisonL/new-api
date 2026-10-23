@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type Table } from '@tanstack/react-table'
+import { type Table } from '@/lib/table-compat'
 import { Power, PowerOff, Trash2, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'

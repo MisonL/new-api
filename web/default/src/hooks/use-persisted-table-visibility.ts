@@ -1,5 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
-import type { VisibilityState } from '@tanstack/react-table'
+import type { VisibilityState } from '@/lib/table-compat'
 
 /**
  * Merge persisted visibility over the caller's defaults.

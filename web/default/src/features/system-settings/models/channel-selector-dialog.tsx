@@ -7,7 +7,7 @@ import {
   useReactTable,
   type ColumnDef,
   type RowSelectionState,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -288,6 +288,7 @@ export function ChannelSelectorDialog({
     getPaginationRowModel: getPaginationRowModel(),
     initialState: {
       pagination: {
+        pageIndex: 0,
         pageSize: 10,
       },
     },

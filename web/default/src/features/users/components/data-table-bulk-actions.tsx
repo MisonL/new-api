@@ -1,4 +1,4 @@
-import { type Table } from '@tanstack/react-table'
+import { type Table } from '@/lib/table-compat'
 import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-table'
 import { type User } from '../types'
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Cross2Icon } from '@radix-ui/react-icons'
-import { type Table } from '@tanstack/react-table'
+import { type Table } from '@/lib/table-compat'
 import { SlidersHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'

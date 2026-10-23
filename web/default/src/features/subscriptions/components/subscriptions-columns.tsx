@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { type ColumnDef } from '@tanstack/react-table'
+import { type ColumnDef } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
 import { DataTableColumnHeader } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'

@@ -7,7 +7,7 @@ import {
   useReactTable,
   type SortingState,
   type VisibilityState,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { useMediaQuery } from '@/hooks'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -321,7 +321,7 @@ export function ModelsTable() {
       </div>
       <PageFooterPortal>
         <DataTablePagination
-          table={table as ReturnType<typeof useReactTable>}
+          table={table}
         />
       </PageFooterPortal>
     </>

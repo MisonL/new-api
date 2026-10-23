@@ -10,7 +10,7 @@ import {
   getSortedRowModel,
   getPaginationRowModel,
   useReactTable,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'

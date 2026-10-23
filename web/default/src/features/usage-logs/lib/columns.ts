@@ -1,33 +1,36 @@
 /**
  * Column definitions factory
  */
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@/lib/table-compat'
 import { useCommonLogsColumns } from '../components/columns/common-logs-columns'
 import { useDrawingLogsColumns } from '../components/columns/drawing-logs-columns'
 import { useTaskLogsColumns } from '../components/columns/task-logs-columns'
 import type { LogCategory } from '../types'
 
 /**
- * Get column definitions based on log category
- * Returns any[] due to different log types (UsageLog, MidjourneyLog, TaskLog)
+ * Get column definitions based on log category.
+ *
+ * The three log categories carry different row shapes (UsageLog,
+ * MidjourneyLog, TaskLog) but the caller renders them through one table, so the
+ * column set is widened to a generic record. The casts below are the type-level
+ * half of that widening; the runtime shape is unchanged.
  */
 export function useColumnsByCategory(
   logCategory: LogCategory,
   isAdmin: boolean
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): ColumnDef<any>[] {
+): ColumnDef<Record<string, unknown>>[] {
   const commonColumns = useCommonLogsColumns(isAdmin)
   const drawingColumns = useDrawingLogsColumns(isAdmin)
   const taskColumns = useTaskLogsColumns(isAdmin)
 
   switch (logCategory) {
     case 'common':
-      return commonColumns
+      return commonColumns as ColumnDef<Record<string, unknown>>[]
     case 'drawing':
-      return drawingColumns
+      return drawingColumns as ColumnDef<Record<string, unknown>>[]
     case 'task':
-      return taskColumns
+      return taskColumns as ColumnDef<Record<string, unknown>>[]
     default:
-      return commonColumns
+      return commonColumns as ColumnDef<Record<string, unknown>>[]
   }
 }

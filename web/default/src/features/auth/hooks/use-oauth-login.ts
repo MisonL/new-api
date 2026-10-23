@@ -25,7 +25,7 @@ export function useOAuthLogin(status: SystemStatus | null) {
   const [isLoading, setIsLoading] = useState(false)
   const [githubButtonText, setGithubButtonText] = useState('')
   const [githubButtonDisabled, setGithubButtonDisabled] = useState(false)
-  const githubTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const githubTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { auth } = useAuthStore()
 
   useEffect(() => {

@@ -6,7 +6,7 @@ import {
   getCoreRowModel,
   useReactTable,
   type VisibilityState,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { useMediaQuery } from '@/hooks'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -334,7 +334,7 @@ export function DeploymentsTable() {
 
       <PageFooterPortal>
         <DataTablePagination
-          table={table as ReturnType<typeof useReactTable>}
+          table={table}
         />
       </PageFooterPortal>
 

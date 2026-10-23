@@ -4,7 +4,7 @@ import {
   CaretSortIcon,
   EyeNoneIcon,
 } from '@radix-ui/react-icons'
-import { type Column } from '@tanstack/react-table'
+import { type Column } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'

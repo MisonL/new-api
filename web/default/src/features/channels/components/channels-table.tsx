@@ -11,7 +11,7 @@ import {
   type VisibilityState,
   type ExpandedState,
   type Row,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { useDebounce, useMediaQuery } from '@/hooks'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'

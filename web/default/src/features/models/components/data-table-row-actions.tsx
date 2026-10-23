@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type Row } from '@tanstack/react-table'
+import { type Row } from '@/lib/table-compat'
 import { MoreHorizontal, Pencil, Power, PowerOff, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'

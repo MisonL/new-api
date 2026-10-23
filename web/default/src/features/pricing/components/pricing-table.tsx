@@ -5,7 +5,7 @@ import {
   getPaginationRowModel,
   useReactTable,
   type PaginationState,
-} from '@tanstack/react-table'
+} from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
 import {
   Table,

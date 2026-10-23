@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState } from 'react'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@/lib/table-compat'
 import { Zap } from 'lucide-react'
 import { formatTimestampToDate, formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'

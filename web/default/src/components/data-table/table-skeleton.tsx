@@ -1,4 +1,4 @@
-import type { Table } from '@tanstack/react-table'
+import type { Table } from '@/lib/table-compat'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TableRow, TableCell } from '@/components/ui/table'

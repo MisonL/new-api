@@ -15,9 +15,9 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "types": ["node"],
 
     /* Alias */
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     },
