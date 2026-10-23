@@ -247,9 +247,9 @@ export const useMessageActions = (
   // 切换角色
   const handleRoleToggle = useCallback(
     (targetMessage) => {
-      if (
-        !(targetMessage.role === 'assistant' || targetMessage.role === 'system')
-      ) {
+      if (!(
+        targetMessage.role === 'assistant' || targetMessage.role === 'system'
+      )) {
         return;
       }
 

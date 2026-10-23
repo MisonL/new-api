@@ -158,8 +158,8 @@ function supportsCustomProviderBrowserLogin(provider) {
     }
     return Boolean(
       provider?.authorization_endpoint &&
-        provider?.client_id &&
-        provider?.jwt_source !== 'body',
+      provider?.client_id &&
+      provider?.jwt_source !== 'body',
     );
   }
   return Boolean(provider?.authorization_endpoint && provider?.client_id);

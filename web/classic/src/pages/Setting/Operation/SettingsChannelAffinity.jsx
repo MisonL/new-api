@@ -71,9 +71,7 @@ import {
 
 const ParamOverrideEditorModal = lazy(
   () =>
-    import(
-      '../../../components/table/channels/modals/ParamOverrideEditorModal'
-    ),
+    import('../../../components/table/channels/modals/ParamOverrideEditorModal'),
 );
 
 const KEY_ENABLED = 'channel_affinity_setting.enabled';

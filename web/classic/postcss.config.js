@@ -17,9 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+// Tailwind 4 起 PostCSS 插件迁到独立包 @tailwindcss/postcss；
+// 继续写 tailwindcss 会直接报错。
 export default {
   plugins: {
-    tailwindcss: {},
+    '@tailwindcss/postcss': {},
     autoprefixer: {},
   },
 };

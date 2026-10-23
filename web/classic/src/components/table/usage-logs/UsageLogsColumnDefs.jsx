@@ -1615,14 +1615,12 @@ export const getLogsColumns = ({
       title: t('花费'),
       dataIndex: 'quota',
       render: (text, record, index) => {
-        if (
-          !(
-            record.type === 0 ||
-            record.type === 2 ||
-            record.type === 5 ||
-            record.type === 6
-          )
-        ) {
+        if (!(
+          record.type === 0 ||
+          record.type === 2 ||
+          record.type === 5 ||
+          record.type === 6
+        )) {
           return <></>;
         }
         const other = getLogOther(record.other);

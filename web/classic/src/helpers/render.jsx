@@ -77,18 +77,19 @@ import {
   SiGitlab,
   SiGoogle,
   SiKeycloak,
-  SiLinkedin,
   SiNextcloud,
   SiNotion,
   SiOkta,
   SiOpenid,
   SiReddit,
-  SiSlack,
   SiTelegram,
   SiTwitch,
   SiWechat,
   SiX,
 } from 'react-icons/si';
+// react-icons 5.7 的 simple-icons 集移除了 LinkedIn / Slack 两个品牌图标，
+// 同义图标改从 Font Awesome 集取。
+import { FaLinkedin, FaSlack } from 'react-icons/fa';
 
 const lobeHubIconMap = {
   OpenAI,
@@ -473,10 +474,10 @@ const oauthProviderIconMap = {
   google: SiGoogle,
   discord: SiDiscord,
   facebook: SiFacebook,
-  linkedin: SiLinkedin,
+  linkedin: FaLinkedin,
   x: SiX,
   twitter: SiX,
-  slack: SiSlack,
+  slack: FaSlack,
   telegram: SiTelegram,
   wechat: SiWechat,
   keycloak: SiKeycloak,

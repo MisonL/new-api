@@ -390,8 +390,8 @@ function AdvancedPanel({ index, rule, t, updateRule }) {
           name={`protocol-rule-conditional-tool-bridge-${index}`}
           checked={Boolean(
             bridgeSupported &&
-              rule.enable_custom_tool_bridge &&
-              rule.only_when_tool_bridge_required,
+            rule.enable_custom_tool_bridge &&
+            rule.only_when_tool_bridge_required,
           )}
           checkedText={t('开')}
           disabled={!bridgeSupported || !rule.enable_custom_tool_bridge}

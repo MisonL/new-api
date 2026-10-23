@@ -172,6 +172,14 @@ export default defineConfig(({ command }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        // semi-ui 2.104 起在 package.json 增加了 exports 字段，但没有导出
+        // ./dist/*，于是官方的整包样式入口 `@douyinfe/semi-ui/dist/css/semi.css`
+        // 会被 exports 解析拒绝（文件本身仍在包里）。这里直接指向绝对路径，
+        // 绕开 exports 校验；升级 semi 后若它补上导出，这条别名可以删掉。
+        '@douyinfe/semi-ui/dist/css/semi.css': path.resolve(
+          __dirname,
+          './node_modules/@douyinfe/semi-ui/dist/css/semi.css',
+        ),
       },
     },
     plugins,
@@ -205,30 +213,38 @@ export default defineConfig(({ command }) => {
           defaultHandler(warning);
         },
         output: {
-          manualChunks: {
-            'react-core': ['react', 'react-dom', 'react-router-dom'],
-            'semi-ui': ['@douyinfe/semi-icons', '@douyinfe/semi-ui'],
-            tools: ['axios', 'history', 'marked'],
-            'lucide-icons': ['lucide-react'],
-            'react-icons': ['react-icons'],
-            'markdown-core': [
-              'react-markdown',
-              'remark-breaks',
-              'remark-gfm',
-              'remark-math',
-              'rehype-highlight',
-              'rehype-katex',
-              'katex',
-            ],
-            'input-tools': ['use-debounce'],
-            visactor: [
-              '@visactor/react-vchart',
-              '@visactor/vchart',
-              '@visactor/vchart-semi-theme',
-            ],
-            toast: ['react-toastify'],
-            'auth-widgets': ['react-telegram-login', 'react-turnstile'],
-            'file-upload': ['react-dropzone'],
+          // Vite 8 底层换成 rolldown，manualChunks 只接受函数形式
+          // （对象映射是 rollup 的旧写法，会报 "manualChunks is not a function"）。
+          // 分块意图与原先的对象映射保持一致，按包名前缀归类。
+          manualChunks(id) {
+            if (!id.includes('/node_modules/')) return undefined;
+            if (/\/node_modules\/(react|react-dom|react-router-dom)\//.test(id))
+              return 'react-core';
+            if (/\/node_modules\/@douyinfe\/semi-(ui|icons)\//.test(id))
+              return 'semi-ui';
+            if (/\/node_modules\/(axios|history|marked)\//.test(id))
+              return 'tools';
+            if (/\/node_modules\/lucide-react\//.test(id))
+              return 'lucide-icons';
+            if (/\/node_modules\/react-icons\//.test(id)) return 'react-icons';
+            if (
+              /\/node_modules\/(react-markdown|remark-breaks|remark-gfm|remark-math|rehype-highlight|rehype-katex|katex)\//.test(
+                id,
+              )
+            )
+              return 'markdown-core';
+            if (/\/node_modules\/use-debounce\//.test(id)) return 'input-tools';
+            if (/\/node_modules\/@visactor\//.test(id)) return 'visactor';
+            if (/\/node_modules\/react-toastify\//.test(id)) return 'toast';
+            if (
+              /\/node_modules\/(react-telegram-login|react-turnstile)\//.test(
+                id,
+              )
+            )
+              return 'auth-widgets';
+            if (/\/node_modules\/react-dropzone\//.test(id))
+              return 'file-upload';
+            return undefined;
           },
         },
       },

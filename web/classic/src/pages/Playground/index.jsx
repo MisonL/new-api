@@ -200,12 +200,10 @@ const Playground = () => {
       let messages = [...message];
 
       // 如果存在用户消息
-      if (
-        !(
-          messages.length === 0 ||
-          messages.every((msg) => msg.role !== MESSAGE_ROLES.USER)
-        )
-      ) {
+      if (!(
+        messages.length === 0 ||
+        messages.every((msg) => msg.role !== MESSAGE_ROLES.USER)
+      )) {
         // 处理最后一个用户消息的图片
         for (let i = messages.length - 1; i >= 0; i--) {
           if (messages[i].role === MESSAGE_ROLES.USER) {
