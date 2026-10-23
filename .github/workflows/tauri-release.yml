@@ -80,7 +80,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
 
       # 钉 master 历史内的提交。不能用 stable 分支 tip：它是 master 的后代，
       # 不在 master 历史内，按该 action 的 README 会被 GC 回收导致工作流失效。

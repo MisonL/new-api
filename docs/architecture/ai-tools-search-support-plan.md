@@ -10,7 +10,7 @@
 
 **架构**：新增 `service/search` 搜索后端抽象（Provider 接口 + SearXNG 实现 + 可插拔扩展）；三条落地通道：一是显式 JSON 端点（Kimi `/coding/v1/search|fetch`、Claude Code CCR 代理 `/v1/code/sessions/{id}/worker/web-search|fetch`、Codex standalone `/v1/alpha/search`）；二是 Claude Code 边车请求本地仿真（模型无关，不调用上游模型，直接回吐 Anthropic SSE 搜索事件）；三是既有透传路径保持不变（真 Claude 上游本来就支持服务端搜索）。计费复用 `tool_price_setting` 与 `text_quota.go` 的既有换算公式，按次扣费。
 
-**技术栈**：Go 1.27.2、Gin、GORM v2（SQLite/MySQL/PostgreSQL 三库兼容）；前端 `web/default` React 19 + Rsbuild，包管理器 `bun`。
+**技术栈**：Go 1.27.3、Gin、GORM v2（SQLite/MySQL/PostgreSQL 三库兼容）；前端 `web/default` React 19 + Rsbuild，包管理器 `bun`。
 
 **依据**：本文件第 1-3 节。外部调研（7 份分报告、参考会话 `ab3925ce-0458-4ad8-b329-c2876526d79d`）为临时产物，关键结论已全部内联；其中「已验证」为逐条代码/命令/容器核实过的结论，「引用」为前序会话实测结论，实现时按标注区别对待。
 
@@ -20,7 +20,7 @@
 
 每个任务都隐含适用，不再逐条重复：
 
-- Go 1.27.2、Gin、GORM v2；不得写只适配单一数据库的 SQL 或迁移语句。
+- Go 1.27.3、Gin、GORM v2；不得写只适配单一数据库的 SQL 或迁移语句。
 - 业务代码禁止直接调用 `encoding/json`，编解码一律走 `common.Marshal`、`common.Unmarshal`、`common.UnmarshalJsonStr`、`common.GetJsonType`（AGENTS.md 第 3 节）。
 - 禁止静默回退、隐藏容错、mock 成功路径；失败必须显式返回错误并被测试覆盖（AGENTS.md 第 1 节）。
 - 代码、注释、日志字符串与 Markdown 文档不使用 Emoji 或装饰性 Unicode 符号。

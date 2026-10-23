@@ -51,7 +51,7 @@ RUN VERSION_VALUE="${EFFECTIVE_APP_VERSION}"; \
     bun /scripts/frontend-bundle-versions.mjs --root /build --only web/classic --dist-dir dist --modules-dir node_modules && \
     sh /scripts/write-frontend-release-metadata.sh classic dist "$VERSION_VALUE" "$VCS_REF" "$BUILD_DATE"
 
-FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS builder2
+FROM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder2
 ENV GO111MODULE=on CGO_ENABLED=0
 
 ARG TARGETOS
