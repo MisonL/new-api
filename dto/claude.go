@@ -172,9 +172,9 @@ func (c *ClaudeMessage) ParseContent() ([]ClaudeMediaMessage, error) {
 }
 
 type Tool struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	InputSchema map[string]interface{} `json:"input_schema"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema"`
 }
 
 type InputSchema struct {
@@ -351,8 +351,7 @@ func (c *ClaudeRequest) GetTokenCountMeta() *types.TokenCountMeta {
 					texts = append(texts, t.Description)
 				}
 				if t.InputSchema != nil {
-					b, _ := common.Marshal(t.InputSchema)
-					texts = append(texts, string(b))
+					texts = append(texts, string(t.InputSchema))
 				}
 			}
 		}

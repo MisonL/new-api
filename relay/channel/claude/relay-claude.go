@@ -229,26 +229,63 @@ func claudeUserContentBlocks(content any) ([]dto.ClaudeMediaMessage, error) {
 	}
 }
 
-func normalizeClaudeInputSchema(parameters any, toolName string) (map[string]interface{}, error) {
+// normalizeClaudeInputSchema 把工具参数规范成可直接下发上游的 JSON Schema。
+// 返回值是原始字节而非 map：JSON 编码 map 会按字典序重排 properties，而
+// structured output 按 schema 里列出的顺序填充字段，重排会改变模型行为。
+func normalizeClaudeInputSchema(parameters any, toolName string) (json.RawMessage, error) {
 	if parameters == nil {
-		return map[string]interface{}{"type": "object"}, nil
+		return json.RawMessage(`{"type":"object"}`), nil
 	}
 
-	schema, err := common.Any2Type[map[string]interface{}](parameters)
-	if err != nil || schema == nil {
+	var raw json.RawMessage
+	switch typed := parameters.(type) {
+	case json.RawMessage:
+		raw = typed
+	case []byte:
+		raw = typed
+	default:
+		encoded, err := common.Marshal(parameters)
 		if err != nil {
 			return nil, fmt.Errorf("tool %s parameters must be a JSON object: %w", toolName, err)
 		}
+		raw = encoded
+	}
+
+	if common.GetJsonType(raw) != "object" {
 		return nil, fmt.Errorf("tool %s parameters must be a JSON object", toolName)
 	}
-	if schemaType, exists := schema["type"]; exists {
-		if _, ok := schemaType.(string); !ok {
-			return nil, fmt.Errorf("tool %s parameters.type must be a string", toolName)
-		}
-	} else {
-		schema["type"] = "object"
+
+	// 只在缺少 type 时补 "type":"object"；已有 type 必须校验为字符串。
+	var probe struct {
+		Type json.RawMessage `json:"type"`
 	}
-	return schema, nil
+	if err := common.Unmarshal(raw, &probe); err != nil {
+		return nil, fmt.Errorf("tool %s parameters must be a JSON object: %w", toolName, err)
+	}
+	if len(probe.Type) == 0 || common.GetJsonType(probe.Type) == "null" {
+		return injectSchemaObjectType(raw, toolName)
+	}
+	if common.GetJsonType(probe.Type) != "string" {
+		return nil, fmt.Errorf("tool %s parameters.type must be a string", toolName)
+	}
+	return raw, nil
+}
+
+// injectSchemaObjectType 在保留原始字节顺序的前提下，向 schema 对象头部插入
+// "type":"object"。走 map 再编码会丢失 properties 顺序，这里只做文本拼接。
+func injectSchemaObjectType(raw json.RawMessage, toolName string) (json.RawMessage, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "{}" {
+		return json.RawMessage(`{"type":"object"}`), nil
+	}
+	if !strings.HasPrefix(trimmed, "{") || !strings.HasSuffix(trimmed, "}") {
+		return nil, fmt.Errorf("tool %s parameters must be a JSON object", toolName)
+	}
+	body := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+	if body == "" {
+		return json.RawMessage(`{"type":"object"}`), nil
+	}
+	return json.RawMessage(`{"type":"object",` + body + `}`), nil
 }
 
 // claudeOutputFormatFromResponseFormat maps an OpenAI response_format onto the

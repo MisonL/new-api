@@ -1304,7 +1304,7 @@ func parseClaudeToolsForOpenAI(raw any) ([]dto.Tool, error) {
 			return nil, fmt.Errorf("Claude tools[%d] name is required", index)
 		}
 		if tool.InputSchema == nil {
-			tool.InputSchema = map[string]interface{}{"type": "object"}
+			tool.InputSchema = common.RawMessage(`{"type":"object"}`)
 		}
 		tools = append(tools, tool)
 	}

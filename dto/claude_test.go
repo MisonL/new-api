@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +27,11 @@ func TestProcessToolsParsesJSONMapTool(t *testing.T) {
 	require.Empty(t, webSearchTools)
 	require.Equal(t, "lookup_order", normalTools[0].Name)
 	require.Equal(t, "Find an order by id", normalTools[0].Description)
-	require.Equal(t, "object", normalTools[0].InputSchema["type"])
+	var schemaType struct {
+		Type string `json:"type"`
+	}
+	require.NoError(t, common.Unmarshal(normalTools[0].InputSchema, &schemaType))
+	require.Equal(t, "object", schemaType.Type)
 }
 
 func TestProcessToolsParsesJSONMapWebSearchTool(t *testing.T) {

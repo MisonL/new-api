@@ -607,8 +607,13 @@ func TestRequestOpenAI2ClaudeMessagePreservesRawToolSchema(t *testing.T) {
 	tools, err := common.Any2Type[[]dto.Tool](claudeRequest.Tools)
 	require.NoError(t, err)
 	require.Len(t, tools, 1)
-	require.Equal(t, "object", tools[0].InputSchema["type"])
-	require.Equal(t, false, tools[0].InputSchema["additionalProperties"])
+	var schemaFields struct {
+		Type                 string `json:"type"`
+		AdditionalProperties bool   `json:"additionalProperties"`
+	}
+	require.NoError(t, common.Unmarshal(tools[0].InputSchema, &schemaFields))
+	require.Equal(t, "object", schemaFields.Type)
+	require.False(t, schemaFields.AdditionalProperties)
 }
 
 func TestRequestOpenAI2ClaudeMessageMapsDeveloperMessagesToSystem(t *testing.T) {
