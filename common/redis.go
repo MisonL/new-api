@@ -61,41 +61,6 @@ func ParseRedisOption() *redis.Options {
 	return opt
 }
 
-func RedisSet(key string, value string, expiration time.Duration) error {
-	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis SET: key=%s, value=%s, expiration=%v", key, value, expiration))
-	}
-	ctx := context.Background()
-	return RDB.Set(ctx, key, value, expiration).Err()
-}
-
-func RedisGet(key string) (string, error) {
-	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis GET: key=%s", key))
-	}
-	ctx := context.Background()
-	val, err := RDB.Get(ctx, key).Result()
-	return val, err
-}
-
-//func RedisExpire(key string, expiration time.Duration) error {
-//	ctx := context.Background()
-//	return RDB.Expire(ctx, key, expiration).Err()
-//}
-//
-//func RedisGetEx(key string, expiration time.Duration) (string, error) {
-//	ctx := context.Background()
-//	return RDB.GetSet(ctx, key, expiration).Result()
-//}
-
-func RedisDel(key string) error {
-	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis DEL: key=%s", key))
-	}
-	ctx := context.Background()
-	return RDB.Del(ctx, key).Err()
-}
-
 func RedisDelKey(key string) error {
 	if DebugEnabled {
 		SysLog(fmt.Sprintf("Redis DEL Key: key=%s", key))
