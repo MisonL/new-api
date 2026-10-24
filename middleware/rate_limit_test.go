@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -170,5 +172,101 @@ func TestGlobalWebRateLimitSkipsStaticAssets(t *testing.T) {
 	)
 	if secondPage.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected second page request to be rate limited, got %d", secondPage.Code)
+	}
+}
+
+
+// 配置了独立限流的分组此前只用 group 的阈值覆盖，计数 key 仍是 userId：
+// 小限流分组会被该用户的全局用量顶满，本应宽松的分组也会被小分组拖累。
+// 修复要求有独立限流的分组按 "userId:group" 单独计数，无独立限流的分组
+// 仍共用该用户的全局计数。
+func TestRateLimitSubjectSeparatesGroupWithOwnLimit(t *testing.T) {
+	previousGroup := setting.ModelRequestRateLimitGroup
+	setting.ModelRequestRateLimitGroup = map[string][2]int{
+		"strict": {2, 2},
+		"loose":  {500, 500},
+	}
+	t.Cleanup(func() { setting.ModelRequestRateLimitGroup = previousGroup })
+
+	for _, tc := range []struct {
+		name  string
+		group string
+		want  string
+	}{
+		{name: "group with own limit", group: "strict", want: "42:strict"},
+		{name: "group without own limit", group: "default", want: "42"},
+		{name: "empty group", group: "", want: "42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Set("id", 42)
+			common.SetContextKey(c, constant.ContextKeyUserGroup, tc.group)
+
+			if got := rateLimitSubject(c); got != tc.want {
+				t.Fatalf("rateLimitSubject = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// 端到端：用户先在宽松分组（限额 3）耗尽 3 次配额，再到限额 2 的严格分组。
+// 修复前两个分组共用 userId 计数，严格分组的第一个请求就被宽松分组的用量
+// 顶成 429；修复后各有独立预算。
+func TestGroupRateLimitBudgetIsNotSharedAcrossGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalRedisEnabled := common.RedisEnabled
+	originalEnabled := setting.ModelRequestRateLimitEnabled
+	originalDuration := setting.ModelRequestRateLimitDurationMinutes
+	originalGroup := setting.ModelRequestRateLimitGroup
+	originalLimiter := inMemoryRateLimiter
+	t.Cleanup(func() {
+		common.RedisEnabled = originalRedisEnabled
+		setting.ModelRequestRateLimitEnabled = originalEnabled
+		setting.ModelRequestRateLimitDurationMinutes = originalDuration
+		setting.ModelRequestRateLimitGroup = originalGroup
+		inMemoryRateLimiter = originalLimiter
+	})
+
+	common.RedisEnabled = false
+	setting.ModelRequestRateLimitEnabled = true
+	setting.ModelRequestRateLimitDurationMinutes = 1
+	setting.ModelRequestRateLimitGroup = map[string][2]int{
+		"loose":  {3, 3},
+		"strict": {2, 2},
+	}
+	inMemoryRateLimiter = &common.InMemoryRateLimiter{}
+
+	router := gin.New()
+	// router.ServeHTTP 会新建 Context，用户身份与分组由前置中间件从请求头注入
+	router.Use(func(c *gin.Context) {
+		c.Set("id", 42)
+		common.SetContextKey(c, constant.ContextKeyUserGroup, c.GetHeader("X-Test-Group"))
+		c.Next()
+	})
+	router.Use(ModelRequestRateLimit())
+	router.POST("/v1/chat/completions", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	call := func(group string) int {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		req.Header.Set("X-Test-Group", group)
+		router.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	for i := 0; i < 3; i++ {
+		if code := call("loose"); code != http.StatusOK {
+			t.Fatalf("loose request %d = %d, want 200", i+1, code)
+		}
+	}
+	// 宽松分组的 3 次用量不得挤占严格分组的独立预算（限额 2）。
+	if code := call("strict"); code != http.StatusOK {
+		t.Fatalf("strict first request = %d, want 200", code)
+	}
+	if code := call("strict"); code != http.StatusOK {
+		t.Fatalf("strict second request = %d, want 200", code)
+	}
+	if code := call("strict"); code != http.StatusTooManyRequests {
+		t.Fatalf("strict third request = %d, want 429", code)
 	}
 }
