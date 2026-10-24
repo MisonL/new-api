@@ -806,10 +806,16 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	return targetConn, nil
 }
 
+// startPingKeepAlive 在请求准备与重试期间发心跳。返回的 stop 函数会取消心跳并
+// 等待所有在途的 ping 写入结束：调用方在流处理器开始写响应前必须先 stop，否则
+// 心跳与扫描器会并发写同一个 c.Writer（两者用的是不同的锁）。
 func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.CancelFunc {
 	pingerCtx, stopPinger := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var pendingPings sync.WaitGroup
 
 	gopool.Go(func() {
+		defer close(done)
 		defer func() {
 			// 增加panic恢复处理
 			if r := recover(); r != nil {
@@ -849,7 +855,7 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.Canc
 			select {
 			// 发送 ping 数据
 			case <-ticker.C:
-				if err := sendPingData(c, &pingMutex); err != nil {
+				if err := sendPingData(c, &pingMutex, &pendingPings); err != nil {
 					if common2.DebugEnabled {
 						println("SSE ping error, stopping goroutine:", err.Error())
 					}
@@ -871,13 +877,22 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.Canc
 		}
 	})
 
-	return stopPinger
+	return func() {
+		stopPinger()
+		// 先等外层循环退出，再等所有在途 ping 写完（sendPingData 自带 10s
+		// 超时，最坏情况这里等它在途的写结束）。保证 stop 返回后不再有人写
+		// c.Writer。
+		<-done
+		pendingPings.Wait()
+	}
 }
 
-func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
-	// 增加超时控制，防止锁死等待
+func sendPingData(c *gin.Context, mutex *sync.Mutex, pendingPings *sync.WaitGroup) error {
+	// 增加超时控制，防止锁死等待。
+	pendingPings.Add(1)
 	done := make(chan error, 1)
 	go func() {
+		defer pendingPings.Done()
 		mutex.Lock()
 		defer mutex.Unlock()
 
@@ -894,7 +909,8 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 		done <- nil
 	}()
 
-	// 设置发送ping数据的超时时间
+	// 设置发送ping数据的超时时间。超时路径直接返回，但内部 goroutine 可能
+	// 仍在写 c.Writer；stop 会等待所有在途写入结束。
 	select {
 	case err := <-done:
 		return err
