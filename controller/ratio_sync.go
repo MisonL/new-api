@@ -375,7 +375,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 			//  type1: /api/ratio_config -> data 为 map[string]any，包含 model_ratio/completion_ratio/cache_ratio/model_price
 			//  type2: /api/pricing      -> data 为 []Pricing 列表，需要转换为与 type1 相同的 map 格式
 			var body struct {
-				Success bool            `json:"success"`
+				Success *bool           `json:"success"`
 				Data    json.RawMessage `json:"data"`
 				Message string          `json:"message"`
 			}
@@ -386,16 +386,25 @@ func FetchUpstreamRatios(c *gin.Context) {
 				return
 			}
 
-			if !body.Success {
-				ch <- upstreamResult{Name: uniqueName, Err: body.Message}
+			// Success:false 表示上游明确拒绝；message 为空时补一个通用错误串，避免
+			// “伪成功”——前端看到 success:true+empty_data 而显示成功。不带 success
+			// 字段的裸静态载荷视为未表态，交由后续格式解析决定。
+			if envelopeErr := upstreamEnvelopeError(body.Success, body.Message); envelopeErr != "" {
+				ch <- upstreamResult{Name: uniqueName, Err: envelopeErr}
 				return
 			}
 
 			// 若 Data 为空，将继续按 type1 尝试解析（与多数静态 ratio_config 兼容）
 
-			// 尝试按 type1 解析
+			// 尝试按 type1 解析。data 缺失时把整个响应体当作 type1 载荷：不少
+			// 上游直接返回 {"model_ratio":{...}} 这种裸静态数据，没有 success
+			// 也没有 data 包装。
+			type1Source := body.Data
+			if len(type1Source) == 0 {
+				type1Source = bodyBytes
+			}
 			var type1Data map[string]any
-			if err := common.Unmarshal(body.Data, &type1Data); err == nil {
+			if err := common.Unmarshal(type1Source, &type1Data); err == nil {
 				// 如果包含至少一个 ratioTypes 字段，则认为是 type1
 				isType1 := false
 				for _, rt := range pricingSyncFields {
@@ -1092,4 +1101,17 @@ func GetSyncableChannels(c *gin.Context) {
 		"message": "",
 		"data":    syncableChannels,
 	})
+}
+
+// upstreamEnvelopeError 把上游 envelope 的 success/message 翻译成错误串：
+// success 缺失或为 true 返回空串，success=false 返回 message（为空时补通用
+// 描述，避免收集侧把空错误串当成成功）。
+func upstreamEnvelopeError(success *bool, message string) string {
+	if success == nil || *success {
+		return ""
+	}
+	if message != "" {
+		return message
+	}
+	return "upstream returned success=false without a message"
 }
