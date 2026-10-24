@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -63,6 +64,23 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, opts ...Option) (
 	).Int()
 
 	if err != nil {
+		// Redis 重启、主从切换或 SCRIPT FLUSH 之后，进程内缓存的 SHA 失效。
+		// 只用 EVALSHA 会让此后所有限流请求报 rate_limit_check_failed，直到
+		// 进程重启；NOSCRIPT 时回退到 EVAL 重新载入脚本。
+		if strings.HasPrefix(err.Error(), "NOSCRIPT ") {
+			result, evalErr := rl.client.Eval(
+				ctx,
+				rateLimitScript,
+				[]string{key},
+				config.Requested,
+				config.Rate,
+				config.Capacity,
+			).Int()
+			if evalErr != nil {
+				return false, fmt.Errorf("rate limit failed: %w", evalErr)
+			}
+			return result == 1, nil
+		}
 		return false, fmt.Errorf("rate limit failed: %w", err)
 	}
 	return result == 1, nil
