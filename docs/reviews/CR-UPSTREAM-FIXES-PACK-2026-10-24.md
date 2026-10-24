@@ -15,7 +15,8 @@
 | 4 | `55bb6b903` | 078a90632 | 通知限流窗口不再随整点重置 + 非正数回退 | P1 |
 | 5 | `09109ec31` | c3f47288b | 过载哨兵改用容器 cgroup 口径 + 连续性与新鲜度 | P0 |
 | 6 | - | 4757072bb | 倍率同步 envelope 伪成功判定修正（适配本地） | P1 |
-| 7 | 文档修订 | docs | 更新 CR-MULTI-ROUND-AUDIT §11.8 过时说明 | P2 |
+| 7 | - | da37f210e | 请求阶段保活 stop 时 join 在途写入，消除与扫描器的竞态 | P2 |
+| 8 | 文档修订 | docs | 更新 CR-MULTI-ROUND-AUDIT §11.8 过时说明 | P2 |
 
 ## 关键实现要点
 
@@ -68,9 +69,9 @@
 
 | 主题 | 原因 | 建议下一步 |
 |---|---|---|
-| stream write deadline（`7e6596728`） | 本地架构从未设置 WriteTimeout（main.go 注释明确），不存在上游那种“每次写固定 30s 切断慢客户端”的缺陷形态。移植需新增预算机制与 SetWriteDeadline，属于行为增强而非修复。 | 如需要保护慢客户端，可在独立任务中设计并实验预算策略。 |
+| stream write deadline（`7e6596728`） | 本地架构从未设置 WriteTimeout（main.go 注释明确），不存在上游那种”每次写固定 30s 切断慢客户端”的缺陷形态。移植需新增预算机制与 SetWriteDeadline，属于行为增强而非修复。 | 如需要保护慢客户端，可在独立任务中设计并实验预算策略。 |
 | Responses false disconnect（`0c2af9780`） | 本地已有 sr.Done() + IsNormalEnd 处理，行为是否等价需更深度复现。 | 如出现具体 bug 再针对性分析。 |
-| keepalive handoff race（`25372e30b`） | local pinger & scanner 使用不同 mutex；理论存在竞争但未复现。 | 在 `-race` 下压测后决定是否修补。 |
+| keepalive handoff race（`25372e30b`） | 已按 join 语义修复（da37f210e）：stop 等待在途 ping 写完再返回，消除 stop 后仍有 goroutine 并发写 c.Writer 的窗口。上游的 streamKeepAliveWriter 包装器方案未移植（依赖 relaykit 与 ExtendWriteDeadline）。 | 上游完整方案可在后续 relaykit 迁移时再评估。 |
 | OAuth 身份列并发唯一（11.7） | 审计 doc 给出明确的"不修原因"：指针改造（empty string → NULL）波及全库，且 SQLite 无 ALTER COLUMN；半途修复会破坏三库兼容性。 | 作为架构级任务单独立项规划。 |
 | 文档中已过时的部分（如 11.7 OAuth concurrency） | 这些条目是历史决策的长期记录，不应被“修掉”。 | 保持归档，按需更新结论行。 |
 | json migration | 已由 `1c02b5c7b` 完成（业务代码 0 处直接调用）；`dto/openai_request.go` 剩的 7 处在块注释死代码里，不影响运行。 | 可清理死代码但不影响功能。 |
