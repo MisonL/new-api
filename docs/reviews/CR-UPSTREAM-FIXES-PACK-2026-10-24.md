@@ -69,6 +69,8 @@
 
 | 主题 | 原因 | 建议下一步 |
 |---|---|---|
+| JSON Schema 键序丢失（d0b840e75） | Claude 工具 schema 已修（420b20280，dto.Tool.InputSchema 改 RawMessage 并保序）。OpenAI FunctionRequest.Parameters 审计后不改：Gemini/Bedrock/openaicompat 必须读取并改写 schema，改 RawMessage 仍会丢序。详见 CR-SCHEMA-ORDERED-PRESERVATION-2026-10-24.md。 | 若确认 Gemini/Bedrock structured output 受影响，按有序 AST 重写方案立项。 |
+| OpenAI 12h prompt cache（e9d4d6353） | 生产库只读实测近 7 天 0 条 12h 标记（近 30 天 cache 写日志 176932 条），当前无流量；改动跨 dto/计费/表达式/前端/7 套 i18n。详见 CR-OPENAI-12H-CACHE-EVALUATION-2026-10-24.md。 | 日志出现 cache_write_tokens_details 或模型清单加入 GPT-5.6 时立项。 |
 | stream write deadline（`7e6596728`） | 本地架构从未设置 WriteTimeout（main.go 注释明确），不存在上游那种”每次写固定 30s 切断慢客户端”的缺陷形态。移植需新增预算机制与 SetWriteDeadline，属于行为增强而非修复。 | 如需要保护慢客户端，可在独立任务中设计并实验预算策略。 |
 | Responses false disconnect（`0c2af9780`） | 本地已有 sr.Done() + IsNormalEnd 处理，行为是否等价需更深度复现。 | 如出现具体 bug 再针对性分析。 |
 | keepalive handoff race（`25372e30b`） | 已按 join 语义修复（da37f210e）：stop 等待在途 ping 写完再返回，消除 stop 后仍有 goroutine 并发写 c.Writer 的窗口。上游的 streamKeepAliveWriter 包装器方案未移植（依赖 relaykit 与 ExtendWriteDeadline）。 | 上游完整方案可在后续 relaykit 迁移时再评估。 |
