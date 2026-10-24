@@ -1276,21 +1276,22 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
-	// 已知缺口：当 Done 为 true 且 CompletionTokens > 0，但 PromptTokens == 0 时
-	// （上游 message_start 未回报 InputTokens，且 message_delta 也缺该字段，
-	// AWS Bedrock 存在此行为），下面的守卫不成立，本函数不会回填 PromptTokens，
-	// 结算会按 0 输入 token 计算。此处仅记录，不改动回填条件：那会改变计费口径。
-	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
+	// Claude 的 input_tokens 不含 cache 读/写，全缓存 prompt 的输入是显式 0；
+	// 只有 input 与 cache 全为 0 才算输入缺失。输出同理：仅在确实流出了内容
+	// 而 token 计数为 0 时才回填估算，拒答等无输出的显式 0 保持原值。
+	missingInputUsage := buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage).PromptTokens == 0
+	missingOutputUsage := claudeInfo.Usage.CompletionTokens == 0 && claudeInfo.ResponseText.Len() > 0
+	if missingInputUsage || missingOutputUsage || !claudeInfo.Done {
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
 		}
 		// 只补缺失字段，不整份覆盖，保留 message_start 已拿到的 cache 字段
 		fallback := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
-		if claudeInfo.Usage.CompletionTokens == 0 ||
+		if missingOutputUsage ||
 			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {
 			claudeInfo.Usage.CompletionTokens = fallback.CompletionTokens
 		}
-		if claudeInfo.Usage.PromptTokens == 0 {
+		if missingInputUsage {
 			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
 		}
 		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens

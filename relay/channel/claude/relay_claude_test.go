@@ -2,11 +2,15 @@ package claude
 
 import (
 	"encoding/base64"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -784,4 +788,77 @@ func TestRequestOpenAI2ClaudeMessage_DoesNotAddThinkingForOtherModels(t *testing
 	require.True(t, ok)
 	require.Len(t, content, 1)
 	require.Equal(t, "tool_use", content[0].Type)
+}
+
+// 输入全部命中缓存时上游回报的 PromptTokens 是显式 0（cache 在单独字段），
+// 拒答等场景下输出也是显式 0。两者都不该被估算值覆盖。
+func TestHandleStreamFinalResponseKeepsExplicitZeroUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("fully cached prompt keeps zero input", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		info := &relaycommon.RelayInfo{
+			RelayFormat:             types.RelayFormatClaude,
+			FinalRequestRelayFormat: types.RelayFormatClaude,
+			ChannelMeta:             &relaycommon.ChannelMeta{UpstreamModelName: "claude-opus-4-8"},
+		}
+		info.SetEstimatePromptTokens(1234)
+		claudeInfo := &ClaudeResponseInfo{
+			Usage: &dto.Usage{
+				PromptTokens:               0,
+				CompletionTokens:           0,
+				PromptTokensDetails:        dto.InputTokenDetails{CachedTokens: 5000},
+				ClaudeCacheCreation5mTokens: 200,
+			},
+			Done: true,
+		}
+
+		HandleStreamFinalResponse(ctx, info, claudeInfo)
+
+		require.Zero(t, claudeInfo.Usage.PromptTokens)
+		require.Equal(t, 5000, claudeInfo.Usage.PromptTokensDetails.CachedTokens)
+		require.Zero(t, claudeInfo.Usage.CompletionTokens)
+	})
+
+	t.Run("refusal before any output keeps zero output", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		info := &relaycommon.RelayInfo{
+			RelayFormat:             types.RelayFormatClaude,
+			FinalRequestRelayFormat: types.RelayFormatClaude,
+			ChannelMeta:             &relaycommon.ChannelMeta{UpstreamModelName: "claude-opus-4-8"},
+		}
+		info.SetEstimatePromptTokens(1234)
+		claudeInfo := &ClaudeResponseInfo{
+			Usage: &dto.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 0,
+			},
+			Done: true,
+		}
+
+		HandleStreamFinalResponse(ctx, info, claudeInfo)
+
+		require.Zero(t, claudeInfo.Usage.CompletionTokens)
+	})
+
+	t.Run("missing counts are still estimated", func(t *testing.T) {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		info := &relaycommon.RelayInfo{
+			RelayFormat:             types.RelayFormatClaude,
+			FinalRequestRelayFormat: types.RelayFormatClaude,
+			ChannelMeta:             &relaycommon.ChannelMeta{UpstreamModelName: "claude-opus-4-8"},
+		}
+		info.SetEstimatePromptTokens(1234)
+		claudeInfo := &ClaudeResponseInfo{
+			ResponseText: strings.Builder{},
+			Usage:        &dto.Usage{},
+			Done:         false,
+		}
+		claudeInfo.ResponseText.WriteString("partial answer")
+
+		HandleStreamFinalResponse(ctx, info, claudeInfo)
+
+		require.NotZero(t, claudeInfo.Usage.PromptTokens)
+		require.NotZero(t, claudeInfo.Usage.CompletionTokens)
+	})
 }

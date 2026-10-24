@@ -79,6 +79,28 @@ func (summary textQuotaSummary) hasObservedNonTokenUsage() bool {
 		!summary.ToolCallSurchargeQuota.IsZero()
 }
 
+// hasBillableUsage 判断该请求是否有应计费用量。Claude 把 cache 读/写与普通
+// 输入分开回报：输入全部命中缓存时 PromptTokens 为 0，TotalTokens 也因此
+// 可能为 0，但 cache token 本身就是计费用量，不能只看 token 计数。
+func (summary textQuotaSummary) hasBillableUsage() bool {
+	if summary.TotalTokens > 0 || !summary.ToolCallSurchargeQuota.IsZero() ||
+		summary.hasObservedNonTokenUsage() {
+		return true
+	}
+	return summary.IsClaudeUsageSemantic && (summary.CacheTokens > 0 ||
+		summary.CacheCreationTokens > 0 ||
+		summary.CacheCreationTokens5m > 0 ||
+		summary.CacheCreationTokens1h > 0)
+}
+
+// hasClaudeCacheOnlyUsage 供 PostTextConsumeQuota 区分“上游没回报用量”与
+// “usage 全落在 cache 上”。前者不该把请求计入用户/渠道用量，后者该计。
+func (summary textQuotaSummary) hasClaudeCacheOnlyUsage() bool {
+	return summary.IsClaudeUsageSemantic && summary.TotalTokens == 0 &&
+		(summary.CacheTokens > 0 || summary.CacheCreationTokens > 0 ||
+			summary.CacheCreationTokens5m > 0 || summary.CacheCreationTokens1h > 0)
+}
+
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
 	if summary.CacheCreationTokens5m > 0 || summary.CacheCreationTokens1h > 0 {
 		splitCacheWriteTokens := summary.CacheCreationTokens5m + summary.CacheCreationTokens1h
@@ -429,7 +451,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.Quota = int(quotaCalculateDecimal.Round(0).IntPart())
 	}
 
-	if summary.TotalTokens == 0 && summary.ToolCallSurchargeQuota.IsZero() && audioInputQuota.IsZero() {
+	if !summary.hasBillableUsage() {
 		summary.Quota = 0
 	} else if !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
@@ -916,7 +938,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 调用 %d 次，调用花费 %s", summary.ImageGenerationCallCount, decimal.NewFromFloat(summary.ImageGenerationTotal).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
 
-	if summary.TotalTokens == 0 && !summary.hasObservedNonTokenUsage() {
+	if summary.TotalTokens == 0 && !summary.hasObservedNonTokenUsage() && !summary.hasClaudeCacheOnlyUsage() {
 		if isBenignCanceledTextStream(relayInfo) {
 			extraContent = append(extraContent, "客户端已断开，未收到完整计费信息，无法扣费")
 			logger.LogInfo(ctx, fmt.Sprintf("stream client disconnected before usage, userId %d, channelId %d, tokenId %d, model %s, pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))

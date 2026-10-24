@@ -1299,3 +1299,79 @@ func TestComposeTieredTextQuotaErrorFallbackUsesPreConsumedQuota(t *testing.T) {
 	require.Equal(t, int64(12500), summary.ToolCallSurchargeQuota.Round(0).IntPart())
 	require.Equal(t, 14500, quota)
 }
+
+// Claude 的 cache 读/写 token 与普通输入分开回报。输入全部命中缓存时
+// PromptTokens 为 0，但请求仍须按 cache 计费；TotalTokens 只含普通输入与
+// 输出，不能单独用来判断“有没有可计费用量”。
+func TestCalculateTextQuotaSummaryClaudeCacheOnlyUsageRemainsBillable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	priceData := types.PriceData{
+		ModelRatio:           2.5,
+		CompletionRatio:      5,
+		CacheRatio:           0.1,
+		CacheCreationRatio:   1.25,
+		CacheCreation5mRatio: 1.25,
+		CacheCreation1hRatio: 2,
+		GroupRatioInfo:       types.GroupRatioInfo{GroupRatio: 1},
+	}
+
+	for _, tc := range []struct {
+		name  string
+		usage *dto.Usage
+		quota int
+	}{
+		{
+			name: "cache read only",
+			usage: &dto.Usage{
+				PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 100},
+				UsageSemantic:       "anthropic",
+			},
+			// 100 * 0.1 * 2.5
+			quota: 25,
+		},
+		{
+			name: "five-minute cache write only",
+			usage: &dto.Usage{
+				PromptTokensDetails:         dto.InputTokenDetails{CachedCreationTokens: 100},
+				ClaudeCacheCreation5mTokens: 100,
+				UsageSemantic:               "anthropic",
+			},
+			// 100 * 1.25 * 2.5
+			quota: 313,
+		},
+		{
+			name: "one-hour cache write only",
+			usage: &dto.Usage{
+				PromptTokensDetails:         dto.InputTokenDetails{CachedCreationTokens: 20000},
+				ClaudeCacheCreation1hTokens: 20000,
+				UsageSemantic:               "anthropic",
+			},
+			// 20000 * 2 * 2.5
+			quota: 100000,
+		},
+		{
+			name:  "no usage",
+			usage: &dto.Usage{UsageSemantic: "anthropic"},
+			quota: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			relayInfo := &relaycommon.RelayInfo{
+				RelayFormat:             types.RelayFormatClaude,
+				FinalRequestRelayFormat: types.RelayFormatClaude,
+				OriginModelName:         "claude-opus-4-8",
+				PriceData:               priceData,
+				StartTime:               time.Now(),
+			}
+
+			summary := calculateTextQuotaSummary(ctx, relayInfo, tc.usage)
+
+			require.Zero(t, summary.PromptTokens)
+			require.Zero(t, summary.CompletionTokens)
+			require.Equal(t, tc.quota, summary.Quota)
+			require.Equal(t, tc.quota > 0, summary.hasBillableUsage())
+		})
+	}
+}
