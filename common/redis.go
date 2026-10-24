@@ -203,40 +203,6 @@ func RedisHGetObj(key string, obj interface{}) error {
 	return nil
 }
 
-// RedisIncr Add this function to handle atomic increments
-func RedisIncr(key string, delta int64) error {
-	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis INCR: key=%s, delta=%d", key, delta))
-	}
-	// 检查键的剩余生存时间
-	ttlCmd := RDB.TTL(context.Background(), key)
-	ttl, err := ttlCmd.Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return fmt.Errorf("failed to get TTL: %w", err)
-	}
-
-	// 只有在 key 存在且有 TTL 时才需要特殊处理
-	if ttl > 0 {
-		ctx := context.Background()
-		// 开始一个Redis事务
-		txn := RDB.TxPipeline()
-
-		// 减少余额
-		decrCmd := txn.IncrBy(ctx, key, delta)
-		if err := decrCmd.Err(); err != nil {
-			return err // 如果减少失败，则直接返回错误
-		}
-
-		// 重新设置过期时间，使用原来的过期时间
-		txn.Expire(ctx, key, ttl)
-
-		// 执行事务
-		_, err = txn.Exec(ctx)
-		return err
-	}
-	return nil
-}
-
 func RedisHIncrBy(key, field string, delta int64) error {
 	if DebugEnabled {
 		SysLog(fmt.Sprintf("Redis HINCRBY: key=%s, field=%s, delta=%d", key, field, delta))
