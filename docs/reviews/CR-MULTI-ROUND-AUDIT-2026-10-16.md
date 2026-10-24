@@ -809,7 +809,18 @@ sidecar 门禁调用，对应断言均按预期失败。`web/default` 的 `forma
 -tAc "select ... from pg_indexes where tablename='users'"` 与重复行计数查询，
 输出如上。未修改任何代码。
 
-### 11.8 encoding/json 迁移文档与仓库现状不符（2026-10-19 复查，未修）
+### 11.8 encoding/json 迁移文档与仓库现状不符（2026-10-19 复查；2026-10-24 已修）
+
+**2026-10-24 结论：本节记录的事实已修复。** 提交 `1c02b5c7b`（refactor(json):
+业务代码统一改用 common JSON 包装器）完成了本节记录的 128 处替换，AGENTS.md
+的 JSON 约束现已满足。当前 `git ls-files '*.go'` 全量（排除 `_test.go` 与
+`common/` 包装自身所在包）统计 `json.Marshal|Unmarshal|NewDecoder|NewEncoder|
+MarshalIndent|Valid` 的活跃调用为 0；`dto/openai_request.go` 中剩余的 7 处
+命中全部位于 941-1112 行的 `/* ... */` 块注释死代码内，不参与编译。
+`CR-JSON-HELPER-MIGRATION-2026-09-22.md` 描述的“剩余违规 0”与今天的仓库
+状态一致，但真正落地的是 `1c02b5c7b` 而非该文档所称的迁移。
+
+以下为 2026-10-19 的原始记录，保留作为历史依据。
 
 `docs/reviews/CR-JSON-HELPER-MIGRATION-2026-09-22.md` 声称"状态：迁移完成，全仓
 测试通过"，并给出"剩余违规文件: 0"。仓库现状与这份声明不符。
