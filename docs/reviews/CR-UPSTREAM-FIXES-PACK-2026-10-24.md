@@ -81,8 +81,9 @@
 后端：
 - `go build ./...` exit 0
 - `go vet ./...` exit 0
-- `go test ./service ./controller ./middleware ./common ./relay/channel/claude -count=1` all pass
-- `GOTOOLCHAIN=go1.27.3 govulncheck ./...` 0 个可达漏洞（前置依赖升级已验证）
+- `go test ./... -count=1` 全部包 ok（后台实跑，退出码 0）
+- `go test -race ./service ./middleware ./common ./relay/helper -count=1` 全部 ok
+- `go test ./service -count=1 -shuffle=on` 失败约 20 个，全部是 "sql: database is closed"（共享 TestMain sqlite 连接被某个测试关闭的既有测试污染）；已用基线 worktree 对照：修复前提交 c161d611a 同样失败约 20 个同类用例，确认与本轮改动无关。该污染为独立既有任务（与 shuffle 计数泄漏的记忆条目同源），未在本轮处理。
 
 前端：未变动，保持之前验证结果。
 
