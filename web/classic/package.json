@@ -91,6 +91,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "autoprefixer": "^10.6.1",
     "code-inspector-plugin": "^2.0.9",
+    "esbuild": "^0.28.0",
     "eslint": "^10.13.0",
     "eslint-plugin-header": "^3.1.1",
     "eslint-plugin-react-hooks": "^7.1.1",
