@@ -214,21 +214,44 @@ fn load_or_create_desktop_runtime_config_prefers_existing_file_over_env() {
     cleanup_test_dir(&test_dir);
 }
 
+// /api/status 的实际响应把 version 放在 data 下：
+// {"success":true,"message":"","data":{"version":"v0.0.0",...}}
+// 只看顶层 version 会让桌面端永远等不到就绪。
 #[test]
-fn is_ready_status_response_accepts_success_payload() {
-    let response =
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"version\":\"1.0.0\"}";
+fn is_ready_status_response_accepts_real_api_status_payload() {
+    let response = concat!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        "{\"success\":true,\"message\":\"\",\"data\":{\"version\":\"v0.0.0\",\"start_time\":1}}"
+    );
     assert!(is_ready_status_response(response));
 }
 
 #[test]
+fn is_ready_status_response_rejects_success_without_data_version() {
+    let no_data = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"message\":\"\"}";
+    let empty_data = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"data\":{}}";
+    let null_data = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"data\":null}";
+    let empty_version = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"data\":{\"version\":\"\"}}";
+    let top_level_only =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"version\":\"1.0.0\"}";
+
+    assert!(!is_ready_status_response(no_data));
+    assert!(!is_ready_status_response(empty_data));
+    assert!(!is_ready_status_response(null_data));
+    assert!(!is_ready_status_response(empty_version));
+    assert!(!is_ready_status_response(top_level_only));
+}
+
+#[test]
 fn is_ready_status_response_rejects_non_ready_payload() {
-    let non_200 =
-        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"version\":\"1.0.0\"}";
+    let non_200 = concat!(
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n",
+        "{\"success\":true,\"data\":{\"version\":\"1.0.0\"}}"
+    );
     let missing_version =
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true}";
     let missing_success =
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"version\":\"1.0.0\"}";
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"data\":{\"version\":\"1.0.0\"}}";
 
     assert!(!is_ready_status_response(non_200));
     assert!(!is_ready_status_response(missing_version));

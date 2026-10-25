@@ -118,8 +118,15 @@ pub fn is_ready_status_response(response: &str) -> bool {
         Ok(value) => value,
         Err(_) => return false,
     };
-    payload.get("success").and_then(serde_json::Value::as_bool) == Some(true)
-        && payload.get("version").is_some()
+    if payload.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
+        return false;
+    }
+    // /api/status 把版本号包在 data 里，顶层没有 version。
+    payload
+        .get("data")
+        .and_then(|data| data.get("version"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|version| !version.is_empty())
 }
 
 pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnosis {
