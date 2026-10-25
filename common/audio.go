@@ -307,8 +307,28 @@ func getWebMDuration(r io.ReadSeeker) (float64, error) {
 	return 0, errors.New("failed to parse webm file")
 }
 
+// adtsHeaderBytes 是 ADTS 头部在无 CRC 时的字节数；带 CRC（protection_absent=0）
+// 时还要多 2 字节。
+const adtsHeaderBytes = 7
+
+// findADTSSyncword 从 offset 起查找 ADTS 同步字（0xFF 后跟高 4 位为 0xF）。
+func findADTSSyncword(data []byte, offset int) int {
+	if offset < 0 {
+		offset = 0
+	}
+	for i := offset; i < len(data)-1; i++ {
+		if data[i] == 0xFF && data[i+1]&0xF0 == 0xF0 {
+			return i
+		}
+	}
+	return -1
+}
+
 // getAACDuration 解析 AAC (ADTS格式) 文件以获取时长。
-// 使用 gomedia 库来解析 AAC ADTS 帧
+//
+// 帧遍历自己做边界校验，不用 gomedia 的 SplitAACFrame：后者按声明长度推进游标，
+// Frame_length 为 0 时原地踏步形成死循环，声明长度超出剩余字节时切片越界 panic，
+// 采样率索引超出 13 项表时索引越界 panic。这三者都能由一个上传的畸形 .aac 触发。
 func getAACDuration(r io.ReadSeeker) (float64, error) {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return 0, errors.Wrap(err, "failed to seek aac file")
@@ -323,18 +343,42 @@ func getAACDuration(r io.ReadSeeker) (float64, error) {
 	var totalFrames int64
 	var sampleRate int
 
-	// 使用 gomedia 的 SplitAACFrame 函数来分割 AAC 帧
-	codec.SplitAACFrame(data, func(aac []byte) {
-		// 解析 ADTS 头部以获取采样率信息
-		if len(aac) >= 7 {
-			// 使用 ConvertADTSToASC 来获取音频配置信息
-			asc, err := codec.ConvertADTSToASC(aac)
-			if err == nil && sampleRate == 0 {
-				sampleRate = codec.AACSampleIdxToSample(int(asc.Sample_freq_index))
-			}
-			totalFrames++
+	offset := 0
+	for {
+		start := findADTSSyncword(data, offset)
+		if start < 0 {
+			break
 		}
-	})
+		if len(data)-start < adtsHeaderBytes {
+			return 0, errors.New("truncated aac frame header")
+		}
+
+		var adts codec.ADTS_Frame_Header
+		adts.Decode(data[start:])
+
+		headerLength := adtsHeaderBytes
+		if adts.Fix_Header.Protection_absent == 0 {
+			headerLength += 2 // CRC 校验位
+		}
+		frameLength := int(adts.Variable_Header.Frame_length)
+		if frameLength < headerLength {
+			return 0, fmt.Errorf("invalid aac frame length %d", frameLength)
+		}
+		if start+frameLength > len(data) {
+			return 0, errors.New("aac frame length exceeds remaining data")
+		}
+
+		freqIndex := int(adts.Fix_Header.Sampling_frequency_index)
+		if freqIndex >= len(codec.AAC_Sampling_Idx) {
+			return 0, fmt.Errorf("unsupported aac sampling frequency index %d", freqIndex)
+		}
+		if sampleRate == 0 {
+			sampleRate = codec.AAC_Sampling_Idx[freqIndex]
+		}
+
+		totalFrames++
+		offset = start + frameLength
+	}
 
 	if sampleRate == 0 || totalFrames == 0 {
 		return 0, errors.New("no valid aac frames found")
