@@ -95,6 +95,7 @@
     "eslint": "^10.13.0",
     "eslint-plugin-header": "^3.1.1",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
     "i18next-cli": "^1.80.0",
     "postcss": "^8.5.31",
     "prettier": "^3.9.10",
