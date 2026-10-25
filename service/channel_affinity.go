@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/samber/hot"
 	"github.com/tidwall/gjson"
 )
@@ -96,9 +97,14 @@ func getChannelAffinityCache() *cachex.HybridCache[int] {
 
 		channelAffinityCache = cachex.NewHybridCache[int](cachex.HybridCacheConfig[int]{
 			Namespace: cachex.Namespace(channelAffinityCacheNamespace),
-			Redis:     common.RDB,
-			RedisEnabled: func() bool {
-				return common.RedisEnabled && common.RDB != nil
+			// 缓存进程内只建一次，Redis 客户端必须每次操作时解析。若在构造时
+			// 抓 common.RDB，测试替换 RDB（或生产重连）后旧客户端已被关闭，
+			// 后续读写要么命中残留数据要么报 "redis: client is closed"。
+			RedisFunc: func() *redis.Client {
+				if !common.RedisEnabled {
+					return nil
+				}
+				return common.RDB
 			},
 			RedisCodec: cachex.IntCodec{},
 			Memory: func() *hot.HotCache[string, int] {

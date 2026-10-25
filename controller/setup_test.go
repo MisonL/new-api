@@ -33,6 +33,15 @@ func setupSetupControllerTestDB(t *testing.T) *gorm.DB {
 	previousDB := model.DB
 	previousLogDB := model.LOG_DB
 
+	// InitOptionMap 会整体重建 common.OptionMap，PostSetup 又会经
+	// persistDerivedServerAddress 写入 ServerAddress。这里必须在 InitOptionMap
+	// 之前保存旧表，否则恢复的是重建后的空表，本用例的
+	// "http://127.0.0.1:13000" 会留在进程级配置里，后续同包用例读
+	// OptionMap["ServerAddress"] 时拿到它（-shuffle 下 CAS 重定向用例失败）。
+	common.OptionMapRWMutex.Lock()
+	previousOptionMap := common.OptionMap
+	common.OptionMapRWMutex.Unlock()
+
 	gin.SetMode(gin.TestMode)
 	common.UsingSQLite = true
 	common.UsingMySQL = false
@@ -68,6 +77,9 @@ func setupSetupControllerTestDB(t *testing.T) *gorm.DB {
 		operation_setting.SelfUseModeEnabled = previousSelfUseMode
 		operation_setting.DemoSiteEnabled = previousDemoSiteMode
 		system_setting.ServerAddress = previousServerAddress
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previousOptionMap
+		common.OptionMapRWMutex.Unlock()
 		common.UsingSQLite = previousUsingSQLite
 		common.UsingMySQL = previousUsingMySQL
 		common.UsingPostgreSQL = previousUsingPostgreSQL

@@ -21,6 +21,10 @@ import (
 )
 
 const npmCliVersionRecordedOptionsKey = "NpmCLIVersionRecordedOptions"
+
+// npmCliVersionSourceRecorded 标记来自 OptionMap 记录快照的缓存条目。
+// 这类条目由快照整体替换，而不是由 registry 刷新维护。
+const npmCliVersionSourceRecorded = "recorded"
 const npmCliVersionRecordedPersistMaxAttempts = 5
 const npmCliVersionRecordedPersistRetryBaseDelay = 5 * time.Millisecond
 
@@ -31,6 +35,9 @@ var (
 	npmCliVersionRecordedState     = struct {
 		sync.Mutex
 		raw string
+		// packages 记录最近一次从快照装入的包名集合；下次同步时，
+		// 快照里不再出现的包会移除自己的缓存条目。
+		packages map[string]struct{}
 	}{}
 	sleepBeforeNpmCLIVersionRecordedRetry = time.Sleep
 	npmCliVersionRecordedRetryJitter      = func() time.Duration {
@@ -182,7 +189,7 @@ func setCachedNpmCLIVersionOptions(packageName string, options []NpmCLIVersionOp
 }
 
 func setCachedNpmCLIVersionOptionsWithFetchedAt(packageName string, options []NpmCLIVersionOption, fetchedAt time.Time) {
-	setCachedNpmCLIVersionOptionsWithFetchedAtAndSource(packageName, options, fetchedAt, "recorded")
+	setCachedNpmCLIVersionOptionsWithFetchedAtAndSource(packageName, options, fetchedAt, npmCliVersionSourceRecorded)
 }
 
 func setCachedNpmCLIVersionOptionsWithFetchedAtAndSource(packageName string, options []NpmCLIVersionOption, fetchedAt time.Time, source string) {
@@ -202,7 +209,7 @@ func setCachedNpmCLIVersionOptionsFromRecord(packageName string, options []NpmCL
 	if latestVersion == "" {
 		return
 	}
-	effectiveSource := "recorded"
+	effectiveSource := npmCliVersionSourceRecorded
 	if len(source) > 0 && strings.TrimSpace(source[0]) != "" {
 		effectiveSource = strings.TrimSpace(source[0])
 	}
@@ -281,26 +288,51 @@ type recordedNpmCLIPackageOptions struct {
 	Options       []NpmCLIVersionOption `json:"options"`
 }
 
+// loadRecordedNpmCLIVersionOptions 把 OptionMap 里的记录同步进进程级缓存。
+//
+// 记录是一份完整快照，因此同步必须是"替换"而不是"只增"：键被删除、或快照里
+// 已经不含某个包时，上一次由快照装入的条目必须一并移除。此前只要键不存在就
+// 直接 return，缓存条目会永久留在进程里，同进程后续任何解析 CLI 请求头模板的
+// 代码都会读到已失效的版本（测试里表现为 UA 被别的用例播种的版本覆盖）。
+// 只删除自己上次装入的包，避免误删比快照更新的条目与 registry 刷新结果。
 func loadRecordedNpmCLIVersionOptions() {
 	common.OptionMapRWMutex.RLock()
 	raw := strings.TrimSpace(common.OptionMap[npmCliVersionRecordedOptionsKey])
 	common.OptionMapRWMutex.RUnlock()
-	if raw == "" {
-		return
-	}
 
 	npmCliVersionRecordedState.Lock()
 	if raw == npmCliVersionRecordedState.raw {
 		npmCliVersionRecordedState.Unlock()
 		return
 	}
+	previousPackages := npmCliVersionRecordedState.packages
 	npmCliVersionRecordedState.Unlock()
 
-	var recorded recordedNpmCLIVersionOptions
-	if err := common.Unmarshal([]byte(raw), &recorded); err != nil {
-		logger.LogWarn(context.Background(), fmt.Sprintf("load npm cli version recorded options failed: %v", err))
-		return
+	recorded := recordedNpmCLIVersionOptions{}
+	if raw != "" {
+		if err := common.Unmarshal([]byte(raw), &recorded); err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("load npm cli version recorded options failed: %v", err))
+			return
+		}
 	}
+
+	currentPackages := make(map[string]struct{}, len(recorded.Packages))
+	for packageName := range recorded.Packages {
+		currentPackages[strings.TrimSpace(packageName)] = struct{}{}
+	}
+
+	npmCliVersionCache.Lock()
+	for packageName := range previousPackages {
+		if _, stillPresent := currentPackages[packageName]; stillPresent {
+			continue
+		}
+		if entry, exists := npmCliVersionCache.items[packageName]; exists && entry.source == npmCliVersionSourceRecorded {
+			delete(npmCliVersionCache.items, packageName)
+		}
+	}
+	npmCliVersionCache.Unlock()
+
+	installed := make(map[string]struct{}, len(currentPackages))
 	for packageName, packageRecord := range recorded.Packages {
 		normalizedPackageName := strings.TrimSpace(packageName)
 		if !IsAllowedNpmCLIPackage(normalizedPackageName) || len(packageRecord.Options) == 0 {
@@ -312,9 +344,11 @@ func loadRecordedNpmCLIVersionOptions() {
 			packageRecord.FetchedAt,
 			packageRecord.LatestVersion,
 		)
+		installed[normalizedPackageName] = struct{}{}
 	}
 	npmCliVersionRecordedState.Lock()
 	npmCliVersionRecordedState.raw = raw
+	npmCliVersionRecordedState.packages = installed
 	npmCliVersionRecordedState.Unlock()
 }
 
