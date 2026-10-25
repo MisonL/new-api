@@ -36,9 +36,17 @@ var PayMethods = []map[string]string{
 	},
 }
 
+// UpdatePayMethodsByJsonString replaces the payment method list.
+//
+// The payload is decoded first, so a malformed submission cannot leave the
+// cashier with an empty list after returning an error.
 func UpdatePayMethodsByJsonString(jsonString string) error {
-	PayMethods = make([]map[string]string, 0)
-	return common.Unmarshal([]byte(jsonString), &PayMethods)
+	loaded := make([]map[string]string, 0)
+	if err := common.Unmarshal([]byte(jsonString), &loaded); err != nil {
+		return err
+	}
+	PayMethods = loaded
+	return nil
 }
 
 func PayMethods2JsonString() string {

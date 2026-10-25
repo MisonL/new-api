@@ -1,6 +1,7 @@
 package setting
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -34,12 +35,23 @@ func UserUsableGroups2JSONString() string {
 	return string(jsonBytes)
 }
 
+// UpdateUserUsableGroupsByJSONString replaces the group description map.
+//
+// The payload is decoded into a fresh map before the lock is taken, so a
+// rejected submission leaves the live map intact instead of emptying it.
 func UpdateUserUsableGroupsByJSONString(jsonStr string) error {
+	loaded := make(map[string]string)
+	if err := common.Unmarshal([]byte(jsonStr), &loaded); err != nil {
+		return err
+	}
+	if loaded == nil {
+		return errors.New("user usable groups payload must be a JSON object")
+	}
+
 	userUsableGroupsMutex.Lock()
 	defer userUsableGroupsMutex.Unlock()
-
-	userUsableGroups = make(map[string]string)
-	return common.Unmarshal([]byte(jsonStr), &userUsableGroups)
+	userUsableGroups = loaded
+	return nil
 }
 
 func GetUsableGroupDescription(groupName string) string {

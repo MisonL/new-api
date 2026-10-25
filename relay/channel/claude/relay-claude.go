@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -255,24 +256,80 @@ func normalizeClaudeInputSchema(parameters any, toolName string) (json.RawMessag
 		return nil, fmt.Errorf("tool %s parameters must be a JSON object", toolName)
 	}
 
-	// 只在缺少 type 时补 "type":"object"；已有 type 必须校验为字符串。
+	// 只在完全缺少 type 时补 "type":"object"。已有 type 必须原样是字符串
+	// "object"：null 或 array/string 之类既不是合法的工具参数 schema，也不能
+	// 靠文本拼接"覆盖"——拼出来的 {"type":"object","type":null,...} 是重复键，
+	// JSON 解码取后者，客户端显式写的值反而胜出。
 	var probe struct {
 		Type json.RawMessage `json:"type"`
 	}
 	if err := common.Unmarshal(raw, &probe); err != nil {
 		return nil, fmt.Errorf("tool %s parameters must be a JSON object: %w", toolName, err)
 	}
-	if len(probe.Type) == 0 || common.GetJsonType(probe.Type) == "null" {
+	if duplicates, err := countTopLevelKey(raw, "type"); err != nil {
+		return nil, fmt.Errorf("tool %s parameters must be a JSON object: %w", toolName, err)
+	} else if duplicates > 1 {
+		return nil, fmt.Errorf("tool %s parameters.type must appear exactly once", toolName)
+	}
+	if len(probe.Type) == 0 {
 		return injectSchemaObjectType(raw, toolName)
 	}
 	if common.GetJsonType(probe.Type) != "string" {
-		return nil, fmt.Errorf("tool %s parameters.type must be a string", toolName)
+		return nil, fmt.Errorf("tool %s parameters.type must be a string, got %s",
+			toolName, common.GetJsonType(probe.Type))
+	}
+	var typeName string
+	if err := common.Unmarshal(probe.Type, &typeName); err != nil {
+		return nil, fmt.Errorf("tool %s parameters.type must be a string: %w", toolName, err)
+	}
+	if typeName != "object" {
+		return nil, fmt.Errorf("tool %s parameters.type must be \"object\", got %q", toolName, typeName)
 	}
 	return raw, nil
 }
 
+// countTopLevelKey 统计 JSON 对象顶层出现指定键的次数。重复键本身就让文档
+// 有歧义（不同解析器取首次或末次），所以补 type 前后都要能发现它。
+func countTopLevelKey(raw json.RawMessage, key string) (int, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil {
+		return 0, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return 0, errors.New("schema must be a JSON object")
+	}
+	count := 0
+	depth := 0
+	for decoder.More() || depth > 0 {
+		token, err := decoder.Token()
+		if err != nil {
+			return 0, err
+		}
+		switch value := token.(type) {
+		case json.Delim:
+			if value == '{' || value == '[' {
+				depth++
+			} else {
+				depth--
+			}
+		case string:
+			if depth == 0 && value == key {
+				count++
+				// 跳过该键的值，避免把值里的同名键也数进来。
+				var skip json.RawMessage
+				if err := decoder.Decode(&skip); err != nil {
+					return 0, err
+				}
+			}
+		}
+	}
+	return count, nil
+}
+
 // injectSchemaObjectType 在保留原始字节顺序的前提下，向 schema 对象头部插入
-// "type":"object"。走 map 再编码会丢失 properties 顺序，这里只做文本拼接。
+// "type":"object"。走 map 再编码会丢失 properties 顺序，这里只做文本拼接；
+// 调用方已确认原文没有 type 键，因此拼出来的文档不会出现重复键。
 func injectSchemaObjectType(raw json.RawMessage, toolName string) (json.RawMessage, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "{}" {

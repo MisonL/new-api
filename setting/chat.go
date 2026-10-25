@@ -34,9 +34,17 @@ var Chats = []map[string]string{
 	},
 }
 
+// UpdateChatsByJsonString replaces the chat client list with a parsed payload.
+//
+// Decoding happens into a fresh slice first: the previous clear-then-decode
+// order emptied the list even when the payload was rejected.
 func UpdateChatsByJsonString(jsonString string) error {
-	Chats = make([]map[string]string, 0)
-	return common.Unmarshal([]byte(jsonString), &Chats)
+	loaded := make([]map[string]string, 0)
+	if err := common.Unmarshal([]byte(jsonString), &loaded); err != nil {
+		return err
+	}
+	Chats = loaded
+	return nil
 }
 
 func Chats2JsonString() string {
