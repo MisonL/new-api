@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -73,6 +74,44 @@ func (cm *ConfigManager) Read(name string, fn func(config interface{})) {
 		return
 	}
 	fn(config)
+}
+
+// ReadLive executes fn with the live config object while the manager read lock is
+// held. Use it for hot-path field reads: the alternative raw-pointer getters read
+// a struct that Update rewrites field by field, which is a data race.
+//
+// fn runs under the read lock, so it must only inspect the object: no blocking
+// calls, and no re-entry into ConfigManager.
+func (cm *ConfigManager) ReadLive(name string, fn func(config interface{})) bool {
+	if fn == nil {
+		return false
+	}
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+	config := cm.configs[name]
+	if config == nil {
+		return false
+	}
+	fn(config)
+	return true
+}
+
+// Update applies a map of "<field json tag>" -> string values to a registered
+// config module under the manager write lock.
+//
+// Every production write must go through here (or LoadFromDB): applying the map
+// unlocked races with ReadLive/Read/ExportAllConfigs, which observe the same
+// struct. Returns an error for an unregistered module so callers cannot believe
+// a write landed when nothing was updated.
+func (cm *ConfigManager) Update(name string, configMap map[string]string) error {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+
+	config, ok := cm.configs[name]
+	if !ok || config == nil {
+		return fmt.Errorf("config module %q is not registered", name)
+	}
+	return updateConfigFromMap(config, configMap)
 }
 
 // LoadFromDB 从数据库加载配置
@@ -310,7 +349,11 @@ func ConfigToMap(config interface{}) (map[string]string, error) {
 	return configToMap(config)
 }
 
-// UpdateConfigFromMap 从map更新配置对象（导出函数）
+// UpdateConfigFromMap 从map更新配置对象（导出函数）。
+//
+// Deprecated: 该函数不持管理器锁，直接对注册配置调用它会与
+// Read/ReadLive/ExportAllConfigs 构成数据竞争。注册配置的写入一律走
+// ConfigManager.Update；此导出形式仅供测试直接操作自有的结构体。
 func UpdateConfigFromMap(config interface{}, configMap map[string]string) error {
 	return updateConfigFromMap(config, configMap)
 }

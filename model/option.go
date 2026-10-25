@@ -334,8 +334,8 @@ func updateOptionMap(key string, value string) (err error) {
 			if !boolValue {
 				newVal = "TOKENS"
 			}
-			if cfg := config.GlobalConfig.Get("general_setting"); cfg != nil {
-				_ = config.UpdateConfigFromMap(cfg, map[string]string{"quota_display_type": newVal})
+			if err := config.GlobalConfig.Update("general_setting", map[string]string{"quota_display_type": newVal}); err != nil {
+				common.SysError("failed to sync DisplayInCurrencyEnabled to general_setting: " + err.Error())
 			}
 		case "DisplayTokenStatEnabled":
 			common.DisplayTokenStatEnabled = boolValue
@@ -757,11 +757,14 @@ func handleConfigUpdate(key, value string) bool {
 		return false // 未注册的配置
 	}
 
-	// 更新配置
+	// 更新配置（写入必须经 ConfigManager.Update 持锁，否则与热路径读取竞争）
 	configMap := map[string]string{
 		configKey: value,
 	}
-	config.UpdateConfigFromMap(cfg, configMap)
+	if err := config.GlobalConfig.Update(configName, configMap); err != nil {
+		common.SysError("failed to update config " + configName + "." + configKey + ": " + err.Error())
+		return true
+	}
 
 	// 特定配置的后处理
 	if configName == "performance_setting" {
