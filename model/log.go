@@ -141,7 +141,13 @@ func buildLogChannelDetail(channel *Channel) *LogChannelDetail {
 	return detail
 }
 
-func formatUserLogs(logs []*Log, startIdx int) {
+// formatUserLogs 抹掉用户无权看到的字段。
+//
+// 这里不能改写 Id：DELETE /api/log/self/:id 按 (id, user_id) 精确定位行，
+// 而前端表格把返回的 id 当作行 key 并原样用来删除。曾经把它改成
+// startIdx+i+1 的分页序号（更早是 id%1024），于是每页第一行都变成 id=1，
+// 点击删除命中的是同一用户最早的一条日志，而不是屏幕上那一条。
+func formatUserLogs(logs []*Log) {
 	for i := range logs {
 		logs[i].ChannelId = 0
 		logs[i].ChannelName = ""
@@ -181,7 +187,6 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			}
 		}
 		logs[i].Other = common.MapToJsonStr(otherMap)
-		logs[i].Id = startIdx + i + 1
 	}
 }
 
@@ -292,7 +297,7 @@ func redactUserLogContent(content string) string {
 
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order("id desc").Limit(common.MaxRecentItems).Find(&logs).Error
-	formatUserLogs(logs, 0)
+	formatUserLogs(logs)
 	return logs, err
 }
 
@@ -800,7 +805,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 		}
 	}
 
-	formatUserLogs(logs, startIdx)
+	formatUserLogs(logs)
 	return logs, total, err
 }
 
