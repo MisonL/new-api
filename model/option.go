@@ -736,6 +736,23 @@ func validateOptionValue(key string, value string) error {
 	case "GlobalRateLimitAdminExemptEnabled":
 		_, err := operation_setting.NormalizeRateLimitAdminExempt(value)
 		return err
+	case "ModelRatio", "ModelPrice", "CompletionRatio", "CacheRatio", "CreateCacheRatio",
+		"ImageRatio", "AudioRatio", "AudioCompletionRatio", "GroupRatio":
+		// These run before the DB write so a rejected payload never lands in the
+		// options table. Validation in the ratio_setting setters alone is too
+		// late: UpdateOption persists first and dispatches second, leaving the
+		// bad value stored and only the in-memory table untouched.
+		return ratio_setting.ValidateNonNegativeRatioJSON(value)
+	case "GroupGroupRatio":
+		return ratio_setting.ValidateNonNegativeNestedRatioJSON(value)
+	case "group_ratio_setting.group_ratio":
+		// The dotted key bypasses UpdateGroupRatioByJSONString: the generic
+		// dispatch hands it to the layered config system, which unmarshals
+		// straight into the RWMap field. Without this case the same negative
+		// ratio that the top-level key rejects lands in the live table.
+		return ratio_setting.ValidateNonNegativeRatioJSON(value)
+	case "group_ratio_setting.group_group_ratio":
+		return ratio_setting.ValidateNonNegativeNestedRatioJSON(value)
 	default:
 		return nil
 	}
