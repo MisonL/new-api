@@ -81,7 +81,7 @@
 | P2 | web/classic DocumentRenderer/index.jsx:50-65 | classic sanitizeHtml 只删 <style>，配合多处 dangerouslySetInnerHTML |
 | P3 | common/audio.go:157、191 | M4A Timescale=0 / OGG sampleRate=0 时长 +Inf，进入 token 计算 |
 | P3 | docs/reviews/CR-SCHEMA-ORDERED-PRESERVATION-2026-10-24.md | 含 emoji 违反 AGENTS.md；两处代码引用失实 |
-| P3 | deploy/env/dev-isolated.env.example:11 | DEV_REDIS_PORT=6380 与实际 env 6381 不一致 |
+| P3 | deploy/env/dev-isolated.env.example:11 | `DEV_REDIS_PORT=6380` 与本地未跟踪 env 的 6381 不一致（复核推翻，见第六节第 9 条） |
 
 ---
 
@@ -130,9 +130,9 @@
 4. **P1** AAC 死循环 → SplitAACFrame 对 Frame_length=0 返回错误。
 5. **P1** classic ESLint 断裂 → 迁移 flat config 或回退 eslint 8.x。
 6. **P1** 桌面端就绪探测 → is_ready_status_response 查 data.version。
-7. **P2** 负倍率守卫 → UpdateModelRatioByJSONString 前增加 `<0` 校验。
-8. **P2** 日志 ID 重写误删 → formatUserLogs 不重写 Id，前端改用分页游标删除。
-9. **P2** MySQL 端口不一致 → 修改 .example 与实例一致（6381）。
+7. **P2** 负倍率守卫 → 10 个 Update*ByJSONString 与 UpdateOption 落库前双重校验（已完成，见第六节）。
+8. **P2** 日志 ID 重写误删 → formatUserLogs 不再重写 Id，返回真实主键（已完成，见第六节）。
+9. **P2** 端口不一致 → 复核推翻，见第六节第 9 条：实现值与契约一致，偏差只在未跟踪的本地 env，且原定修复方向会与 legacy 栈撞端口。
 10. **P2** Redis 闭连泄漏 → test cleanup 重建 Redis client 而非仅恢复指针。
 
 ### 已知暂缓项（已记录，本次复核无异议）
@@ -140,6 +140,88 @@
 - OpenAI 12h prompt cache（当前流量 0，实施收益为零）。
 - Bedrock cache creation 拆分未实现（SDK 支持但未映射，性能关注点）。
 - 三库兼容性测试覆盖率不足（SQLite only，PG/MySQL gate 测 100% skip）。
+
+---
+
+## 六、修复实施记录（按清单顺序）
+
+每项都先复现 RED，再修到 GREEN，并在本轮运行验证命令。
+
+### 1-4. Claude schema / 配置清空 / 配置竞争 / AAC 死循环
+
+提交 `2ddfb7437`、`e2114d145`、`f8735c1b1`。验证命令与结果见各提交说明与
+`docs/reviews/CR-FULL-DIMENSION-AUDIT-2026-10-25.md`。
+
+### 5. classic ESLint 断裂（提交 `295e4c98b`）
+
+- 迁移到 `eslint.config.js` flat config，规则集与原 `.eslintrc.cjs` 一致。
+- `eslint-plugin-header@3.1.1`（最新版）仍用 ESLint 10 已删除的
+  `context.getSourceCode()`，且无 `meta.schema`；新增
+  `header-plugin-compat.mjs` 在本地补 schema 并把 `create()` 的 context 包一层
+  浅拷贝映射到 `context.sourceCode`。规则判断与自动修复逻辑不改。
+  注意：Proxy 方案不可行，ESLint 10 的 context 上有只读不可配置属性
+  （`report` 等），返回包装函数会触发 Proxy 不变量 TypeError。
+- `globals` 升 17.13.0（11.12.0 的全局名带尾随空格，flat config 直接报错）。
+- 删除 `.eslintrc.cjs` 与 `.eslintignore`。
+- 验证：`bun run eslint` 退出码 0（= CI `repo-gates.yml` 的门禁命令）；
+  反向验证构造缺头部/错头部/多空行三个探针均被正确报错、`--fix` 可自动补头；
+  `bun run lint`（prettier）退出码 0。
+- 首次仅用 `src/index.jsx` 验证时该文件无违规，规则未走到 `report`，Proxy 缺陷
+  未暴露；正是加反向探针才抓到的，不能以"单文件通过"代替规则有效。
+
+### 6. 桌面端就绪探测（提交 `b37521b18`）
+
+- `/api/status` 返回 `{success, message, data:{version,...}}`，顶层无 `version`。
+- `f56ab6fc8` 把"整串包含 `\"version\":`"改成"顶层必须有 version 键"后恒为
+  false，桌面端 sidecar 已就绪也永远等到超时并误报 Unexpected service。
+- 改为校验 `success` 且 `data.version` 为非空字符串；仅顶层 version 一律不认，
+  避免同端口其他服务伪造就绪。
+- 验证：`cargo test --test runtime_support` 23 passed；用隔离开发服务真实
+  3.7KB 响应体驱动谓词返回 true；`cargo clippy --all-targets` 无警告。
+
+### 7. 负倍率守卫（提交 `52b281d09`）
+
+- 负倍率意味着反向计费：quota 为负时 `PostConsumeQuota` 走 `IncreaseUserQuota`。
+- 两层守卫：`setting/ratio_setting` 的 10 个 `Update*ByJSONString` 在替换内存表前
+  校验；`model.validateOptionValue` 在落库前校验，避免坏值先进 DB 而只有内存表未被
+  更新（管理员界面与重启回载长期不一致）。
+- 分层键 `group_ratio_setting.group_ratio` / `.group_group_ratio` 同样覆盖：它们
+  绕过 setter，由通用派发直接反序列化进 RWMap 字段，实测同一负值顶层键被拒、
+  点号键却生效。
+- 0 仍合法（未定价模型靠它 fail-closed）；NaN/Inf 一并拒绝。
+- 验证：新增 5 个测试（10 表 + 嵌套表 + 3 个落库前拒绝，含分层键），全部先 RED
+  后 GREEN；`go test ./controller ./model ./relay/common ./relay/helper ./service
+  ./setting/...` 通过。
+
+### 8. 用户日志 ID 重写误删（提交 `4ab7b3b1f`）
+
+- `formatUserLogs` 把 Id 改写成 `startIdx+i+1`（更早是 `Id%1024`），而
+  `DELETE /api/log/self/:id` 按 `(id, user_id)` 精确定位，前端把返回 id 当行 key
+  并原样用于删除：每页第一行都是 id=1，删除命中的是该用户最早一条。
+- 改为不再改写 Id。管理员接口 `GetAllLogs` 一直是真 ID，用户侧与之一致。
+  脱敏逻辑不变。
+- 验证：新增测试显式写入远离分页序号的主键，先复现"返回 id=3 对应真实
+  id=500002"（RED），修复后返回真实主键且能删掉刚展示的那一行（GREEN）。
+  注：首版测试因自增 id 恰好等于分页序号而误判为通过，改用显式主键后才真正复现。
+
+### 9. 端口不一致：复核推翻，维持现状
+
+`DEV_REDIS_PORT` 三处已相互一致，均为 6380：
+
+- `deploy/env/dev-isolated.env.example:11`
+- `deploy/compose/dev-isolated.yml:99` 的默认值
+- `scripts/compose-healthcheck-contract.py:247` 的契约期望
+
+6381 是 **legacy 栈**的默认端口（`docker-compose.dev.yml:77` 的
+`DEV_LEGACY_REDIS_PORT` 默认值、`dev-legacy.env.example:10`、契约脚本 legacy 段）。
+把 isolated 的 example 改成 6381 会与 legacy 栈撞默认端口。
+
+实际偏差在**未跟踪的个人配置** `deploy/env/dev-isolated.env`（`DEV_REDIS_PORT=6381`，
+`.gitignore` 第 48 行忽略），只影响宿主机调试端口；应用连 Redis 走容器网
+`redis:6379`，与宿主端口无关。该偏差已由
+`CR-MULTI-ROUND-AUDIT-2026-10-16.md` 记录并裁定不改，本次复核无新证据。
+
+结论：无需改仓库文件；原清单"修改 .example 与实例一致（6381）"方向错误。
 
 ---
 
