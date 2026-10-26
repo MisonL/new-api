@@ -74,6 +74,15 @@ func GetPageQuery(c *gin.Context) *PageInfo {
 		}
 	}
 
+	// 负数不是"翻到更早的页"，而是无效输入：gorm 的 clause.Limit 对负值
+	// 不输出 LIMIT，等于整表返回。起始页与页大小都必须夹到有效区间。
+	if pageInfo.Page < 1 {
+		pageInfo.Page = 1
+	}
+	if pageInfo.PageSize < 1 {
+		pageInfo.PageSize = ItemsPerPage
+	}
+
 	if pageInfo.PageSize > 100 {
 		pageInfo.PageSize = 100
 	}
