@@ -102,7 +102,11 @@ pub fn bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), St
         .env("REDIS_CONN_STRING", "")
         .env("SESSION_SECRET", desktop_secrets.session_secret)
         .env("CRYPTO_SECRET", desktop_secrets.crypto_secret)
-        .env("SQLITE_PATH", sqlite_path.to_string_lossy().to_string());
+        .env("SQLITE_PATH", sqlite_path.to_string_lossy().to_string())
+        // 独立进程组：插件层的 kill 走 killpg，能把 sidecar 自己派生的
+        // 子进程一起回收，也避免终端信号误伤。注意这不能解决"父进程被
+        // SIGKILL 后 sidecar 变孤儿"——那需要子进程侧监听父进程退出。
+        .set_process_group(true);
 
     let (rx, child) = sidecar_command.spawn().map_err(|err| err.to_string())?;
     store_sidecar(&app, child);
