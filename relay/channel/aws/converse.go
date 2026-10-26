@@ -284,9 +284,6 @@ func convertOpenAIMessagesToConverse(c *gin.Context, info *relaycommon.RelayInfo
 			if strings.TrimSpace(message.ToolCallId) != "" {
 				return nil, nil, fmt.Errorf("messages[%d]: tool_call_id is only valid for tool messages", messageIndex)
 			}
-			if reasoning := message.GetReasoningContent(); reasoning != "" {
-				return nil, nil, fmt.Errorf("messages[%d]: reasoning_content cannot be replayed to AWS Converse without its provider signature", messageIndex)
-			}
 			content, err := message.ParseContentStrict()
 			if err != nil {
 				return nil, nil, fmt.Errorf("messages[%d]: %w", messageIndex, err)
@@ -298,13 +295,40 @@ func convertOpenAIMessagesToConverse(c *gin.Context, info *relaycommon.RelayInfo
 			if len(toolCalls) > 0 && role != "assistant" {
 				return nil, nil, fmt.Errorf("messages[%d]: tool_calls are only valid for assistant messages", messageIndex)
 			}
-			blocks := make([]bedrocktypes.ContentBlock, 0, len(content)+len(toolCalls))
+			blocks := make([]bedrocktypes.ContentBlock, 0, len(content)+len(toolCalls)+1)
+			// Bedrock 的 thinking 块要求文本与签名一起回传。Converse 的 Claude
+			// 输出不带 signature（OpenAI 形状没有载体），客户端下一轮会原样
+			// 回传 thinking 文本，转换后成为 reasoning_content。旧实现无条件
+			// 拒绝它，形成"自己产出、自己拒绝"的链路，多轮思考对话必然 400。
+			// SDK 的 ReasoningTextBlock.Signature 是可选字段，这里按文本重放。
+			// 只接受本网关注入的 reasoning_content；ThinkingContent/Reasoning
+			// 是 provider 私有别名，没有对应语义，继续 fail-closed。
+			if message.ThinkingContent != nil || message.Reasoning != nil {
+				return nil, nil, fmt.Errorf("messages[%d]: provider-specific reasoning_content aliases cannot be replayed to AWS Converse", messageIndex)
+			}
+			if reasoning := message.GetReasoningContent(); reasoning != "" && role == "assistant" {
+				blocks = append(blocks, &bedrocktypes.ContentBlockMemberReasoningContent{
+					Value: &bedrocktypes.ReasoningContentBlockMemberReasoningText{
+						Value: bedrocktypes.ReasoningTextBlock{Text: common.GetPointer(reasoning)},
+					},
+				})
+			}
 			for contentIndex, part := range content {
 				block, err := convertOpenAIContentBlock(c, info, role, part, messageIndex, contentIndex)
 				if err != nil {
 					return nil, nil, err
 				}
 				blocks = append(blocks, block)
+				// Claude 的 cache_control 逐块给出缓存边界，Converse 用独立的
+				// cachePoint 内容块表达同一语义。丢掉它等于静默关掉缓存：
+				// 请求仍然成功，但后续每轮都按全价输入计费。
+				if len(part.CacheControl) > 0 {
+					cachePoint, err := converseCachePointBlock(part.CacheControl, messageIndex, contentIndex)
+					if err != nil {
+						return nil, nil, err
+					}
+					blocks = append(blocks, cachePoint)
+				}
 			}
 			for callIndex, call := range toolCalls {
 				block, err := convertOpenAIToolUse(call, messageIndex, callIndex)
@@ -432,6 +456,32 @@ func convertOpenAIContentBlock(c *gin.Context, info *relaycommon.RelayInfo, role
 	default:
 		return nil, fmt.Errorf("messages[%d].content[%d] type %q is not supported by AWS Converse", messageIndex, contentIndex, part.Type)
 	}
+}
+
+// converseCachePointBlock maps a Claude cache_control marker onto Bedrock's
+// cachePoint content block. Only "ephemeral" is defined by the Anthropic
+// schema; its ttl (absent = 5m, "1h") selects the Bedrock TTL. An unknown
+// shape fails closed instead of silently dropping the cache boundary.
+func converseCachePointBlock(raw []byte, messageIndex, contentIndex int) (bedrocktypes.ContentBlock, error) {
+	var marker struct {
+		Type string `json:"type"`
+		TTL  string `json:"ttl"`
+	}
+	if err := common.Unmarshal(raw, &marker); err != nil {
+		return nil, fmt.Errorf("messages[%d].content[%d]: cache_control is not valid json: %w", messageIndex, contentIndex, err)
+	}
+	if marker.Type != "" && marker.Type != "ephemeral" {
+		return nil, fmt.Errorf("messages[%d].content[%d]: cache_control type %q is not supported by AWS Converse", messageIndex, contentIndex, marker.Type)
+	}
+	block := bedrocktypes.CachePointBlock{Type: bedrocktypes.CachePointTypeDefault}
+	switch marker.TTL {
+	case "":
+	case string(bedrocktypes.CacheTTLOneHour):
+		block.Ttl = bedrocktypes.CacheTTLOneHour
+	default:
+		return nil, fmt.Errorf("messages[%d].content[%d]: cache_control ttl %q is not supported by AWS Converse", messageIndex, contentIndex, marker.TTL)
+	}
+	return &bedrocktypes.ContentBlockMemberCachePoint{Value: block}, nil
 }
 
 func converseImageFormat(mimeType string) (string, error) {
@@ -827,6 +877,7 @@ func converseUsage(usage *bedrocktypes.TokenUsage) *dto.Usage {
 	} else {
 		result.TotalTokens = result.PromptTokens + result.CompletionTokens
 	}
+	applyConverseCacheTokens(usage, &result.PromptTokensDetails, &result.ClaudeCacheCreation5mTokens, &result.ClaudeCacheCreation1hTokens)
 	return result
 }
 
@@ -841,7 +892,46 @@ func converseClaudeUsage(usage *bedrocktypes.TokenUsage) *dto.ClaudeUsage {
 	if usage.OutputTokens != nil {
 		result.OutputTokens = int(*usage.OutputTokens)
 	}
+	if usage.CacheReadInputTokens != nil {
+		result.CacheReadInputTokens = int(*usage.CacheReadInputTokens)
+	}
+	if usage.CacheWriteInputTokens != nil {
+		result.CacheCreationInputTokens = int(*usage.CacheWriteInputTokens)
+	}
+	result.ClaudeCacheCreation5mTokens, result.ClaudeCacheCreation1hTokens = converseCacheCreationSplit(usage)
 	return result
+}
+
+// applyConverseCacheTokens fills the cache counters from Bedrock's TokenUsage.
+// Without them the openai billing branch charges the whole prompt at full
+// price: cache_ratio and the cache-creation ratios never apply.
+func applyConverseCacheTokens(usage *bedrocktypes.TokenUsage, details *dto.InputTokenDetails, cache5m, cache1h *int) {
+	if usage.CacheReadInputTokens != nil {
+		details.CachedTokens = int(*usage.CacheReadInputTokens)
+	}
+	if usage.CacheWriteInputTokens != nil {
+		details.CachedCreationTokens = int(*usage.CacheWriteInputTokens)
+	}
+	*cache5m, *cache1h = converseCacheCreationSplit(usage)
+}
+
+// converseCacheCreationSplit reads the per-TTL breakdown. CacheDetails is only
+// populated when the upstream reports the split; callers must treat zeros as
+// "no split available", not as "no cache creation".
+func converseCacheCreationSplit(usage *bedrocktypes.TokenUsage) (int, int) {
+	var fiveMinutes, oneHour int
+	for _, detail := range usage.CacheDetails {
+		if detail.InputTokens == nil {
+			continue
+		}
+		switch detail.Ttl {
+		case bedrocktypes.CacheTTLOneHour:
+			oneHour += int(*detail.InputTokens)
+		case bedrocktypes.CacheTTLFiveMinutes:
+			fiveMinutes += int(*detail.InputTokens)
+		}
+	}
+	return fiveMinutes, oneHour
 }
 
 type converseStreamState struct {
