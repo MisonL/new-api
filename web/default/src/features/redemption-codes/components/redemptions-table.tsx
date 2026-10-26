@@ -138,7 +138,10 @@ export function RedemptionsTable() {
     onPaginationChange,
     onGlobalFilterChange,
     onColumnFiltersChange,
-    manualPagination: !globalFilter,
+    // 分页由服务端完成，搜索词也随查询串发给后端。旧写法
+    // manualPagination: !globalFilter 会在带筛选时对服务端已切好的这一页
+    // 再切片，第 2 页恒空并把页码弹回 1。列筛选仍是当前页内的客户端筛选。
+    manualPagination: true,
     pageCount: Math.ceil((data?.total || 0) / pagination.pageSize),
   })
 

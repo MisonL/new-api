@@ -157,7 +157,13 @@ export function UsersTable() {
     onPaginationChange,
     onGlobalFilterChange,
     onColumnFiltersChange,
-    manualPagination: !globalFilter,
+    // 分页一律由服务端完成（查询串带 p/page_size）。旧写法
+    // manualPagination: !globalFilter 会在带搜索词时改由客户端二次切片：
+    // 服务端已经只返回这一页的 20 行，第 2 页再取 20-40 行必然为空，
+    // pageCount 退化成 1，ensurePageInRange 又把页码弹回 1。
+    // 列筛选（status/role/group）仍然只在当前页内生效，保持手动分页 +
+    // 客户端筛选的组合即可。
+    manualPagination: true,
     pageCount: Math.ceil((data?.total || 0) / pagination.pageSize),
   })
 
