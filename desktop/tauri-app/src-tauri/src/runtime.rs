@@ -91,6 +91,10 @@ pub fn bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), St
         .map_err(|err| err.to_string())?
         .current_dir(&app_data_dir)
         .env("PORT", runtime_config.port.to_string())
+        // 只绑回环。桌面端的探针、窗口和预检全部假设 127.0.0.1，而
+        // Go 服务不设 HOST 时绑全部网卡：在公共网络里会把整个控制台
+        // （包括无鉴权的首次 /api/setup）暴露给同网段其他人。
+        .env("HOST", DEFAULT_LOCAL_SERVER_HOST)
         .env("NEW_API_SKIP_DOTENV", "true")
         .env("SQL_DSN", "local")
         .env("LOG_SQL_DSN", "")

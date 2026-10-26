@@ -241,7 +241,7 @@ func main() {
 	// only applies between requests on a keep-alive connection, so it is safe
 	// for SSE.
 	srv := &http.Server{
-		Addr:              ":" + port,
+		Addr:              common.ResolveListenAddress(port),
 		Handler:           server,
 		ReadHeaderTimeout: time.Duration(common.GetEnvOrDefault("READ_HEADER_TIMEOUT_SECONDS", 30)) * time.Second,
 		IdleTimeout:       time.Duration(common.GetEnvOrDefault("IDLE_TIMEOUT_SECONDS", 120)) * time.Second,
