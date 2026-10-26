@@ -4,6 +4,7 @@ mod native_i18n;
 mod runtime;
 pub mod runtime_support;
 mod service_management;
+mod sidecar_exit;
 mod state;
 pub mod window_bounds;
 mod windowing;

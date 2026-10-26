@@ -27,6 +27,7 @@ use crate::{
         load_or_create_desktop_runtime_config, load_or_create_desktop_secrets,
         probe_readiness_response, DesktopRuntimeConfig, ReadinessProbeResult,
     },
+    sidecar_exit,
     state::{
         clear_sidecar, clear_starting, clear_startup_error, clear_stopping_sidecar,
         has_running_sidecar, is_quitting, is_starting, is_stopping_sidecar, mark_quitting,
@@ -231,10 +232,10 @@ pub fn stop_sidecar<R: Runtime>(app_handle: &AppHandle<R>) {
         .expect("sidecar state lock poisoned");
 
     if let Some(child) = guard.take() {
-        if let Err(err) = child.kill() {
-            eprintln!("failed to stop sidecar: {err}");
-            clear_stopping_sidecar(app_handle);
-        }
+        // SIGTERM first: the Go sidecar flushes batch deltas and dashboard
+        // aggregates only from its signal handler, and the plugin's kill is
+        // SIGKILL on Unix.
+        sidecar_exit::stop(child);
     } else {
         clear_stopping_sidecar(app_handle);
     }

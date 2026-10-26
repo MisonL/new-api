@@ -2154,6 +2154,7 @@ name = "new-api-tauri-desktop"
 version = "1.1.0"
 dependencies = [
  "getrandom 0.4.3",
+ "libc",
  "log",
  "serde",
  "serde_json",

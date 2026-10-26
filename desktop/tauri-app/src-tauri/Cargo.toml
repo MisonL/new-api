@@ -28,3 +28,8 @@ tauri-plugin-dialog = "2.8.3"
 tauri-plugin-log = "2.10.1"
 tauri-plugin-shell = "2.5.0"
 tauri-plugin-single-instance = "2.5.4"
+
+# SIGTERM/SIGKILL 常量与 kill(2)。只在 Unix 上需要：Windows 没有可移植的
+# 优雅终止信号，走插件自身的 TerminateProcess。
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
