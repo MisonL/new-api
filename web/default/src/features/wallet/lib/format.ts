@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import { formatLocalCurrencyAmount } from '@/lib/currency'
 import { DEFAULT_DISCOUNT_RATE } from '../constants'
 
@@ -46,12 +47,12 @@ export function formatCurrency(amount: number | string): string {
 /**
  * Get discount label for display (e.g., "20% OFF")
  */
-export function getDiscountLabel(discount: number): string {
+export function getDiscountLabel(discount: number, t: TFunction): string {
   if (discount >= DEFAULT_DISCOUNT_RATE) {
     return ''
   }
   const off = Math.round((1 - discount) * 100)
-  return `${off}% OFF`
+  return t('{{percent}}% OFF', { percent: off })
 }
 
 /**

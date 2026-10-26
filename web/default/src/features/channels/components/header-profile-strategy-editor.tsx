@@ -1260,8 +1260,9 @@ export function HeaderProfileStrategyEditor({
                               )}
                             </div>
                             <p className='text-muted-foreground mt-1 line-clamp-2 text-xs'>
-                              {profile.description ||
-                                t('Complete static request header snapshot.')}
+                              {profile.description
+                                ? t(profile.description)
+                                : t('Complete static request header snapshot.')}
                             </p>
                           </button>
 

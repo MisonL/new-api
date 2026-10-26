@@ -8,7 +8,8 @@ import type { TopupStatus } from '../types'
 
 interface StatusConfig {
   variant: StatusBadgeProps['variant']
-  label: string
+  // i18n 键；组件里用 t(labelKey) 渲染，否则非英语界面会一直显示英文。
+  labelKey: string
 }
 
 /**
@@ -17,15 +18,15 @@ interface StatusConfig {
 export const STATUS_CONFIG: Record<TopupStatus, StatusConfig> = {
   success: {
     variant: 'success',
-    label: 'Success',
+    labelKey: 'Success',
   },
   pending: {
     variant: 'warning',
-    label: 'Pending',
+    labelKey: 'Pending',
   },
   expired: {
     variant: 'danger',
-    label: 'Expired',
+    labelKey: 'Expired',
   },
 }
 

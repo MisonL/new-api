@@ -313,7 +313,7 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
       AI_CODING_CLI_DEFAULT_PLATFORM
     ),
     description:
-      '模板只固定客户端身份，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。',
+      'The template only fixes the client identity and presets pass_headers so session, window, turn metadata and sticky routing headers are relayed from real Codex requests.',
     previewText: '',
   },
   {
@@ -329,7 +329,7 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
       Originator: 'Codex Desktop',
     },
     description:
-      '模板只固定 Codex App 客户端身份，不能与 codex-tui 混用，并自动预设从真实 Codex 请求透传会话、窗口、turn metadata 与 sticky routing 动态请求头的 pass_headers。',
+      'The template only fixes the Codex App client identity and must not be mixed with codex-tui; it presets pass_headers so session, window, turn metadata and sticky routing headers are relayed from real Codex requests.',
     previewText: '',
   },
   {
@@ -395,7 +395,7 @@ const BASE_HEADER_PROFILES: HeaderProfile[] = [
     scope: 'builtin',
     readonly: true,
     description:
-      '固定请求头静态快照来自 Antigravity CLI 原始请求身份；此模板仅固定客户端身份。若后续确认需要动态头，应基于真实客户端抓包在高级参数覆盖中手动配置 pass_headers。',
+      'The static header snapshot comes from the original Antigravity CLI request identity; this template only fixes the client identity. If dynamic headers turn out to be required, configure pass_headers manually in the advanced parameter override based on real client captures.',
     headers: {
       'User-Agent':
         'antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)',

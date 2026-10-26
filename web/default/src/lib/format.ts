@@ -1,3 +1,4 @@
+import { t } from 'i18next'
 import dayjs from '@/lib/dayjs'
 import {
   formatCurrencyFromUSD,
@@ -100,7 +101,7 @@ export function quotaUnitsToDollars(units: number): number {
  */
 export function formatTimestamp(timestamp: number): string {
   if (timestamp === -1) {
-    return 'Never'
+    return t('Never')
   }
   return formatTimestampToDate(timestamp)
 }

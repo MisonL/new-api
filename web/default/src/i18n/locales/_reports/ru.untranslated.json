@@ -1,4 +1,13 @@
 {
+  "Go to page {{page}}": "Go to page {{page}}",
+  "Pay {{amount}}": "Pay {{amount}}",
+  "Payment": "Payment",
+  "Save {{amount}}": "Save {{amount}}",
+  "The static header snapshot comes from the original Antigravity CLI request identity; this template only fixes the client identity. If dynamic headers turn out to be required, configure pass_headers manually in the advanced parameter override based on real client captures.": "The static header snapshot comes from the original Antigravity CLI request identity; this template only fixes the client identity. If dynamic headers turn out to be required, configure pass_headers manually in the advanced parameter override based on real client captures.",
+  "The template only fixes the client identity and presets pass_headers so session, window, turn metadata and sticky routing headers are relayed from real Codex requests.": "The template only fixes the client identity and presets pass_headers so session, window, turn metadata and sticky routing headers are relayed from real Codex requests.",
+  "The template only fixes the Codex App client identity and must not be mixed with codex-tui; it presets pass_headers so session, window, turn metadata and sticky routing headers are relayed from real Codex requests.": "The template only fixes the Codex App client identity and must not be mixed with codex-tui; it presets pass_headers so session, window, turn metadata and sticky routing headers are relayed from real Codex requests.",
+  "Try adjusting your search": "Try adjusting your search",
+  "Your transaction history will appear here": "Your transaction history will appear here",
   "AI Coding CLI": "AI Coding CLI",
   "API SDK / Debug": "API SDK / Debug",
   "Accepted request body size (bytes)": "Accepted request body size (bytes)",

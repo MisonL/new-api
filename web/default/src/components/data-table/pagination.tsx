@@ -112,7 +112,9 @@ export function DataTablePagination<TData>({
                     }
                   }}
                 >
-                  <span className='sr-only'>Go to page {pageNumber}</span>
+                  <span className='sr-only'>
+                    {t('Go to page {{page}}', { page: pageNumber })}
+                  </span>
                   {pageNumber}
                 </Button>
               )}

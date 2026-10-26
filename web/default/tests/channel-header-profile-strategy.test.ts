@@ -59,8 +59,10 @@ describe('channel header profile strategy settings', () => {
     expect(agy?.headers['User-Agent']).toBe(
       'antigravity/cli/1.0.14 (aidev_client; os_type=darwin; arch=amd64)'
     )
-    expect(agy?.description).toContain('手动配置 pass_headers')
-    expect(agy?.description).not.toContain('Antigravity CLI 请求头透传模板')
+    // 描述是展示给用户的文案，已改为 i18n 源串（英文），渲染时按当前语言翻译；
+    // 这里只锁语义：必须说明动态头要在高级参数覆盖里手动配置 pass_headers。
+    expect(agy?.description).toContain('configure pass_headers manually')
+    expect(agy?.description).not.toContain('请求头透传模板')
   })
 
   test('channel edit keeps untouched User-Agent related submit state', () => {
