@@ -75,36 +75,16 @@ func GetCodexChannelUsage(c *gin.Context) {
 		return
 	}
 
-	if (statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden) && strings.TrimSpace(oauthKey.RefreshToken) != "" {
-		refreshCtx, refreshCancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
-		defer refreshCancel()
-
-		res, refreshErr := service.RefreshCodexOAuthTokenWithProxy(refreshCtx, oauthKey.RefreshToken, ch.GetSetting().Proxy)
-		if refreshErr == nil {
-			oauthKey.AccessToken = res.AccessToken
-			oauthKey.RefreshToken = res.RefreshToken
-			oauthKey.LastRefresh = time.Now().Format(time.RFC3339)
-			oauthKey.Expired = res.ExpiresAt.Format(time.RFC3339)
-			if strings.TrimSpace(oauthKey.Type) == "" {
-				oauthKey.Type = "codex"
-			}
-
-			encoded, encErr := common.Marshal(oauthKey)
-			if encErr == nil {
-				_ = model.DB.Model(&model.Channel{}).Where("id = ?", ch.Id).Update("key", string(encoded)).Error
-				model.InitChannelCache()
-				service.ResetProxyClientCache()
-			}
-
-			ctx2, cancel2 := context.WithTimeout(c.Request.Context(), 15*time.Second)
-			defer cancel2()
-			statusCode, body, err = service.FetchCodexWhamUsage(ctx2, client, ch.GetBaseURL(), oauthKey.AccessToken, accountID)
-			if err != nil {
-				common.SysError("failed to fetch codex usage after refresh: " + err.Error())
-				c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取用量信息失败，请稍后重试"})
-				return
-			}
-		}
+	// 这里曾经在上游 401/403 时顺手刷新并持久化 OAuth token。GET 是查询
+	// 接口，写库副作用让审计、缓存与幂等语义全部失真，也让独立的
+	// POST /:id/codex/refresh 形同虚设。凭证过期请显式调用刷新入口。
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+		c.JSON(http.StatusOK, gin.H{
+			"success":         false,
+			"message":         "凭证已失效，请使用「刷新凭证」重新授权后重试",
+			"upstream_status": statusCode,
+		})
+		return
 	}
 
 	var payload any
