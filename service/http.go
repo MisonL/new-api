@@ -54,6 +54,21 @@ func ShouldCopyUpstreamHeader(c *gin.Context, key string, values []string) bool 
 	return true
 }
 
+// CopyUpstreamHeaders mirrors upstream response headers onto the downstream
+// response through the same filter as every other relay path. Copying the map
+// verbatim lets an upstream set cookies on the gateway origin and forwards
+// hop-by-hop headers that only describe the gateway-to-upstream connection.
+func CopyUpstreamHeaders(c *gin.Context, headers http.Header) {
+	for key, values := range headers {
+		if !ShouldCopyUpstreamHeader(c, key, values) {
+			continue
+		}
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+}
+
 var upstreamRequestIDHeaderPriority = []string{
 	common.RequestIdKey,
 	"X-Request-Id",
