@@ -21,6 +21,15 @@ use crate::{
 
 const SERVICE_MANAGEMENT_HTML: &str = include_str!("../assets/service_management.html");
 
+/// 页面只有内联样式和内联脚本，只 fetch 同源的 /api/*，所以可以收紧到
+/// 默认拒绝：不需要远程脚本、远程样式、字体、图片或框架。
+const SERVICE_MANAGEMENT_CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; \
+     style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; \
+     base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/// 状态变更请求必须带的自定义头。
+const SERVICE_MANAGEMENT_REQUEST_HEADER: &str = "x-newapi-service-request";
+
 #[derive(Debug, Serialize)]
 struct ServiceManagementState {
     startup_status: String,
@@ -55,6 +64,13 @@ pub fn handle_request<R: Runtime>(
     request: tauri::http::Request<Vec<u8>>,
 ) -> Response<Cow<'static, [u8]>> {
     let path = request.uri().path();
+
+    if !is_state_changing_request_authorized(request.method(), request.headers()) {
+        return text_response(
+            StatusCode::FORBIDDEN,
+            "missing service management request header",
+        );
+    }
 
     match (request.method(), path) {
         (&Method::GET, "/") | (&Method::GET, "/index.html") => {
@@ -154,11 +170,22 @@ fn update_runtime_config<R: Runtime>(app: &AppHandle<R>, port: u16) -> Result<St
 }
 
 fn html_response(body: &'static str) -> Response<Cow<'static, [u8]>> {
-    build_response(
-        StatusCode::OK,
-        "text/html; charset=utf-8",
-        Cow::Borrowed(body.as_bytes()),
-    )
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CONTENT_SECURITY_POLICY, SERVICE_MANAGEMENT_CSP)
+        .body(Cow::Borrowed(body.as_bytes()))
+        .unwrap_or_else(|_| Response::new(Cow::Borrowed(b"internal server error")))
+}
+
+/// 这个协议只给服务管理窗口自己用，但同一 webview 里的任何脚本（含被注入的
+/// 第三方内容）都能直接 fetch 它。自定义头不属于 CORS 简单请求：没有本应用
+/// 写入的标记头就不放行，避免普通 GET/表单式请求顺带改掉端口或触发重启。
+fn is_state_changing_request_authorized(method: &Method, headers: &tauri::http::HeaderMap) -> bool {
+    if method == Method::GET || method == Method::HEAD {
+        return true;
+    }
+    headers.contains_key(SERVICE_MANAGEMENT_REQUEST_HEADER)
 }
 
 fn json_response<T: Serialize>(payload: T) -> Response<Cow<'static, [u8]>> {
@@ -360,5 +387,43 @@ fn as_json_items(value: Value) -> Vec<Value> {
         Value::Array(items) => items,
         Value::Null => Vec::new(),
         other => vec![other],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_state_changing_request_authorized;
+    use tauri::http::{HeaderMap, Method};
+
+    #[test]
+    fn get_requests_are_always_authorized() {
+        assert!(is_state_changing_request_authorized(
+            &Method::GET,
+            &HeaderMap::new()
+        ));
+        assert!(is_state_changing_request_authorized(
+            &Method::HEAD,
+            &HeaderMap::new()
+        ));
+    }
+
+    #[test]
+    fn state_changing_requests_without_the_marker_are_rejected() {
+        for method in [Method::POST, Method::PUT, Method::DELETE] {
+            assert!(
+                !is_state_changing_request_authorized(&method, &HeaderMap::new()),
+                "{method} must require the marker header"
+            );
+        }
+    }
+
+    #[test]
+    fn state_changing_requests_with_the_marker_are_authorized() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-newapi-service-request", "1".parse().unwrap());
+        assert!(is_state_changing_request_authorized(
+            &Method::POST,
+            &headers
+        ));
     }
 }

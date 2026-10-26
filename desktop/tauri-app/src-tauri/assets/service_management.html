@@ -416,11 +416,13 @@
 
       async function request(path, options = {}) {
         const response = await fetch(path, {
+          ...options,
           headers: {
             'Content-Type': 'application/json',
+            // 服务端要求这个标记头才放行状态变更请求，见 service_management.rs。
+            'X-NewAPI-Service-Request': '1',
             ...(options.headers || {}),
           },
-          ...options,
         });
 
         if (!response.ok) {
