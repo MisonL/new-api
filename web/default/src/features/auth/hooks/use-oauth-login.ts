@@ -11,6 +11,7 @@ import {
   buildOIDCOAuthUrl,
   buildLinuxDOOAuthUrl,
 } from '../lib/oauth'
+import { markOAuthIntent } from '@/lib/oauth'
 import type { SystemStatus, CustomOAuthProviderInfo } from '../types'
 
 type LogoutRequestConfig = AxiosRequestConfig & {
@@ -90,6 +91,7 @@ export function useOAuthLogin(status: SystemStatus | null) {
       }
 
       const url = buildGitHubOAuthUrl(status.github_client_id, state)
+      markOAuthIntent('login')
       window.open(url, '_self')
     } catch (_error) {
       toast.error(t('Failed to start GitHub login'))
@@ -115,6 +117,7 @@ export function useOAuthLogin(status: SystemStatus | null) {
       }
 
       const url = buildDiscordOAuthUrl(status.discord_client_id, state)
+      markOAuthIntent('login')
       window.open(url, '_self')
     } catch (_error) {
       toast.error(t('Failed to start Discord login'))
@@ -140,6 +143,7 @@ export function useOAuthLogin(status: SystemStatus | null) {
         status.oidc_client_id,
         state
       )
+      markOAuthIntent('login')
       window.open(url, '_self')
     } catch (_error) {
       toast.error(t('Failed to start OIDC login'))
@@ -161,6 +165,7 @@ export function useOAuthLogin(status: SystemStatus | null) {
       }
 
       const url = buildLinuxDOOAuthUrl(status.linuxdo_client_id, state)
+      markOAuthIntent('login')
       window.open(url, '_self')
     } catch (_error) {
       toast.error(t('Failed to start LinuxDO login'))
@@ -197,6 +202,7 @@ export function useOAuthLogin(status: SystemStatus | null) {
         url.searchParams.set('scope', provider.scopes)
       }
 
+      markOAuthIntent('login')
       window.open(url.toString(), '_self')
     } catch (_error) {
       toast.error(

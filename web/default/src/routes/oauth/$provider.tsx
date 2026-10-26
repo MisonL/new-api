@@ -18,6 +18,31 @@ import {
   resolveOAuthCallbackOutcome,
 } from '@/features/auth/lib/oauth-callback-outcome'
 import { normalizeLoginRedirectTarget } from '@/features/auth/lib/redirect-target'
+import { OAUTH_INTENT_STORAGE_KEY } from '@/lib/oauth'
+
+// 回调页曾经用 window.opener 判断绑定/登录，这要求弹窗保留对打开者的
+// 引用——正是 noopener 要去掉的东西。改读打开前写入的意图标记；标记缺失
+// 时按登录处理（绑定流程由调用方自己发起，不会缺标记）。
+function resolveOAuthMode(): 'login' | 'bind' {
+  if (typeof window === 'undefined') return 'login'
+  try {
+    return window.localStorage.getItem(OAUTH_INTENT_STORAGE_KEY) === 'bind'
+      ? 'bind'
+      : 'login'
+  } catch (_error) {
+    void _error
+    return 'login'
+  }
+}
+
+function clearOAuthIntent(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(OAUTH_INTENT_STORAGE_KEY)
+  } catch (_error) {
+    void _error
+  }
+}
 
 type OAuthRequestConfig = AxiosRequestConfig & {
   skipBusinessError?: boolean
@@ -34,15 +59,11 @@ function OAuthCallback() {
     state?: string
     redirect?: string
   }
-  const [mode, setMode] = useState<'login' | 'bind'>(() => {
-    if (typeof window === 'undefined') return 'login'
-    return window.opener ? 'bind' : 'login'
-  })
+  const [mode, setMode] = useState<'login' | 'bind'>(resolveOAuthMode)
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMode(window.opener ? 'bind' : 'login')
+    setMode(resolveOAuthMode())
   }, [])
 
   useEffect(() => {
@@ -74,8 +95,7 @@ function OAuthCallback() {
         safeNavigate('/sign-in')
         return
       }
-      const isBindingFlow =
-        typeof window !== 'undefined' ? Boolean(window.opener) : mode === 'bind'
+      const isBindingFlow = resolveOAuthMode() === 'bind'
       if (isBindingFlow && mode !== 'bind') {
         setMode('bind')
       } else if (!isBindingFlow && mode !== 'login') {
@@ -144,6 +164,7 @@ function OAuthCallback() {
 
       const handleBindingFailure = (message: string) => {
         notifyBindingResult('error')
+        clearOAuthIntent()
         toast.error(message)
       }
 
@@ -183,6 +204,7 @@ function OAuthCallback() {
           if (outcome.kind === 'bind') {
             toast.success(i18next.t('Binding successful!'))
             notifyBindingResult('success')
+            clearOAuthIntent()
             if (isBindingFlow) {
               // Close the callback window if we opened a new tab for binding
               closeBindingWindow()

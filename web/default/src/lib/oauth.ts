@@ -56,6 +56,29 @@ export function buildLinuxDOOAuthUrl(clientId: string, state: string): string {
 // ============================================================================
 
 /**
+ * Marker written before opening the OAuth window in binding mode.
+ *
+ * The callback page used to decide "bind vs login" from `window.opener`,
+ * which forces the popup to keep a reference back to this window — exactly
+ * what `noopener` removes. An explicit intent marker keeps the decision while
+ * letting every window.open carry `noopener,noreferrer`.
+ */
+export const OAUTH_INTENT_STORAGE_KEY = 'oauth:intent'
+
+export function markOAuthIntent(intent: 'login' | 'bind'): void {
+  try {
+    window.localStorage.setItem(OAUTH_INTENT_STORAGE_KEY, intent)
+  } catch (_error) {
+    // 存储不可用时回调页会回落到 login，绑定流程随后自行提示，不阻断打开。
+    void _error
+  }
+}
+
+function openOAuthWindow(url: string): void {
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+/**
  * Get OAuth state token
  * Includes affiliate code from localStorage if available
  */
@@ -86,7 +109,8 @@ export async function handleGitHubOAuth(clientId: string): Promise<void> {
   if (!state) return
 
   const url = buildGitHubOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  markOAuthIntent('bind')
+  openOAuthWindow(url)
 }
 
 /**
@@ -97,7 +121,8 @@ export async function handleDiscordOAuth(clientId: string): Promise<void> {
   if (!state) return
 
   const url = buildDiscordOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  markOAuthIntent('bind')
+  openOAuthWindow(url)
 }
 
 /**
@@ -111,7 +136,8 @@ export async function handleOIDCOAuth(
   if (!state) return
 
   const url = buildOIDCOAuthUrl(authUrl, clientId, state)
-  window.open(url, '_blank')
+  markOAuthIntent('bind')
+  openOAuthWindow(url)
 }
 
 /**
@@ -122,5 +148,6 @@ export async function handleLinuxDOOAuth(clientId: string): Promise<void> {
   if (!state) return
 
   const url = buildLinuxDOOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  markOAuthIntent('bind')
+  openOAuthWindow(url)
 }
