@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window-remote",
+  "description": "打包后主窗口的 origin 是 http://127.0.0.1:<port>，Tauri 判定为 remote，必须单独授权唯一的自定义命令",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*"
+    ]
+  },
+  "permissions": [
+    "allow-open-external-url"
+  ]
+}
