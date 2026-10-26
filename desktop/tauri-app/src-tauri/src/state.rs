@@ -52,12 +52,25 @@ pub fn is_stopping_sidecar<R: Runtime>(app: &AppHandle<R>) -> bool {
         .load(Ordering::SeqCst)
 }
 
-pub fn clear_sidecar<R: Runtime>(app: &AppHandle<R>) {
+/// 只清理由 `terminated_pid` 对应的那个 sidecar。
+///
+/// 监控线程收到 Terminated 时，主线程可能已经 stop 掉旧进程并通过重试起了
+/// 新进程；无条件 take 会把新进程一起杀掉，表现为"重试后立刻又退出"。
+pub fn clear_sidecar_if_pid<R: Runtime>(app: &AppHandle<R>, terminated_pid: u32) {
     let state = app.state::<DesktopState>();
     let mut guard = state.sidecar.lock().expect("sidecar state lock poisoned");
-    if let Some(child) = guard.take() {
-        let _ = child.kill();
+    let matches = guard
+        .as_ref()
+        .is_some_and(|child| should_clear_sidecar(Some(child.pid()), terminated_pid));
+    if matches {
+        if let Some(child) = guard.take() {
+            let _ = child.kill();
+        }
     }
+}
+
+fn should_clear_sidecar(stored_pid: Option<u32>, terminated_pid: u32) -> bool {
+    stored_pid == Some(terminated_pid)
 }
 
 pub fn has_running_sidecar<R: Runtime>(app: &AppHandle<R>) -> bool {
@@ -131,4 +144,25 @@ pub fn snapshot_startup_error<R: Runtime>(app: &AppHandle<R>) -> Option<String> 
         .lock()
         .expect("startup error state lock poisoned");
     guard.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_clear_sidecar;
+
+    #[test]
+    fn terminated_event_clears_only_the_matching_sidecar() {
+        assert!(should_clear_sidecar(Some(4242), 4242));
+    }
+
+    #[test]
+    fn terminated_event_leaves_a_newer_sidecar_alone() {
+        // stop + 重试后，旧进程的 Terminated 事件晚到；新进程必须保留。
+        assert!(!should_clear_sidecar(Some(5151), 4242));
+    }
+
+    #[test]
+    fn terminated_event_with_no_stored_sidecar_is_a_noop() {
+        assert!(!should_clear_sidecar(None, 4242));
+    }
 }

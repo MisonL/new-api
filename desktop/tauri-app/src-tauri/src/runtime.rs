@@ -29,7 +29,7 @@ use crate::{
     },
     sidecar_exit,
     state::{
-        clear_sidecar, clear_starting, clear_startup_error, clear_stopping_sidecar,
+        clear_sidecar_if_pid, clear_starting, clear_startup_error, clear_stopping_sidecar,
         has_running_sidecar, is_quitting, is_starting, is_stopping_sidecar, mark_quitting,
         mark_stopping_sidecar, push_error_log, set_startup_error, snapshot_error_logs,
         snapshot_startup_error, try_mark_starting, DesktopState,
@@ -109,6 +109,9 @@ pub fn bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), St
         .set_process_group(true);
 
     let (rx, child) = sidecar_command.spawn().map_err(|err| err.to_string())?;
+    // 监控线程收到的 Terminated 只属于这个 pid；stop+重试换新进程后，
+    // 旧事件不得再清掉新进程的句柄。
+    let sidecar_pid = child.pid();
     store_sidecar(&app, child);
 
     let sidecar_monitor_handle = app.clone();
@@ -132,7 +135,7 @@ pub fn bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), St
                     push_error_log(&sidecar_monitor_handle, format!("sidecar error: {message}"));
                 }
                 CommandEvent::Terminated(payload) => {
-                    clear_sidecar(&sidecar_monitor_handle);
+                    clear_sidecar_if_pid(&sidecar_monitor_handle, sidecar_pid);
 
                     let exit_code = payload
                         .code
