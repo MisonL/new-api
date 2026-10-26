@@ -50,6 +50,7 @@ const (
 	ContextKeyResponsesArgumentsHistoryRetry                        ContextKey = "responses_arguments_history_retry"
 	ContextKeyResponsesReasoningContextAction                       ContextKey = "responses_reasoning_context_action"
 	ContextKeyResponsesStreamPreludeRetrySafe                       ContextKey = "responses_stream_prelude_retry_safe"
+	ContextKeyClaudeStreamPreludeSent                               ContextKey = "claude_stream_prelude_sent"
 	ContextKeyResponsesChatCompatIgnoredEncryptedInclude            ContextKey = "responses_chat_compat_ignored_encrypted_include"
 	ContextKeyResponsesChatCompatReasoningSummaryMapped             ContextKey = "responses_chat_compat_reasoning_summary_mapped"
 	ContextKeyResponsesCompactionOutput                             ContextKey = "responses_compaction_output"

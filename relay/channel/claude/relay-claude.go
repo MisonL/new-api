@@ -1341,6 +1341,19 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			if claudeResponse.Message != nil {
 				info.UpstreamModelName = claudeResponse.Message.Model
 			}
+			if common.GetContextKeyBool(c, constant.ContextKeyClaudeStreamPreludeSent) {
+				// 重试尝试：客户端已经收到上一次尝试的 message_start。
+				// 再发一次会让 Anthropic SDK 重建消息状态，这里只保留
+				// usage 解析，不重复转发。
+				return nil
+			}
+			common.SetContextKey(c, constant.ContextKeyClaudeStreamPreludeSent, true)
+			// 只有生命周期帧时，中断仍可安全换渠道重试；首个内容帧到达
+			// 后由下面的分支清掉这个标记。
+			common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
+		} else if claudeResponse.Type == "content_block_start" || claudeResponse.Type == "content_block_delta" {
+			// 内容已下发，重放会重复内容，不能再重试。
+			common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, false)
 		} else if claudeResponse.Type == "message_delta" {
 			// 确保 message_delta 的 usage 包含完整的 input_tokens 和 cache 相关字段
 			// 解决 AWS Bedrock 等上游返回的 message_delta 缺少这些字段的问题
@@ -1433,6 +1446,13 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// 上游在首个内容帧之前断流（GOAWAY / unexpected EOF）时，此前只会
+	// 静默补一个 message_stop，客户端拿到空回复却按成功计费。这里改成
+	// 可重试错误：客户端尚未收到任何内容，换渠道重放是安全的。
+	if newAPIError := relaycommon.RetryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
+		return nil, newAPIError
 	}
 
 	HandleStreamFinalResponse(c, info, claudeInfo)

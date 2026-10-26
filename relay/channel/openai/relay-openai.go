@@ -289,21 +289,8 @@ func frameErrorMessageForStatus(frameError *types.OpenAIError) string {
 }
 
 func retryableUpstreamStreamInterruptedError(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
-	if info == nil || info.StreamStatus == nil {
-		return nil
-	}
-	if info.StreamStatus.EndReason != relaycommon.StreamEndReasonUpstreamInterrupted {
-		return nil
-	}
-	if info.ReceivedResponseCount > 0 &&
-		(c == nil || !common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamPreludeRetrySafe)) {
-		return nil
-	}
-	err := info.StreamStatus.EndError
-	if err == nil {
-		err = io.ErrUnexpectedEOF
-	}
-	return types.NewOpenAIError(err, types.ErrorCodeUpstreamTransportInterrupted, http.StatusBadGateway)
+	// 判定逻辑与 Claude 渠道共用，见 relay/common/stream_interrupt.go。
+	return relaycommon.RetryableUpstreamStreamInterruptedError(c, info)
 }
 
 func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
