@@ -28,7 +28,7 @@ import {
 } from '@/components/data-table'
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { PageFooterPortal } from '@/components/layout'
-import { getModels, searchModels, getVendors } from '../api'
+import { getModels, searchModels, getAllVendors } from '../api'
 import {
   DEFAULT_PAGE_SIZE,
   getModelStatusOptions,
@@ -90,14 +90,11 @@ export function ModelsTable() {
 
   // Fetch vendors for filter
   const { data: vendorsData } = useQuery({
-    queryKey: vendorsQueryKeys.list(),
-    queryFn: () => getVendors({ page_size: 1000 }),
+    queryKey: vendorsQueryKeys.list({ all: true }),
+    queryFn: () => getAllVendors(),
   })
 
-  const vendors = useMemo(
-    () => vendorsData?.data?.items || [],
-    [vendorsData?.data?.items]
-  )
+  const vendors = useMemo(() => vendorsData || [], [vendorsData])
 
   const vendorOptions = useMemo(() => {
     return vendors.map((v) => ({

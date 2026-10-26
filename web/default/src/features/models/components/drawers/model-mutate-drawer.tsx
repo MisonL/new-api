@@ -53,7 +53,7 @@ import { useUpdateOption } from '@/features/system-settings/hooks/use-update-opt
 import { normalizeJsonString } from '@/features/system-settings/models/utils'
 import type { ModelSettings } from '@/features/system-settings/types'
 import { safeJsonParse } from '@/features/system-settings/utils/json-parser'
-import { createModel, updateModel, getModel, getVendors } from '../../api'
+import { createModel, updateModel, getModel, getAllVendors } from '../../api'
 import { getNameRuleOptions, ENDPOINT_TEMPLATES } from '../../constants'
 import { modelsQueryKeys, vendorsQueryKeys, parseModelTags } from '../../lib'
 import type { Model } from '../../types'
@@ -108,12 +108,12 @@ export function ModelMutateDrawer({
 
   // Fetch vendors for dropdown
   const { data: vendorsData } = useQuery({
-    queryKey: vendorsQueryKeys.list(),
-    queryFn: () => getVendors({ page_size: 1000 }),
+    queryKey: vendorsQueryKeys.list({ all: true }),
+    queryFn: () => getAllVendors(),
     enabled: open,
   })
 
-  const vendors = vendorsData?.data?.items || []
+  const vendors = vendorsData || []
 
   // Fetch model detail if editing
   const { data: modelData } = useQuery({

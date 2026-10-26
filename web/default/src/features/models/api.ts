@@ -110,6 +110,28 @@ export async function getVendors(params?: {
 }
 
 /**
+ * Vendor list for selectors and filters.
+ *
+ * The backend clamps page_size to 100, so requesting 1000 (the previous
+ * behaviour) silently returned only the first 100 vendors: the dropdown lost
+ * entries with no indication. Page through instead, with a hard page cap so a
+ * mis-reported total cannot turn this into an unbounded request loop.
+ */
+export async function getAllVendors(): Promise<Vendor[]> {
+  const pageSize = 100
+  const maxPages = 20
+  const first = await getVendors({ p: 1, page_size: pageSize })
+  const items = first.data?.items ?? []
+  const total = first.data?.total ?? items.length
+  const pages = Math.min(Math.ceil(total / pageSize), maxPages)
+  for (let p = 2; p <= pages; p++) {
+    const next = await getVendors({ p, page_size: pageSize })
+    items.push(...(next.data?.items ?? []))
+  }
+  return items
+}
+
+/**
  * Search vendors
  */
 export async function searchVendors(params: {
