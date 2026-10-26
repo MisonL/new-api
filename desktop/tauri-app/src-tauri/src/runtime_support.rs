@@ -108,13 +108,27 @@ pub fn save_desktop_runtime_config(
 pub fn is_ready_status_response(response: &str) -> bool {
     let mut parts = response.splitn(2, "\r\n\r\n");
     let header = parts.next().unwrap_or_default();
-    let body = parts.next().unwrap_or_default();
+    let raw_body = parts.next().unwrap_or_default();
 
     if !(header.starts_with("HTTP/1.1 200") || header.starts_with("HTTP/1.0 200")) {
         return false;
     }
 
-    let payload: serde_json::Value = match serde_json::from_str(body) {
+    // 探针走裸 socket，读到的是未解帧的原始报文。/api/status 的响应体
+    // 超过 Go 的 bufferBeforeChunkingSize（2048 字节），服务器不下发
+    // Content-Length 而改用 Transfer-Encoding: chunked，body 前面就多出
+    // 十六进制长度行。直接把它当 JSON 解析必然失败，桌面端会误判成
+    // "另一个本地服务占用了端口"。
+    let body = if header_has_chunked_transfer_encoding(header) {
+        match decode_chunked_body(raw_body) {
+            Some(decoded) => decoded,
+            None => return false,
+        }
+    } else {
+        raw_body.to_string()
+    };
+
+    let payload: serde_json::Value = match serde_json::from_str(&body) {
         Ok(value) => value,
         Err(_) => return false,
     };
@@ -127,6 +141,47 @@ pub fn is_ready_status_response(response: &str) -> bool {
         .and_then(|data| data.get("version"))
         .and_then(serde_json::Value::as_str)
         .is_some_and(|version| !version.is_empty())
+}
+
+fn header_has_chunked_transfer_encoding(header: &str) -> bool {
+    header.lines().skip(1).any(|line| {
+        let Some((name, value)) = line.split_once(':') else {
+            return false;
+        };
+        name.trim().eq_ignore_ascii_case("transfer-encoding")
+            && value
+                .split(',')
+                .any(|token| token.trim().eq_ignore_ascii_case("chunked"))
+    })
+}
+
+// 按 RFC 9112 拆 chunk：每个 chunk 是 "十六进制长度[;扩展]\r\n数据\r\n"，
+// 以长度为 0 的 chunk 结束。缺少终止 chunk 说明响应被截断，按未就绪处理，
+// 不能把半截 JSON 当成有效状态。chunk 扩展（分号之后）一律忽略。
+// 在字节层拼接：chunk 边界可以切在多字节 UTF-8 字符中间。
+fn decode_chunked_body(raw: &str) -> Option<String> {
+    let mut decoded: Vec<u8> = Vec::new();
+    let mut rest = raw.as_bytes();
+    loop {
+        let newline = find_crlf(rest)?;
+        let size_line = std::str::from_utf8(&rest[..newline]).ok()?;
+        let size_token = size_line.split(';').next().unwrap_or_default().trim();
+        let size = usize::from_str_radix(size_token, 16).ok()?;
+        if size == 0 {
+            return String::from_utf8(decoded).ok();
+        }
+        let data_start = newline + 2;
+        let data_end = data_start.checked_add(size)?;
+        if rest.len() < data_end {
+            return None;
+        }
+        decoded.extend_from_slice(&rest[data_start..data_end]);
+        rest = rest[data_end..].strip_prefix(b"\r\n")?;
+    }
+}
+
+fn find_crlf(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(2).position(|pair| pair == b"\r\n")
 }
 
 pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnosis {

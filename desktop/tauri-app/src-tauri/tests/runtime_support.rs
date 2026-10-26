@@ -242,6 +242,52 @@ fn is_ready_status_response_rejects_success_without_data_version() {
     assert!(!is_ready_status_response(top_level_only));
 }
 
+// 真实 /api/status 的响应体超过 Go 的 bufferBeforeChunkingSize（2048 字节），
+// 服务器用 Transfer-Encoding: chunked 分帧，body 前面多出十六进制长度行。
+// 探针走裸 socket，拿到的是未解帧的原始报文，必须自己拆 chunk。
+#[test]
+fn is_ready_status_response_accepts_chunked_transfer_encoding() {
+    let payload =
+        "{\"success\":true,\"message\":\"\",\"data\":{\"version\":\"v1.1.0\",\"start_time\":1}}";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+        payload.len(),
+        payload
+    );
+    assert!(
+        is_ready_status_response(&response),
+        "chunked responses must be de-chunked before JSON parsing"
+    );
+}
+
+#[test]
+fn is_ready_status_response_accepts_chunked_response_split_across_chunks() {
+    let head = "{\"success\":true,\"message\":\"\",";
+    let tail = "\"data\":{\"version\":\"v1.1.0\"}}";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{}\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+        head.len(),
+        head,
+        tail.len(),
+        tail
+    );
+    assert!(is_ready_status_response(&response));
+}
+
+#[test]
+fn is_ready_status_response_rejects_truncated_chunked_response() {
+    let payload = "{\"success\":true,\"data\":{\"version\":\"v1.1.0\"}}";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{}",
+        payload.len(),
+        payload
+    );
+    assert!(
+        !is_ready_status_response(&response),
+        "a chunked body without its terminating chunk is incomplete and must not count as ready"
+    );
+}
+
 #[test]
 fn is_ready_status_response_rejects_non_ready_payload() {
     let non_200 = concat!(
