@@ -61,10 +61,12 @@ const queryClient = new QueryClient({
           router.navigate({ to: '/sign-in', search: { redirect } })
         }
         if (error.response?.status === 500) {
+          // 只提示，不整页跳转。任意后台轮询（useStatus 等）返回 500 就把
+          // 用户从填了一半的表单上踢到 /500，损失远大于收益；真正的渲染
+          // 错误仍由路由的 errorComponent 承接。
           if (!wasToastShown(error)) {
             toast.error(i18next.t('Internal Server Error!'))
           }
-          router.navigate({ to: '/500' })
         }
       }
     },

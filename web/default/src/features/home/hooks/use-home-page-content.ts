@@ -18,8 +18,15 @@ export function useHomePageContent(): HomePageContentResult {
     let mounted = true
 
     const loadContent = async () => {
-      // Load from localStorage first for immediate display
-      const cached = localStorage.getItem(STORAGE_KEY)
+      // 缓存读写全部包在 try 内：存储被禁用时 getItem 会抛 SecurityError，
+      // 旧写法把它放在 try 之前，Promise 直接 reject，finally 里的
+      // setIsLoaded(true) 永不执行，首页永久停在 Loading。
+      let cached: string | null = null
+      try {
+        cached = localStorage.getItem(STORAGE_KEY)
+      } catch (_error) {
+        void _error
+      }
       if (cached && mounted) {
         setContent(cached)
       }
@@ -32,11 +39,19 @@ export function useHomePageContent(): HomePageContentResult {
 
         if (success && data) {
           setContent(data)
-          localStorage.setItem(STORAGE_KEY, data)
+          try {
+            localStorage.setItem(STORAGE_KEY, data)
+          } catch (_error) {
+            void _error
+          }
         } else {
           // Clear content if API returns empty
           setContent('')
-          localStorage.removeItem(STORAGE_KEY)
+          try {
+            localStorage.removeItem(STORAGE_KEY)
+          } catch (_error) {
+            void _error
+          }
         }
       } catch (error) {
         if (!mounted) return

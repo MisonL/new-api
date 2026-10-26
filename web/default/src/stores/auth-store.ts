@@ -62,12 +62,19 @@ export const useAuthStore = create<AuthState>()((set) => {
       user: initUser,
       setUser: (user) =>
         set((state) => {
-          // Persist user to localStorage
+          // 持久化失败不能拖垮状态更新：Safari 无痕、存储配额耗尽或被策略
+          // 禁用时 setItem 会抛异常。旧写法让它从 set() 里冒出去，调用点在
+          // beforeLoad 中就会整页进入 errorComponent，用户看到 500 而非登录页。
           if (typeof window !== 'undefined') {
-            if (user) {
-              window.localStorage.setItem('user', JSON.stringify(user))
-            } else {
-              window.localStorage.removeItem('user')
+            try {
+              if (user) {
+                window.localStorage.setItem('user', JSON.stringify(user))
+              } else {
+                window.localStorage.removeItem('user')
+              }
+            } catch (_error) {
+              // 内存中的 user 仍然有效，只是本会话不再跨刷新保留。
+              void _error
             }
           }
           return { ...state, auth: { ...state.auth, user } }
@@ -75,7 +82,11 @@ export const useAuthStore = create<AuthState>()((set) => {
       reset: () =>
         set((state) => {
           if (typeof window !== 'undefined') {
-            window.localStorage.removeItem('user')
+            try {
+              window.localStorage.removeItem('user')
+            } catch (_error) {
+              void _error
+            }
           }
           return {
             ...state,
