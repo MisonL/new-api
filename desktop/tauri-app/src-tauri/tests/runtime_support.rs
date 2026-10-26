@@ -62,6 +62,26 @@ fn load_or_create_desktop_secrets_persists_stable_values() {
     cleanup_test_dir(&test_dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn desktop_secret_file_is_not_world_readable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let test_dir = unique_test_dir("desktop-secrets-permissions");
+    let secret_file = test_dir.join("desktop-secrets.json");
+
+    load_or_create_desktop_secrets(&secret_file).expect("secret load must work");
+
+    let mode = fs::metadata(&secret_file)
+        .expect("secret file metadata must be readable")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600, "secret file mode must be 0600, got {mode:o}");
+
+    cleanup_test_dir(&test_dir);
+}
+
 #[test]
 fn load_or_create_desktop_secrets_rejects_invalid_file() {
     let test_dir = unique_test_dir("desktop-secrets-invalid");
@@ -229,8 +249,10 @@ fn is_ready_status_response_accepts_real_api_status_payload() {
 #[test]
 fn is_ready_status_response_rejects_success_without_data_version() {
     let no_data = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"message\":\"\"}";
-    let empty_data = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"data\":{}}";
-    let null_data = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"data\":null}";
+    let empty_data =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"data\":{}}";
+    let null_data =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"data\":null}";
     let empty_version = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"data\":{\"version\":\"\"}}";
     let top_level_only =
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"success\":true,\"version\":\"1.0.0\"}";
@@ -339,6 +361,30 @@ fn analyze_startup_error_identifies_invalid_runtime_config() {
 
     assert_eq!(diagnosis.title, "Desktop runtime config is invalid");
     assert!(diagnosis.summary.contains("runtime configuration"));
+}
+
+#[test]
+fn analyze_startup_error_identifies_corrupt_desktop_secret_file() {
+    let diagnosis = analyze_startup_error(
+        "failed to bootstrap desktop runtime: failed to parse desktop secret file: expected value at line 1 column 1",
+        &[],
+    );
+
+    assert_eq!(diagnosis.title, "Desktop secret file is invalid");
+    assert!(diagnosis.summary.contains("secret"));
+    // 用户必须知道该改哪个文件，以及删除它会作废已加密的渠道凭证。
+    assert!(diagnosis.detail.contains("desktop-secrets.json"));
+    assert!(diagnosis.detail.contains("CRYPTO_SECRET"));
+}
+
+#[test]
+fn analyze_startup_error_identifies_secret_file_with_empty_secret() {
+    let diagnosis = analyze_startup_error(
+        "failed to bootstrap desktop runtime: desktop secret file is invalid: /tmp/x/desktop-secrets.json",
+        &[],
+    );
+
+    assert_eq!(diagnosis.title, "Desktop secret file is invalid");
 }
 
 #[test]

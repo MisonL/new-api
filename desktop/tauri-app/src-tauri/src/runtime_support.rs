@@ -221,6 +221,21 @@ pub fn analyze_startup_error(detail: &str, log_lines: &[String]) -> ErrorDiagnos
         };
     }
 
+    if joined_logs.contains("failed to parse desktop secret file")
+        || joined_logs.contains("desktop secret file is invalid")
+        || joined_logs.contains("failed to read desktop secret file")
+    {
+        // 这个文件里的 CRYPTO_SECRET 加密着已保存的渠道密钥。静默重新生成
+        // 会让这些数据永久不可解，所以这里只能显式报错并说明恢复手段。
+        return ErrorDiagnosis {
+            title: "Desktop secret file is invalid".to_string(),
+            summary: "The desktop secret file (desktop-secrets.json) could not be read or parsed."
+                .to_string(),
+            detail: "Restore desktop-secrets.json from a backup, or delete it to let the app generate new secrets. Deleting it changes SESSION_SECRET (all local sessions are signed out) and CRYPTO_SECRET (channel credentials encrypted with the old value can no longer be decrypted)."
+                .to_string(),
+        };
+    }
+
     if joined_logs_lower.contains("database is locked")
         || joined_logs_lower.contains("unable to open database")
     {
@@ -369,6 +384,7 @@ fn persist_desktop_secrets(secret_file: &Path, secrets: &DesktopSecrets) -> Resu
     })?;
     fs::create_dir_all(parent_dir)
         .map_err(|err| format!("failed to create desktop secret directory: {err}"))?;
+    restrict_directory_permissions(parent_dir)?;
 
     let payload = PersistedDesktopSecrets {
         version: DESKTOP_SECRET_FILE_VERSION,
@@ -379,10 +395,51 @@ fn persist_desktop_secrets(secret_file: &Path, secrets: &DesktopSecrets) -> Resu
         .map_err(|err| format!("failed to serialize desktop secrets: {err}"))?;
 
     let temp_path = temp_secret_file_path(secret_file);
-    fs::write(&temp_path, serialized)
+    write_private_file(&temp_path, &serialized)
         .map_err(|err| format!("failed to write desktop secret temp file: {err}"))?;
     fs::rename(&temp_path, secret_file)
         .map_err(|err| format!("failed to finalize desktop secret file: {err}"))?;
+    Ok(())
+}
+
+/// Write `contents` to `path` so the file is only readable by its owner and
+/// the bytes are on disk before a rename makes them visible.
+///
+/// The default umask (022) makes a freshly written file world-readable, and a
+/// plain write leaves it in the page cache: a crash right after the rename can
+/// leave a zero-length secrets file, which costs the user the CRYPTO_SECRET.
+fn write_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // mode() only applies when the file is created; an existing temp file
+        // from an interrupted write keeps its old mode, so set it again below.
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restrict_directory_permissions(dir: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+        .map_err(|err| format!("failed to restrict desktop data directory permissions: {err}"))
+}
+
+#[cfg(not(unix))]
+fn restrict_directory_permissions(_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
