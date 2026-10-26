@@ -198,3 +198,70 @@ func TestConverseClaudeStreamProcessesMetadataAfterMessageStop(t *testing.T) {
 	require.Equal(t, 3, state.ClaudeUsage.OutputTokens)
 	require.Contains(t, recorder.Body.String(), "message_start")
 }
+
+// Bedrock 的 thinking 块以一个 signature delta 收尾（SDK 注释明确要求把它
+// 原样回传）。旧实现直接 return error，错误上抛到 converseStreamHandler 被
+// 包成 502，而此刻 message_start 与 thinking_delta 已经 flush，客户端拿到
+// 半截 SSE。
+func TestConverseClaudeStreamSkipsReasoningSignatureDelta(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	state := &converseStreamState{
+		ID:                  "msg_1",
+		Model:               "claude",
+		Usage:               &dto.Usage{},
+		ClaudeUsage:         &dto.ClaudeUsage{},
+		ClaudeBlocksStarted: make(map[int32]bool),
+	}
+	require.NoError(t, handleConverseClaudeStreamEvent(c, nil, state, &bedrocktypes.ConverseStreamOutputMemberMessageStart{
+		Value: bedrocktypes.MessageStartEvent{Role: bedrocktypes.ConversationRoleAssistant},
+	}))
+
+	index := int32(0)
+	require.NoError(t, handleConverseClaudeStreamEvent(c, nil, state, &bedrocktypes.ConverseStreamOutputMemberContentBlockDelta{
+		Value: bedrocktypes.ContentBlockDeltaEvent{
+			ContentBlockIndex: &index,
+			Delta:             &bedrocktypes.ContentBlockDeltaMemberReasoningContent{Value: &bedrocktypes.ReasoningContentBlockDeltaMemberText{Value: "thinking..."}},
+		},
+	}))
+
+	// 关键断言：signature delta 不能让整条流失败。
+	require.NoError(t, handleConverseClaudeStreamEvent(c, nil, state, &bedrocktypes.ConverseStreamOutputMemberContentBlockDelta{
+		Value: bedrocktypes.ContentBlockDeltaEvent{
+			ContentBlockIndex: &index,
+			Delta:             &bedrocktypes.ContentBlockDeltaMemberReasoningContent{Value: &bedrocktypes.ReasoningContentBlockDeltaMemberSignature{Value: "sig-abc"}},
+		},
+	}))
+
+	body := recorder.Body.String()
+	require.Contains(t, body, "thinking_delta")
+	require.NotContains(t, body, "sig-abc", "signature is opaque integrity metadata and must never reach the visible stream")
+}
+
+func TestConverseOpenAIStreamSkipsReasoningSignatureDelta(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	state := &converseStreamState{
+		ID:                "msg_1",
+		Model:             "claude",
+		Usage:             &dto.Usage{},
+		OpenAIToolIndexes: make(map[int32]int),
+	}
+
+	index := int32(0)
+	require.NoError(t, handleConverseOpenAIStreamEvent(c, nil, state, &bedrocktypes.ConverseStreamOutputMemberContentBlockDelta{
+		Value: bedrocktypes.ContentBlockDeltaEvent{
+			ContentBlockIndex: &index,
+			Delta:             &bedrocktypes.ContentBlockDeltaMemberReasoningContent{Value: &bedrocktypes.ReasoningContentBlockDeltaMemberText{Value: "thinking..."}},
+		},
+	}))
+	require.NoError(t, handleConverseOpenAIStreamEvent(c, nil, state, &bedrocktypes.ConverseStreamOutputMemberContentBlockDelta{
+		Value: bedrocktypes.ContentBlockDeltaEvent{
+			ContentBlockIndex: &index,
+			Delta:             &bedrocktypes.ContentBlockDeltaMemberReasoningContent{Value: &bedrocktypes.ReasoningContentBlockDeltaMemberSignature{Value: "sig-abc"}},
+		},
+	}))
+	require.NotContains(t, recorder.Body.String(), "sig-abc")
+}

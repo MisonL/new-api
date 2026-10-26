@@ -1011,9 +1011,12 @@ func handleConverseOpenAIStreamEvent(c *gin.Context, info *relaycommon.RelayInfo
 		case *bedrocktypes.ContentBlockDeltaMemberText:
 			choice.Delta.SetContentString(delta.Value)
 		case *bedrocktypes.ContentBlockDeltaMemberReasoningContent:
-			reasoning, err := converseReasoningDeltaText(delta.Value)
+			reasoning, skip, err := converseReasoningDeltaText(delta.Value)
 			if err != nil {
 				return err
+			}
+			if skip {
+				return nil
 			}
 			choice.Delta.SetReasoningContent(reasoning)
 		case *bedrocktypes.ContentBlockDeltaMemberToolUse:
@@ -1114,9 +1117,12 @@ func handleConverseClaudeStreamEvent(c *gin.Context, info *relaycommon.RelayInfo
 			delta.Type = "text_delta"
 			delta.Text = &item.Value
 		case *bedrocktypes.ContentBlockDeltaMemberReasoningContent:
-			reasoning, err := converseReasoningDeltaText(item.Value)
+			reasoning, skip, err := converseReasoningDeltaText(item.Value)
 			if err != nil {
 				return err
+			}
+			if skip {
+				return nil
 			}
 			delta.Type = "thinking_delta"
 			delta.Thinking = &reasoning
@@ -1169,16 +1175,21 @@ func handleConverseClaudeStreamEvent(c *gin.Context, info *relaycommon.RelayInfo
 	return nil
 }
 
-func converseReasoningDeltaText(value bedrocktypes.ReasoningContentBlockDelta) (string, error) {
+// converseReasoningDeltaText 把 Bedrock 的 reasoning delta 映射成兼容输出。
+// signature delta 是 provider 的完整性元数据，OpenAI/Claude 兼容流里没有
+// 能安全承载它的字段；Claude 直连对同一 delta 也是静默跳过
+// (relay-claude.go 的 signature_delta 分支)。这里必须跳过而不是报错：
+// 报错会在 message_start/thinking_delta 已经 flush 之后把整条流打断成 502。
+func converseReasoningDeltaText(value bedrocktypes.ReasoningContentBlockDelta) (text string, skip bool, err error) {
 	switch delta := value.(type) {
 	case *bedrocktypes.ReasoningContentBlockDeltaMemberText:
-		return delta.Value, nil
+		return delta.Value, false, nil
 	case *bedrocktypes.ReasoningContentBlockDeltaMemberSignature:
-		return "", fmt.Errorf("reasoning signature cannot be represented by OpenAI/Claude compatibility output")
+		return "", true, nil
 	case *bedrocktypes.ReasoningContentBlockDeltaMemberRedactedContent:
-		return "", fmt.Errorf("redacted reasoning cannot be represented by OpenAI/Claude compatibility output")
+		return "", false, fmt.Errorf("redacted reasoning cannot be represented by OpenAI/Claude compatibility output")
 	default:
-		return "", fmt.Errorf("reasoning delta type %T is not supported", value)
+		return "", false, fmt.Errorf("reasoning delta type %T is not supported", value)
 	}
 }
 
