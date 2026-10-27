@@ -30,6 +30,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, timestamp2string } from '../../helpers';
 import { marked } from 'marked';
+import { sanitizeHtml } from '../../helpers/sanitizeHtml';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../context/Status';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
@@ -561,7 +562,9 @@ const OtherSetting = () => {
           </Button>,
         ]}
       >
-        <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>
+        <div
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(updateData.content) }}
+        ></div>
       </Modal>
     </Row>
   );

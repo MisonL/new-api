@@ -30,6 +30,7 @@ import { useTranslation } from 'react-i18next';
 import { API } from '../../helpers/apiCore';
 import { getRelativeTime, showError } from '../../helpers/utils';
 import { marked } from 'marked';
+import { sanitizeHtml } from '../../helpers/sanitizeHtml';
 import {
   IllustrationNoContent,
   IllustrationNoContentDark,
@@ -144,7 +145,7 @@ const NoticeModal = ({
 
     return (
       <div
-        dangerouslySetInnerHTML={{ __html: noticeContent }}
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(noticeContent) }}
         className='notice-content-scroll max-h-[55vh] overflow-y-auto pr-2'
       />
     );
@@ -171,8 +172,10 @@ const NoticeModal = ({
       <div className='max-h-[55vh] overflow-y-auto pr-2 card-content-scroll'>
         <Timeline mode='left'>
           {processedAnnouncements.map((item, idx) => {
-            const htmlContent = marked.parse(item.content || '');
-            const htmlExtra = item.extra ? marked.parse(item.extra) : '';
+            const htmlContent = sanitizeHtml(marked.parse(item.content || ''));
+            const htmlExtra = item.extra
+              ? sanitizeHtml(marked.parse(item.extra))
+              : '';
             return (
               <Timeline.Item
                 key={idx}

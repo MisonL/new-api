@@ -27,6 +27,7 @@ import {
 } from '@douyinfe/semi-illustrations';
 import { useTranslation } from 'react-i18next';
 import MarkdownRenderer from '../markdown/LazyMarkdownRenderer';
+import { sanitizeHtml as sanitizeAdminHtml } from '../../../helpers/sanitizeHtml';
 
 // Check whether content is a URL.
 const isUrl = (content) => {
@@ -46,8 +47,9 @@ const isHtmlContent = (content) => {
   return htmlTagRegex.test(content);
 };
 
-// Parse HTML content and extract inline styles.
-const sanitizeHtml = (html) => {
+// Parse HTML content and extract inline styles. This is not a sanitizer: the
+// extracted markup is sanitized by sanitizeAdminHtml at the render site.
+const extractHtmlPayload = (html) => {
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = html;
 
@@ -117,7 +119,7 @@ const DocumentRenderer = ({
     if (!isHtmlContent(content)) {
       return { content: '', styles: '' };
     }
-    return sanitizeHtml(content);
+    return extractHtmlPayload(content);
   }, [content]);
 
   useEffect(() => {
@@ -215,7 +217,9 @@ const DocumentRenderer = ({
             </Title>
             <div
               className='prose prose-lg max-w-none'
-              dangerouslySetInnerHTML={{ __html: htmlPayload.content }}
+              dangerouslySetInnerHTML={{
+                __html: sanitizeAdminHtml(htmlPayload.content),
+              }}
             />
           </div>
         </div>

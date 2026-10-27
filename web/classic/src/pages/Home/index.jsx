@@ -38,6 +38,7 @@ import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
 import { marked } from 'marked';
+import { sanitizeHtml } from '../../helpers/sanitizeHtml';
 import { useTranslation } from 'react-i18next';
 import {
   IconGithubLogo,
@@ -500,7 +501,9 @@ const Home = () => {
           ) : (
             <div
               className='mt-[60px]'
-              dangerouslySetInnerHTML={{ __html: homePageContent }}
+              dangerouslySetInnerHTML={{
+                __html: sanitizeHtml(homePageContent),
+              }}
             />
           )}
         </div>

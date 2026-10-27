@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useState } from 'react';
 import { API, showError } from '../../helpers';
 import { marked } from 'marked';
+import { sanitizeHtml } from '../../helpers/sanitizeHtml';
 import { Empty } from '@douyinfe/semi-ui';
 import {
   IllustrationConstruction,
@@ -161,7 +162,7 @@ const About = () => {
           ) : (
             <div
               style={{ fontSize: 'larger' }}
-              dangerouslySetInnerHTML={{ __html: about }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(about) }}
             ></div>
           )}
         </>
