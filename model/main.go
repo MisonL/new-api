@@ -477,6 +477,12 @@ func migrateDB() error {
 	if err := migratePrefillGroupTable(); err != nil {
 		return err
 	}
+	if err := migrateModelMetaUniqueIndex(); err != nil {
+		return err
+	}
+	if err := migrateVendorMetaUniqueIndex(); err != nil {
+		return err
+	}
 	if err := migrateResponsesCompactModeAuto(); err != nil {
 		return err
 	}
