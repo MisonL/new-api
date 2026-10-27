@@ -543,6 +543,15 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	if err != nil {
 		common.SysLog("failed to record task billing log: " + err.Error())
 	}
+	// 看板聚合与消费日志必须同源。修复脚本按 logs 里 type=2 的行重建
+	// quota_data，任务消费若只写日志不写聚合，看板长期缺失这部分；一旦
+	// 有人跑修复脚本，这些任务又会整批补上，数值出现无法解释的跳变。
+	// 退款不是消费，不进入聚合（修复脚本同样只按 type=2 重建）。
+	if params.LogType == LogTypeConsume && common.DataExportEnabled {
+		gopool.Go(func() {
+			LogQuotaData(params.UserId, username, params.ModelName, params.Quota, common.GetTimestamp(), 0)
+		})
+	}
 }
 
 type LogFilter struct {
