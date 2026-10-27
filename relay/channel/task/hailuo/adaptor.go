@@ -210,14 +210,22 @@ func (a *TaskAdaptor) parseTaskResultWithContext(ctx context.Context, baseURL, k
 
 	taskResult := relaycommon.TaskInfo{}
 
-	if resTask.BaseResp.StatusCode == StatusSuccess {
-		taskResult.Code = 0
-	} else {
+	// base_resp 非成功表示这次查询本身就失败了（任务不存在、鉴权失败、
+	// 上游内部错误），不是任务进度信息。必须立即返回：继续走下面的状态
+	// 字符串 switch 会把 FAILURE 覆盖回 IN_PROGRESS（空值或不可识别的状态）
+	// 甚至 SUCCESS（状态串仍写着 Success），任务因此永远结束不了，成功分支
+	// 还会为拿视频再发一次上游请求。
+	if resTask.BaseResp.StatusCode != StatusSuccess {
 		taskResult.Code = resTask.BaseResp.StatusCode
 		taskResult.Reason = resTask.BaseResp.StatusMsg
+		if taskResult.Reason == "" {
+			taskResult.Reason = "hailuo task query failed"
+		}
 		taskResult.Status = model.TaskStatusFailure
 		taskResult.Progress = "100%"
+		return &taskResult, nil
 	}
+	taskResult.Code = 0
 
 	switch strings.ToLower(strings.TrimSpace(resTask.Status)) {
 	case strings.ToLower(TaskStatusPreparing), strings.ToLower(TaskStatusQueueing), strings.ToLower(TaskStatusProcessing):
