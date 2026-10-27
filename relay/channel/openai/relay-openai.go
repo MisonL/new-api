@@ -129,6 +129,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	defer service.CloseResponseBodyGracefully(resp)
 
+	// 首个内容帧之前只可能发出 role/空 delta 帧；这段窗口内断流可以换渠道
+	// 重试。内容帧到达时由 trackStreamPreludeCommit 清掉标记。
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
+
 	model := info.UpstreamModelName
 	var responseId string
 	var createAt int64 = 0
@@ -183,6 +187,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		return nil, types.WithOpenAIError(*streamFrameError, statusCode, types.ErrOptionWithSkipRetry())
 	}
 
+	// 最后一帧在扫描期间不会经过 HandleStreamFormat（它被压后到流结束才
+	// 下发），这里补一次提交判定：末帧带内容时，中断就不能再重试。
+	trackStreamPreludeCommit(c, lastStreamData)
 	if newAPIError := retryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
 		return nil, newAPIError
 	}

@@ -21,6 +21,7 @@ import (
 // 辅助函数
 func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
 	info.SendResponseCount++
+	trackStreamPreludeCommit(c, data)
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
@@ -31,6 +32,60 @@ func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string
 		return handleGeminiFormat(c, data, info)
 	}
 	return nil
+}
+
+// streamPreludeDelta 只取判断"本帧有没有实质内容"所需的字段。
+type streamPreludeDelta struct {
+	Content          *string          `json:"content"`
+	ReasoningContent *string          `json:"reasoning_content"`
+	Reasoning        *string          `json:"reasoning"`
+	Refusal          *string          `json:"refusal"`
+	ToolCalls        []map[string]any `json:"tool_calls"`
+}
+
+type streamPreludeFrame struct {
+	Choices []struct {
+		Delta   streamPreludeDelta `json:"delta"`
+		Message streamPreludeDelta `json:"message"`
+	} `json:"choices"`
+}
+
+func hasStreamPreludeContent(delta streamPreludeDelta) bool {
+	if len(delta.ToolCalls) > 0 {
+		return true
+	}
+	for _, field := range []*string{delta.Content, delta.ReasoningContent, delta.Reasoning, delta.Refusal} {
+		if field != nil && *field != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// trackStreamPreludeCommit 记录"客户端是否已经收到实质内容"。
+//
+// 上游在首个内容帧之前断流（GOAWAY / unexpected EOF）时，客户端手里最多只有
+// role 或空 delta，换渠道重放是安全的；一旦内容下发，重放就会重复内容。控制器
+// 的 shouldRetry 与 relay/common 的中断判定都读这个标记。
+//
+// 标记被清掉后不再解析后续帧，正常流因此没有额外反序列化开销。
+func trackStreamPreludeCommit(c *gin.Context, data string) {
+	if c == nil || len(data) == 0 {
+		return
+	}
+	if !common.GetContextKeyBool(c, appconstant.ContextKeyResponsesStreamPreludeRetrySafe) {
+		return
+	}
+	var frame streamPreludeFrame
+	if err := common.UnmarshalJsonStr(data, &frame); err != nil {
+		return
+	}
+	for _, choice := range frame.Choices {
+		if hasStreamPreludeContent(choice.Delta) || hasStreamPreludeContent(choice.Message) {
+			common.SetContextKey(c, appconstant.ContextKeyResponsesStreamPreludeRetrySafe, false)
+			return
+		}
+	}
 }
 
 func handleClaudeFormat(c *gin.Context, data string, info *relaycommon.RelayInfo) error {
