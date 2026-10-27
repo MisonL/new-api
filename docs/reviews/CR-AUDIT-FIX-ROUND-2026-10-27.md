@@ -71,6 +71,17 @@ capability 与删除 app manifest 的反向用例）。
 验证：`cargo test` 退出码 0，新增匹配/不匹配/空句柄三条用例。
 边界：竞态依赖真实进程生命周期，接线部分仍需真机走一次"启动失败 → 重试"。
 
+### 1.8 启动失败清理不再提前清 starting 标记
+
+`spawn_bootstrap_desktop_runtime` 原先在 `handle_bootstrap_failure` 之前就
+清 `startup_in_progress`。失败清理里的 `stop_sidecar` 会无条件取走当前
+sidecar 句柄，提前清标记等于给重试开了一个窗口：重试刚起的新进程会被这次
+失败清理顺手杀掉。改为成功路径才在这里清，失败路径由 `stop_sidecar` 内部
+在清理末尾清。
+
+验证：`cargo fmt --check` 干净，`cargo test` 全量通过。边界：时序问题
+没有可断言的单测，需要真机复验。
+
 ## 2. 前端（web/default）
 
 ### 2.1 富文本净化（2316aa88c）
@@ -163,10 +174,23 @@ before completion`，`completion_tokens=0`，且 `upstream_ttfb_ms` 30-60s。
 新增 3 条用例（仅 prelude 中断可重试、内容已下发不重试、重试不重复
 message_start 且内容正常下发）；`gofmt -l` 无输出，`go vet` 无输出。
 
-边界：只覆盖 Claude 格式上游流。OpenAI 格式上游沿用原有
-`ReceivedResponseCount == 0` 判定，未扩展到"收到空帧后断流"。
+### 3.4 OpenAI 格式上游同样可重试（c23149696）
 
-### 3.4 其他（9abfc0b21、3cbe3c75d）
+Claude 侧修完后，OpenAI 兼容渠道存在同类缺口：中断判定要求
+`ReceivedResponseCount == 0`，而上游通常会先发一帧 role/空 delta，计数已是 1，
+断流仍被当成正常结束。
+
+- 流开始时置 prelude 重试标记；`HandleStreamFormat` 逐帧判定，出现
+  content / reasoning_content / reasoning / refusal / tool_calls 才算提交并
+  清掉标记；标记清掉后不再解析后续帧。
+- 扫描期间最后一帧被压后到流结束才下发，中断判定前补一次末帧提交检查，
+  否则"末帧即内容"的单帧流会被误判为空。
+
+验证：`go test ./relay/... ./controller ./service ./constant ./middleware`
+退出码 0；新增 3 条用例（role 帧后断流可重试、内容帧后断流不重试、健康流
+成功且标记已清）。
+
+### 3.5 其他（9abfc0b21、3cbe3c75d）
 
 - `common/page_info.go`：负数 page/page_size 归一化，避免负 LIMIT 退化成
   无上限查询。
