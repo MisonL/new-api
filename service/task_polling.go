@@ -77,9 +77,35 @@ type TaskResultParserWithContext interface {
 	ParseTaskResultWithContext(ctx context.Context, baseURL string, key string, respBody []byte, proxy string, extraHeaders ...http.Header) (*relaycommon.TaskInfo, error)
 }
 
+// taskPollingRequestTimeout bounds one upstream task-status request, including
+// the body read. RELAY_TIMEOUT defaults to 0, which leaves the shared HTTP
+// client without any timeout, and the polling context carries only a cancel,
+// no deadline: a provider that accepts the connection and then stalls would
+// park the polling loop on that single request and stop advancing every other
+// task behind it.
+var taskPollingRequestTimeout = 60 * time.Second
+
+// taskPollingResponseBody releases the per-request timeout when the caller is
+// done with the response body, so a successful poll does not keep a timer
+// armed for the rest of the timeout window.
+type taskPollingResponseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *taskPollingResponseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
+}
+
 // FetchTaskWithContext routes task polling through the context-aware adaptor.
 // The interface requires this method so lease/probe cancellation can never
 // silently fall back to an unbound HTTP request.
+//
+// The derived context is what actually bounds the request: adaptors build
+// their HTTP requests from it, so both the round trip and a stalled body read
+// end when the deadline passes.
 func FetchTaskWithContext(ctx context.Context, adaptor TaskPollingAdaptor, baseURL string, key string, body map[string]any, proxy string, extraHeaders ...http.Header) (*http.Response, error) {
 	if adaptor == nil {
 		return nil, errors.New("task polling adaptor is nil")
@@ -87,7 +113,23 @@ func FetchTaskWithContext(ctx context.Context, adaptor TaskPollingAdaptor, baseU
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return adaptor.FetchTaskWithContext(ctx, baseURL, key, body, proxy, extraHeaders...)
+	timeout := taskPollingRequestTimeout
+	if timeout <= 0 {
+		return adaptor.FetchTaskWithContext(ctx, baseURL, key, body, proxy, extraHeaders...)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	resp, err := adaptor.FetchTaskWithContext(requestCtx, baseURL, key, body, proxy, extraHeaders...)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if resp == nil || resp.Body == nil {
+		// Nothing left to read; the deadline would only linger unused.
+		cancel()
+		return resp, nil
+	}
+	resp.Body = &taskPollingResponseBody{ReadCloser: resp.Body, cancel: cancel}
+	return resp, nil
 }
 
 type sunoTaskPollingBatchKey struct {
