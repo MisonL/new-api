@@ -605,17 +605,29 @@ func sweepTimedOutTasks(ctx context.Context) {
 	}
 }
 
-// TaskPollingLoop 主轮询循环，每 15 秒检查一次未完成的任务
+// TaskPollingLoop 主轮询循环，每 15 秒检查一次未完成的任务。
+//
+// 未完成任务可能多于单轮窗口（TASK_QUERY_LIMIT）。固定取"id 最小的 N 条"
+// 时，一批卡在非终态的行会长期占满窗口，id 更大的任务直到那批超时都轮不
+// 到。这里维护一个进程内游标：每轮从上一轮最后一条之后继续，取不满窗口就
+// 回到开头，让所有未完成任务在若干轮内都被看到。
 func TaskPollingLoop() {
 	common.SleepBeforeMaintenanceLoop(common.TaskPollingInitialDelay)
+	var cursor int64
 	for {
 		time.Sleep(common.TaskPollingInterval)
 		common.SysLog("任务进度轮询开始")
 		ctx := context.TODO()
 		sweepTimedOutTasks(ctx)
-		allTasks, err := model.GetAllUnFinishSyncTasksWithError(constant.TaskQueryLimit)
+		allTasks, err := model.GetUnfinishSyncTasksAfterIDWithError(cursor, constant.TaskQueryLimit)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("TaskPollingLoop query/row error; continuing with valid tasks: %v", err))
+		}
+		if len(allTasks) < constant.TaskQueryLimit {
+			// 本轮取不满窗口，说明已经走到队尾；下一轮从头开始。
+			cursor = 0
+		} else {
+			cursor = allTasks[len(allTasks)-1].ID
 		}
 		if len(allTasks) == 0 {
 			continue

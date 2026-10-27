@@ -1157,6 +1157,19 @@ func GetAllUnFinishSyncTasksWithError(limit int) ([]*Task, error) {
 	return loadTasksWithPrivateDataIsolation(query, limit)
 }
 
+// GetUnfinishSyncTasksAfterIDWithError returns unfinished synchronous-provider
+// tasks ordered by id, starting strictly after afterID. The maintenance poller
+// walks this window with a rotating cursor: a fixed "first N by id" window lets
+// a batch of rows stuck in a non-terminal state occupy every slot forever, so
+// tasks with larger ids are never polled until those rows time out.
+func GetUnfinishSyncTasksAfterIDWithError(afterID int64, limit int) ([]*Task, error) {
+	query := backgroundDB().Model(&Task{}).
+		Where("COALESCE(status, '') NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+		Where("id > ?", afterID).
+		Order("id")
+	return loadTasksWithPrivateDataIsolation(query, limit)
+}
+
 // loadTasksWithPrivateDataIsolation reads private_data as raw bytes in a small
 // page, loads the remaining columns without the custom scanner, and decodes
 // each payload independently. A corrupt private-data value is reported while
