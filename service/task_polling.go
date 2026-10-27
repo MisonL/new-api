@@ -504,6 +504,10 @@ func groupTasksForPolling(tasks []*model.Task) (map[constant.TaskPlatform][]*mod
 // sweepTimedOutTasks 在主轮询之前独立清理超时任务。
 // 每次最多处理 100 条，剩余的下个周期继续处理。
 // 使用 per-task CAS (UpdateWithStatus) 防止覆盖被正常轮询已推进的任务。
+// legacyTaskCutoff 之前的任务是本功能上线（2026-02-22）前旧系统遗留的行，
+// 超时后只置失败、不自动退款，交由管理员处理。
+const legacyTaskCutoff int64 = 1771718400 // 2026-02-22 00:00:00 UTC
+
 func sweepTimedOutTasks(ctx context.Context) {
 	if constant.TaskTimeoutMinutes <= 0 {
 		return
@@ -517,7 +521,6 @@ func sweepTimedOutTasks(ctx context.Context) {
 		return
 	}
 
-	const legacyTaskCutoff int64 = 1740182400 // 2026-02-22 00:00:00 UTC
 	reason := fmt.Sprintf("任务超时（%d分钟）", constant.TaskTimeoutMinutes)
 	legacyReason := "任务超时（旧系统遗留任务，不进行退款，请联系管理员）"
 	now := time.Now().Unix()
