@@ -529,6 +529,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 	for _, task := range tasks {
 		isLegacy := task.SubmitTime > 0 && task.SubmitTime < legacyTaskCutoff
 
+		snap := task.Snapshot()
 		oldStatus := task.Status
 		task.Status = model.TaskStatusFailure
 		task.Progress = "100%"
@@ -550,7 +551,10 @@ func sweepTimedOutTasks(ctx context.Context) {
 		}
 		timedOutCount++
 		if !isLegacy && task.Quota != 0 {
-			RefundTaskQuota(ctx, task, reason)
+			if refundErr := RefundTaskQuota(ctx, task, reason); refundErr != nil {
+				RevertTaskTerminalTransition(ctx, task, model.TaskStatusFailure, snap)
+				continue
+			}
 		}
 	}
 
@@ -741,6 +745,7 @@ func markTaskPollingFailure(ctx context.Context, task *model.Task, reason string
 	if isTaskTerminal(task.Status) {
 		return nil
 	}
+	snap := task.Snapshot()
 	oldStatus := task.Status
 	task.Status = model.TaskStatusFailure
 	task.Progress = "100%"
@@ -760,7 +765,10 @@ func markTaskPollingFailure(ctx context.Context, task *model.Task, reason string
 		return nil
 	}
 	if task.Quota != 0 {
-		RefundTaskQuota(ctx, task, reason)
+		if refundErr := RefundTaskQuota(ctx, task, reason); refundErr != nil {
+			RevertTaskTerminalTransition(ctx, task, model.TaskStatusFailure, snap)
+			return fmt.Errorf("refund task %s: %w", task.TaskID, refundErr)
+		}
 	}
 	return nil
 }
@@ -830,6 +838,7 @@ func applySunoTaskResponse(ctx context.Context, task *model.Task, responseItem d
 		return nil
 	}
 
+	snap := task.Snapshot()
 	oldStatus := task.Status
 	task.Status = status
 	task.FailReason = lo.If(responseItem.FailReason != "", responseItem.FailReason).Else(task.FailReason)
@@ -863,7 +872,10 @@ func applySunoTaskResponse(ctx context.Context, task *model.Task, responseItem d
 	}
 	if status == model.TaskStatusFailure && oldStatus != model.TaskStatusFailure && task.Quota != 0 {
 		logger.LogInfo(ctx, task.TaskID+" 构建失败，"+task.FailReason)
-		RefundTaskQuota(ctx, task, task.FailReason)
+		if refundErr := RefundTaskQuota(ctx, task, task.FailReason); refundErr != nil {
+			RevertTaskTerminalTransition(ctx, task, model.TaskStatusFailure, snap)
+			return fmt.Errorf("refund suno task %s: %w", task.TaskID, refundErr)
+		}
 	}
 	return nil
 }
@@ -1713,10 +1725,16 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	if shouldSettle {
-		settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
+		if settleErr := settleTaskBillingOnComplete(ctx, adaptor, task, taskResult); settleErr != nil {
+			RevertTaskTerminalTransition(ctx, task, model.TaskStatusSuccess, snap)
+			return fmt.Errorf("settle task %s: %w", task.TaskID, settleErr)
+		}
 	}
 	if shouldRefund {
-		RefundTaskQuota(ctx, task, task.FailReason)
+		if refundErr := RefundTaskQuota(ctx, task, task.FailReason); refundErr != nil {
+			RevertTaskTerminalTransition(ctx, task, model.TaskStatusFailure, snap)
+			return fmt.Errorf("refund task %s: %w", task.TaskID, refundErr)
+		}
 	}
 
 	return nil
@@ -1999,28 +2017,27 @@ func truncateBase64(s string) string {
 //
 //  2. taskResult.TotalTokens > 0 -> 按 token 重算
 //  3. 都不满足 -> 保持预扣额度不变
-func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
+func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) error {
 	// 0. 按次计费的任务不做差额结算
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
-		return
+		return nil
 	}
 	// 1. 优先让 adaptor 决定最终额度
 	if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
-		RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整")
-		return
+		return RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整")
 	}
 	// 2. 回退到 token 重算
 	if taskResult.TotalTokens > 0 {
-		RecalculateTaskQuotaByTokens(ctx, task, taskResult.TotalTokens)
-		return
+		return RecalculateTaskQuotaByTokens(ctx, task, taskResult.TotalTokens)
 	}
 	// 3. 无调整，保持预扣额度
+	return nil
 }
 
 // SettleTaskBillingOnComplete exposes the same idempotent terminal settlement
 // used by the maintenance poller to request-scoped realtime fetches. Callers
 // must invoke it only after winning the task status CAS transition.
-func SettleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
-	settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
+func SettleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) error {
+	return settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
 }

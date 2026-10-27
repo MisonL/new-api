@@ -1403,10 +1403,18 @@ func tryRealtimeFetch(c *gin.Context, task *model.Task, isOpenAIVideoAPI bool) (
 	// maintenance poller, otherwise a later poll would see a terminal task and
 	// skip billing entirely.
 	if casWon && terminalTransition {
+		// Billing owns the terminal transition: when the funding step fails
+		// before any money moved, roll the row back so the next poll retries.
+		// A terminal row is never selected again by the poller, so leaving it
+		// terminal would drop the settlement or refund permanently.
 		if task.Status == model.TaskStatusSuccess {
-			service.SettleTaskBillingOnComplete(c, adaptor, task, ti)
+			if settleErr := service.SettleTaskBillingOnComplete(c, adaptor, task, ti); settleErr != nil {
+				service.RevertTaskTerminalTransition(c, task, model.TaskStatusSuccess, snap)
+			}
 		} else if task.Status == model.TaskStatusFailure && task.Quota != 0 {
-			service.RefundTaskQuota(c, task, ti.Reason)
+			if refundErr := service.RefundTaskQuota(c, task, ti.Reason); refundErr != nil {
+				service.RevertTaskTerminalTransition(c, task, model.TaskStatusFailure, snap)
+			}
 		}
 	}
 

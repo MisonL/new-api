@@ -77,7 +77,7 @@ func insertTask(t *testing.T, task *Task) {
 // ---------------------------------------------------------------------------
 
 func TestSnapshotEqual_Same(t *testing.T) {
-	s := taskSnapshot{
+	s := TaskSnapshot{
 		Status:     TaskStatusInProgress,
 		Progress:   "50%",
 		StartTime:  1000,
@@ -90,26 +90,26 @@ func TestSnapshotEqual_Same(t *testing.T) {
 }
 
 func TestSnapshotEqual_DifferentStatus(t *testing.T) {
-	a := taskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage(`{}`)}
-	b := taskSnapshot{Status: TaskStatusSuccess, Data: json.RawMessage(`{}`)}
+	a := TaskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage(`{}`)}
+	b := TaskSnapshot{Status: TaskStatusSuccess, Data: json.RawMessage(`{}`)}
 	assert.False(t, a.Equal(b))
 }
 
 func TestSnapshotEqual_DifferentProgress(t *testing.T) {
-	a := taskSnapshot{Status: TaskStatusInProgress, Progress: "30%", Data: json.RawMessage(`{}`)}
-	b := taskSnapshot{Status: TaskStatusInProgress, Progress: "60%", Data: json.RawMessage(`{}`)}
+	a := TaskSnapshot{Status: TaskStatusInProgress, Progress: "30%", Data: json.RawMessage(`{}`)}
+	b := TaskSnapshot{Status: TaskStatusInProgress, Progress: "60%", Data: json.RawMessage(`{}`)}
 	assert.False(t, a.Equal(b))
 }
 
 func TestSnapshotEqual_DifferentData(t *testing.T) {
-	a := taskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage(`{"a":1}`)}
-	b := taskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage(`{"a":2}`)}
+	a := TaskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage(`{"a":1}`)}
+	b := TaskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage(`{"a":2}`)}
 	assert.False(t, a.Equal(b))
 }
 
 func TestSnapshotEqual_NilVsEmpty(t *testing.T) {
-	a := taskSnapshot{Status: TaskStatusInProgress, Data: nil}
-	b := taskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage{}}
+	a := TaskSnapshot{Status: TaskStatusInProgress, Data: nil}
+	b := TaskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage{}}
 	// bytes.Equal(nil, []byte{}) == true
 	assert.True(t, a.Equal(b))
 }

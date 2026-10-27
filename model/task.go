@@ -185,6 +185,10 @@ type TaskPrivateData struct {
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
 	TokenId        int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
 	BillingContext *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
+	// BillingRetryCount 记录终态计费失败后的回退次数。终态计费失败会把任务
+	// 回退到未完成状态等待重试，没有上限时一个永久性失败（例如订阅行已被
+	// 删除）会让每轮轮询都重复请求上游。超过上限后保留终态并告警。
+	BillingRetryCount int `json:"billing_retry_count,omitempty"`
 }
 
 // TaskRouteSnapshotSchemaVersion is the current persisted snapshot schema.
@@ -1311,7 +1315,10 @@ func (Task *Task) Insert() error {
 	return err
 }
 
-type taskSnapshot struct {
+// TaskSnapshot is the pre-transition lifecycle state of a task row. It is the
+// CAS baseline for status transitions and the restore source when a transition
+// has to be undone.
+type TaskSnapshot struct {
 	Status     TaskStatus
 	Progress   string
 	StartTime  int64
@@ -1321,7 +1328,7 @@ type taskSnapshot struct {
 	Data       json.RawMessage
 }
 
-func (s taskSnapshot) Equal(other taskSnapshot) bool {
+func (s TaskSnapshot) Equal(other TaskSnapshot) bool {
 	return s.Status == other.Status &&
 		s.Progress == other.Progress &&
 		s.StartTime == other.StartTime &&
@@ -1331,8 +1338,8 @@ func (s taskSnapshot) Equal(other taskSnapshot) bool {
 		bytes.Equal(s.Data, other.Data)
 }
 
-func (t *Task) Snapshot() taskSnapshot {
-	return taskSnapshot{
+func (t *Task) Snapshot() TaskSnapshot {
+	return TaskSnapshot{
 		Status:     t.Status,
 		Progress:   t.Progress,
 		StartTime:  t.StartTime,
@@ -1365,6 +1372,34 @@ func UpdateTaskQuota(id int64, quota int) error {
 		return fmt.Errorf("task quota cannot be negative: %d", quota)
 	}
 	return DB.Model(&Task{}).Where("id = ?", id).Update("quota", quota).Error
+}
+
+// RestoreSnapshot undoes a status transition this caller won, guarded by the
+// status it moved away from. It is used when a terminal transition must be
+// rolled back because the billing step that owns it failed: the row returns to
+// its pre-transition lifecycle state so the next poll retries both.
+//
+// Only the lifecycle columns in the snapshot are restored. Channel and quota
+// are left untouched because they belong to submission, not to the transition
+// being undone. Private data is written back so a caller can persist retry
+// bookkeeping (for example a bounded retry counter) in the same statement.
+func (t *Task) RestoreSnapshot(fromStatus TaskStatus, snap TaskSnapshot) (bool, error) {
+	if t == nil {
+		return false, errors.New("task is nil")
+	}
+	result := DB.Model(&Task{}).Where("id = ? AND status = ?", t.ID, fromStatus).Updates(map[string]interface{}{
+		"status":       snap.Status,
+		"progress":     snap.Progress,
+		"start_time":   snap.StartTime,
+		"finish_time":  snap.FinishTime,
+		"fail_reason":  snap.FailReason,
+		"data":         snap.Data,
+		"private_data": t.PrivateData,
+	})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

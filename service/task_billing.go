@@ -153,18 +153,65 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
+// TaskBillingRetryLimit bounds how many times a failed terminal settlement or
+// refund may roll the task back into the polling pool. Without a limit, a
+// permanent funding failure (a deleted subscription, a vanished user) would
+// re-enter the poller forever and, for a success settlement, re-poll the
+// provider on every cycle.
+const TaskBillingRetryLimit = 5
+
+// RevertTaskTerminalTransition rolls a terminal transition back to its
+// pre-transition snapshot when the billing step that owns it failed before any
+// money moved. Without the revert the task stays terminal, the poller never
+// selects it again, and the settlement or refund is lost for good. The revert
+// is CAS-guarded by the terminal status, so a concurrent writer that already
+// moved the row is never overwritten.
+//
+// Retries are bounded: after TaskBillingRetryLimit attempts the task keeps its
+// terminal state and the failure is logged for operators, so a permanent
+// funding failure stops looping instead of retrying on every poll cycle.
+func RevertTaskTerminalTransition(ctx context.Context, task *model.Task, terminalStatus model.TaskStatus, snap model.TaskSnapshot) {
+	if task.PrivateData.BillingRetryCount >= TaskBillingRetryLimit {
+		logger.LogError(ctx, fmt.Sprintf("任务 %s 终态计费已连续失败 %d 次，保留终态不再重试，需要人工核对",
+			task.TaskID, task.PrivateData.BillingRetryCount))
+		return
+	}
+	task.PrivateData.BillingRetryCount++
+	won, err := task.RestoreSnapshot(terminalStatus, snap)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("任务 %s 计费失败后回退终态出错: %s", task.TaskID, err.Error()))
+		return
+	}
+	if !won {
+		logger.LogWarn(ctx, fmt.Sprintf("任务 %s 计费失败后回退终态未生效（状态已被其他进程改写）", task.TaskID))
+		return
+	}
+	task.Status = snap.Status
+	task.Progress = snap.Progress
+	task.StartTime = snap.StartTime
+	task.FinishTime = snap.FinishTime
+	task.FailReason = snap.FailReason
+	task.Data = snap.Data
+	logger.LogWarn(ctx, fmt.Sprintf("任务 %s 计费失败，已回退到 %s 等待下一轮重试（第 %d 次）",
+		task.TaskID, snap.Status, task.PrivateData.BillingRetryCount))
+}
+
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
-func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
+//
+// 返回值只表示资金来源（钱包或订阅）是否退款成功：那是第一步不可逆操作，
+// 失败时数据库未发生任何资金变动，调用方可以安全地回退任务终态并等待重试。
+// 令牌额度与日志失败发生在资金已变动之后，只记录错误，重试会导致重复退款。
+func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) error {
 	quota := task.Quota
 	if quota == 0 {
-		return
+		return nil
 	}
 
 	// 1. 退还资金来源（钱包或订阅）
 	if err := taskAdjustFunding(task, -quota, false); err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
-		return
+		return err
 	}
 
 	// 2. 退还令牌额度
@@ -185,14 +232,18 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		Group:     task.Group,
 		Other:     other,
 	})
+	return nil
 }
 
 // RecalculateTaskQuota 通用的异步差额结算。
 // actualQuota 是任务完成后的实际应扣额度，与预扣额度 (task.Quota) 做差额结算。
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
-func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string) {
+//
+// 与 RefundTaskQuota 相同，返回值只报告资金来源调整是否成功；失败表示
+// 数据库未发生资金变动，调用方可以安全回退任务终态等待重试。
+func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string) error {
 	if actualQuota <= 0 {
-		return
+		return nil
 	}
 	preConsumedQuota := task.Quota
 	quotaDelta := actualQuota - preConsumedQuota
@@ -200,7 +251,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if quotaDelta == 0 {
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 预扣费准确（%s，%s）",
 			task.TaskID, logger.LogQuota(actualQuota), reason))
-		return
+		return nil
 	}
 
 	logger.LogInfo(ctx, fmt.Sprintf("任务 %s 差额结算：delta=%s（实际：%s，预扣：%s，%s）",
@@ -214,7 +265,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	// 调整资金来源（任务已执行完，订阅超额必须落账）
 	if err := taskAdjustFunding(task, quotaDelta, true); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
-		return
+		return err
 	}
 
 	// 调整令牌额度
@@ -255,6 +306,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		Group:     task.Group,
 		Other:     other,
 	})
+	return nil
 }
 
 // taskFrozenGroupRatio returns the group ratio captured at submission time.
@@ -301,9 +353,9 @@ func resolveTaskGroupRatio(task *model.Task) float64 {
 // RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
 // 当任务成功且返回了 totalTokens 时，根据模型倍率和分组倍率重新计算实际扣费额度，
 // 与预扣费的差额进行补扣或退还。支持钱包和订阅计费来源。
-func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) {
+func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) error {
 	if totalTokens <= 0 {
-		return
+		return nil
 	}
 
 	modelName := taskModelName(task)
@@ -312,7 +364,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
 	// 只有配置了倍率(非固定价格)时才按 token 重新计费
 	if !hasRatioSetting || modelRatio <= 0 {
-		return
+		return nil
 	}
 
 	// 分组倍率优先取提交时冻结的快照：预扣用的就是它，重算另取一份配置
@@ -323,7 +375,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		finalGroupRatio = resolveTaskGroupRatio(task)
 	}
 	if finalGroupRatio <= 0 {
-		return
+		return nil
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）
@@ -340,5 +392,5 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
-	RecalculateTaskQuota(ctx, task, actualQuota, reason)
+	return RecalculateTaskQuota(ctx, task, actualQuota, reason)
 }
