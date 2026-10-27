@@ -250,6 +250,47 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	})
 }
 
+// taskFrozenGroupRatio returns the group ratio captured at submission time.
+// The task row stores the concrete group that was actually used, not the
+// user's own group, so re-deriving the ratio from configuration can pick a
+// different value than the one the pre-consume charged.
+func taskFrozenGroupRatio(task *model.Task) (float64, bool) {
+	if task == nil || task.PrivateData.BillingContext == nil {
+		return 0, false
+	}
+	ratio := task.PrivateData.BillingContext.GroupRatio
+	if ratio <= 0 {
+		return 0, false
+	}
+	return ratio, true
+}
+
+// resolveTaskGroupRatio re-derives the group ratio for legacy rows that carry
+// no billing snapshot. The special ratio is keyed by (user group, using group);
+// passing the using group twice never matches a configured entry.
+func resolveTaskGroupRatio(task *model.Task) float64 {
+	if task == nil {
+		return 0
+	}
+	usingGroup := task.Group
+	userGroup := ""
+	if task.UserId > 0 {
+		if user, err := model.GetUserById(task.UserId, false); err == nil {
+			userGroup = user.Group
+		}
+	}
+	if usingGroup == "" {
+		usingGroup = userGroup
+	}
+	if usingGroup == "" {
+		return 0
+	}
+	if special, ok := ratio_setting.GetGroupGroupRatio(userGroup, usingGroup); ok {
+		return special
+	}
+	return ratio_setting.GetGroupRatio(usingGroup)
+}
+
 // RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
 // 当任务成功且返回了 totalTokens 时，根据模型倍率和分组倍率重新计算实际扣费额度，
 // 与预扣费的差额进行补扣或退还。支持钱包和订阅计费来源。
@@ -267,26 +308,15 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		return
 	}
 
-	// 获取用户和组的倍率信息
-	group := task.Group
-	if group == "" {
-		user, err := model.GetUserById(task.UserId, false)
-		if err == nil {
-			group = user.Group
-		}
+	// 分组倍率优先取提交时冻结的快照：预扣用的就是它，重算另取一份配置
+	// 会让同一笔任务在补扣/退款时换一套口径。只有旧行没有快照时才回退到
+	// 现查，且必须按 (用户分组, 使用分组) 查专属倍率。
+	finalGroupRatio, ok := taskFrozenGroupRatio(task)
+	if !ok {
+		finalGroupRatio = resolveTaskGroupRatio(task)
 	}
-	if group == "" {
+	if finalGroupRatio <= 0 {
 		return
-	}
-
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
-	var finalGroupRatio float64
-	if hasUserGroupRatio {
-		finalGroupRatio = userGroupRatio
-	} else {
-		finalGroupRatio = groupRatio
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）
