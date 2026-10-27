@@ -295,6 +295,16 @@ func midjourneyResponseSucceeded(response *dto.MidjourneyResponseWithStatusCode)
 	}
 }
 
+// midjourneyTaskQuotaForRow decides the refundable amount persisted on a task
+// row. The row's Quota is the amount the asynchronous failure/timeout refund
+// path credits back, so a submit that never charged must leave zero there.
+func midjourneyTaskQuotaForRow(charged bool, quota int) int {
+	if !charged {
+		return 0
+	}
+	return quota
+}
+
 func maybeAutoDisableMidjourneyChannel(channelID int, channel *model.Channel) {
 	if channel == nil || !common.AutomaticDisableChannelEnabled || !channel.GetAutoBan() {
 		return
@@ -641,8 +651,15 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		PrivateData: model.TaskPrivateData{
 			Key:           common.GetContextKeyString(c, constant.ContextKeyChannelKey),
 			RouteSnapshot: routeSnapshot,
+			// 异步退款按 token_id 退还令牌额度；不落库就只能退钱包。
+			TokenId: info.TokenId,
 		},
 	}
+	// 只有 200 + Code==1 才会真正扣费（见上面的 defer）。任务行上的 Quota
+	// 同时被异步失败退款路径使用：未扣费却留下可退款金额，等于失败时凭空
+	// 加额度。主提交路径有同样的防护，swap_face 此前缺失。
+	midjourneyTask.Quota = midjourneyTaskQuotaForRow(
+		mjResp.StatusCode == 200 && midjResponse.Code == 1, priceData.Quota)
 	err = midjourneyTask.Insert()
 	if err != nil {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
@@ -1050,6 +1067,8 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		PrivateData: model.TaskPrivateData{
 			Key:           common.GetContextKeyString(c, constant.ContextKeyChannelKey),
 			RouteSnapshot: routeSnapshot,
+			// 异步退款按 token_id 退还令牌额度；不落库就只能退钱包。
+			TokenId: relayInfo.TokenId,
 		},
 	}
 	if midjResponse.Code == 3 {
@@ -1069,9 +1088,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	// A provider-level submission failure (or a non-billable follow-up action)
 	// never charged the caller, so do not leave a refundable amount on its task
 	// row.
-	if !consumeQuota {
-		midjourneyTask.Quota = 0
-	}
+	midjourneyTask.Quota = midjourneyTaskQuotaForRow(consumeQuota, priceData.Quota)
 
 	if midjResponse.Code == 21 { //21-任务已存在（处理中或者有结果了）
 		// 将 properties 转换为一个 map
