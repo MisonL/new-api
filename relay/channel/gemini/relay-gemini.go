@@ -1589,6 +1589,9 @@ func handleFinalStream(c *gin.Context, info *relaycommon.RelayInfo, resp *dto.Ch
 
 func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, callback func(data string, geminiResponse *dto.GeminiChatResponse) bool) (*dto.Usage, *types.NewAPIError) {
 	captureGeminiResponseHeaders(info, resp)
+	// 首个内容分片之前只可能收到元数据/空候选；这段窗口内断流可以换渠道
+	// 重试。内容分片到达后由下方循环清掉标记。
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
 	var usage = &dto.Usage{}
 	var imageCount int
 	responseText := strings.Builder{}
@@ -1613,6 +1616,10 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				if part.Text != "" {
 					responseText.WriteString(part.Text)
 				}
+				if part.Text != "" || part.InlineData != nil || part.FunctionCall != nil {
+					// 内容已下发，重放会重复内容，不能再重试。
+					common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, false)
+				}
 			}
 		}
 
@@ -1636,6 +1643,12 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			sr.MarkDone()
 		}
 	})
+
+	// 上游在首个内容分片之前断流时，此前直接按成功返回空回复。与 OpenAI /
+	// Claude 侧一致：尚未提交内容就报可重试错误，让控制器换渠道。
+	if newAPIError := relaycommon.RetryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
+		return nil, newAPIError
+	}
 
 	if imageCount != 0 {
 		if usage.CompletionTokens == 0 {
