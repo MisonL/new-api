@@ -1353,6 +1353,20 @@ func (Task *Task) Update() error {
 	return DB.Save(Task).Error
 }
 
+// UpdateTaskQuota persists a settled quota on the task row. It is a targeted
+// column write: settlement runs after the terminal status CAS, and a full-row
+// save would rewrite status, progress and private data from a polling snapshot
+// that may already be stale.
+func UpdateTaskQuota(id int64, quota int) error {
+	if id <= 0 {
+		return errors.New("invalid task id")
+	}
+	if quota < 0 {
+		return fmt.Errorf("task quota cannot be negative: %d", quota)
+	}
+	return DB.Model(&Task{}).Where("id = ?", id).Update("quota", quota).Error
+}
+
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
 // Returns (true, nil) if this caller won the update, (false, nil) if
 // another process already moved the task out of fromStatus.

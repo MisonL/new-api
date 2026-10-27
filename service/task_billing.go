@@ -221,6 +221,13 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
+	// 结算额度必须落库：任务列表读的是库里的 quota，只改内存会让用户看到的
+	// 扣费停留在预扣值，任何按行内 quota 计算的后续动作也会拿到旧值。
+	if task.ID > 0 {
+		if err := model.UpdateTaskQuota(task.ID, actualQuota); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("持久化任务结算额度失败 task %s: %s", task.TaskID, err.Error()))
+		}
+	}
 
 	var logType int
 	var logQuota int
