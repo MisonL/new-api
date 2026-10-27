@@ -3,11 +3,14 @@ package helper
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -231,6 +234,64 @@ func OpenAIChatErrorEvent(c *gin.Context, openAIError types.OpenAIError) error {
 // Done writes the terminal [DONE] SSE marker.
 func Done(c *gin.Context) {
 	_ = StringData(c, "[DONE]")
+}
+
+// 实时中继的心跳参数。对端消失时 TCP 连接可以长时间保持"已建立"状态，
+// 没有读超时的话两侧读协程会永久阻塞在 ReadMessage 上：连接、计费会话和
+// 上游并发租约都不会释放。
+var (
+	realtimePingInterval = 30 * time.Second
+	realtimePongWait     = 90 * time.Second
+	realtimeWriteWait    = 10 * time.Second
+)
+
+// StartRealtimeKeepalive arms liveness detection on one side of the realtime
+// relay: the read deadline is set, every pong extends it, and a ping is sent on
+// an interval so an idle-but-alive peer keeps proving itself. The returned stop
+// function ends the ping loop; it is safe to call more than once.
+//
+// Ping uses WriteControl, which gorilla allows concurrently with the data
+// writes the relay goroutines perform on the same connection.
+func StartRealtimeKeepalive(conn *websocket.Conn, label string) func() {
+	if conn == nil {
+		return func() {}
+	}
+	conn.SetReadDeadline(time.Now().Add(realtimePongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(realtimePongWait))
+	})
+
+	done := make(chan struct{})
+	var once sync.Once
+	stop := func() {
+		once.Do(func() { close(done) })
+	}
+	go func() {
+		ticker := time.NewTicker(realtimePingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(realtimeWriteWait)); err != nil {
+					logger.LogWarn(context.Background(), fmt.Sprintf("realtime keepalive ping to %s failed: %s", label, err.Error()))
+					return
+				}
+			}
+		}
+	}()
+	return stop
+}
+
+// TouchRealtimeReadDeadline extends the read deadline after any successful
+// read. A peer that sends data but never answers a ping is still alive, so
+// traffic alone must count as liveness evidence.
+func TouchRealtimeReadDeadline(conn *websocket.Conn) {
+	if conn == nil {
+		return
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(realtimePongWait))
 }
 
 // WssString writes a string message to the websocket client.

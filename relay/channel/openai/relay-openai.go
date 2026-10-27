@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -459,6 +460,19 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	targetClosed := make(chan struct{})
 	errChan := make(chan error, 2)
 
+	// 没有心跳时，对端消失的连接会让两个读协程永久阻塞在 ReadMessage 上，
+	// 连接、计费会话和上游并发租约都不释放。两侧都开读超时 + ping/pong。
+	stopClientKeepalive := helper.StartRealtimeKeepalive(clientConn, "client")
+	defer stopClientKeepalive()
+	stopTargetKeepalive := helper.StartRealtimeKeepalive(targetConn, "target")
+	defer stopTargetKeepalive()
+
+	// 两个读协程都会读写这三个用量对象：客户端方向累加 localUsage，上游
+	// 方向在 turn 结束时累加 usage、结算并清空 localUsage，函数尾部还要
+	// 读取两个对象的合计。没有锁时这些写与尾部读构成数据竞争，清空
+	// localUsage 的那次赋值可能被另一协程的累加覆盖，或者相反，导致同一个
+	// turn 的用量被计费两次或漏计。
+	var usageMu sync.Mutex
 	usage := &dto.RealtimeUsage{}
 	localUsage := &dto.RealtimeUsage{}
 	sumUsage := &dto.RealtimeUsage{}
@@ -482,6 +496,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					close(clientClosed)
 					return
 				}
+				helper.TouchRealtimeReadDeadline(clientConn)
 
 				realtimeEvent := &dto.RealtimeEvent{}
 				err = common.Unmarshal(message, realtimeEvent)
@@ -504,8 +519,12 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					return
 				}
 
+				// 令牌计数会读取 info.IsFirstRequest / info.RealtimeTools，而
+				// 上游方向协程会写这两个字段：计数必须与用量累加一起串行化。
+				usageMu.Lock()
 				textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
 				if err != nil {
+					usageMu.Unlock()
 					errChan <- fmt.Errorf("error counting text token: %v", err)
 					return
 				}
@@ -514,6 +533,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				localUsage.InputTokens += textToken + audioToken
 				localUsage.InputTokenDetails.TextTokens += textToken
 				localUsage.InputTokenDetails.AudioTokens += audioToken
+				usageMu.Unlock()
 
 				err = helper.WssString(c, targetConn, string(upstreamMessage))
 				if err != nil {
@@ -543,6 +563,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					close(targetClosed)
 					return
 				}
+				helper.TouchRealtimeReadDeadline(targetConn)
 				info.SetFirstResponseTime()
 				realtimeEvent := &dto.RealtimeEvent{}
 				err = common.Unmarshal(message, realtimeEvent)
@@ -554,18 +575,20 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				if realtimeEvent.Type == dto.RealtimeEventTypeResponseDone {
 					realtimeUsage := realtimeEvent.Response.Usage
 					if realtimeUsage != nil {
+						usageMu.Lock()
 						addRealtimeUsage(usage, realtimeUsage)
 						err := preConsumeUsage(c, info, usage, sumUsage)
 						// 无论扣费成功与否，本 turn 的用量都已并入 sumUsage，
 						// 必须清空 usage；否则函数尾部的兜底 preConsumeUsage 会把
 						// 同一 turn 再加一次，sumUsage 翻倍并按翻倍值终态结算。
 						usage = &dto.RealtimeUsage{}
+						// 本次计费完成，清除
+						localUsage = &dto.RealtimeUsage{}
+						usageMu.Unlock()
 						if err != nil {
 							errChan <- fmt.Errorf("error consume usage: %v", err)
 							return
 						}
-						// 本次计费完成，清除
-						localUsage = &dto.RealtimeUsage{}
 					} else {
 						textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
 						if err != nil {
@@ -573,6 +596,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 							return
 						}
 						logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
+						usageMu.Lock()
 						localUsage.TotalTokens += textToken + audioToken
 						info.IsFirstRequest = false
 						localUsage.InputTokens += textToken + audioToken
@@ -582,15 +606,17 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 						// 同 ResponseDone 分支：用量已并入 sumUsage，先清空再判断错误，
 						// 避免尾部兜底重复累计。
 						localUsage = &dto.RealtimeUsage{}
+						usageMu.Unlock()
 						if err != nil {
 							errChan <- fmt.Errorf("error consume usage: %v", err)
 							return
 						}
 						// print now usage
 					}
+					usageMu.Lock()
 					logger.LogInfo(c, fmt.Sprintf("realtime streaming sumUsage: %v", sumUsage))
 					logger.LogInfo(c, fmt.Sprintf("realtime streaming localUsage: %v", localUsage))
-					logger.LogInfo(c, fmt.Sprintf("realtime streaming localUsage: %v", localUsage))
+					usageMu.Unlock()
 
 				} else if realtimeEvent.Type == dto.RealtimeEventTypeSessionUpdated || realtimeEvent.Type == dto.RealtimeEventTypeSessionCreated {
 					realtimeSession := realtimeEvent.Session
@@ -606,10 +632,12 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 						return
 					}
 					logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
+					usageMu.Lock()
 					localUsage.TotalTokens += textToken + audioToken
 					localUsage.OutputTokens += textToken + audioToken
 					localUsage.OutputTokenDetails.TextTokens += textToken
 					localUsage.OutputTokenDetails.AudioTokens += audioToken
+					usageMu.Unlock()
 				}
 
 				err = helper.WssString(c, clientConn, string(message))
@@ -630,6 +658,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	case <-c.Done():
 	}
 
+	usageMu.Lock()
 	if usage.TotalTokens != 0 {
 		_ = preConsumeUsage(c, info, usage, sumUsage)
 	}
@@ -637,8 +666,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	if localUsage.TotalTokens != 0 {
 		_ = preConsumeUsage(c, info, localUsage, sumUsage)
 	}
-
-	// check usage total tokens, if 0, use local usage
+	usageMu.Unlock()
 
 	return nil, sumUsage
 }
