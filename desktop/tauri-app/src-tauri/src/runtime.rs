@@ -46,13 +46,17 @@ pub fn spawn_bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) {
 
     thread::spawn(move || {
         let result = bootstrap_desktop_runtime(app.clone());
-        clear_starting(&app);
 
         match result {
             Ok(()) => {
+                clear_starting(&app);
                 clear_startup_error(&app);
                 close_service_management_window(&app);
             }
+            // 失败路径不能先清 starting：handle_bootstrap_failure 里的
+            // stop_sidecar 会无条件取走当前句柄，而它内部才清 starting。
+            // 提前清标记会给重试留出一个窗口，让重试刚起的新 sidecar 被
+            // 这次失败清理顺手杀掉。
             Err(err) => handle_bootstrap_failure(&app, err),
         }
     });
