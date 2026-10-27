@@ -483,6 +483,9 @@ func migrateDB() error {
 	if err := migrateVendorMetaUniqueIndex(); err != nil {
 		return err
 	}
+	if err := migrateQuotaDataUniqueIndex(); err != nil {
+		return err
+	}
 	if err := migrateResponsesCompactModeAuto(); err != nil {
 		return err
 	}

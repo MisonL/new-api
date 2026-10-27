@@ -8,15 +8,16 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // QuotaData 柱状图数据
 type QuotaData struct {
 	Id        int    `json:"id"`
-	UserID    int    `json:"user_id" gorm:"index;index:idx_qdt_user_created_at,priority:1"`
-	Username  string `json:"username" gorm:"index:idx_qdt_model_user_name,priority:2;index:idx_qdt_username_created_at,priority:1;size:64;default:''"`
-	ModelName string `json:"model_name" gorm:"index:idx_qdt_model_user_name,priority:1;index:idx_qdt_created_model,priority:2;size:64;default:''"`
-	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_qdt_created_at,priority:2;index:idx_qdt_user_created_at,priority:2;index:idx_qdt_username_created_at,priority:2;index:idx_qdt_created_model,priority:1"`
+	UserID    int    `json:"user_id" gorm:"index;index:idx_qdt_user_created_at,priority:1;uniqueIndex:uk_qdt_bucket,priority:1"`
+	Username  string `json:"username" gorm:"index:idx_qdt_model_user_name,priority:2;index:idx_qdt_username_created_at,priority:1;size:64;default:'';uniqueIndex:uk_qdt_bucket,priority:2"`
+	ModelName string `json:"model_name" gorm:"index:idx_qdt_model_user_name,priority:1;index:idx_qdt_created_model,priority:2;size:64;default:'';uniqueIndex:uk_qdt_bucket,priority:3"`
+	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_qdt_created_at,priority:2;index:idx_qdt_user_created_at,priority:2;index:idx_qdt_username_created_at,priority:2;index:idx_qdt_created_model,priority:1;uniqueIndex:uk_qdt_bucket,priority:4"`
 	TokenUsed int    `json:"token_used" gorm:"default:0"`
 	Count     int    `json:"count" gorm:"default:0"`
 	Quota     int    `json:"quota" gorm:"default:0"`
@@ -162,26 +163,13 @@ func SaveQuotaDataCache() {
 	}
 	saved := make(map[string]*QuotaData, size)
 	for key, quotaData := range CacheQuotaData {
-		quotaDataDB := &QuotaData{}
-		queryErr := DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
-			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt).First(quotaDataDB).Error
-		if queryErr != nil && !errors.Is(queryErr, gorm.ErrRecordNotFound) {
-			common.SysLog(fmt.Sprintf("保存数据看板数据失败（查询阶段，保留待重试）: %s", queryErr))
+		// 直接 upsert：先查再插在两个进程同时刷同一个小时桶时都会查不到行、
+		// 都执行 INSERT，落出两行重复聚合；此后 UPDATE 同时命中两行，看板
+		// 数值翻倍。唯一索引 (user_id, username, model_name, created_at) 兜底，
+		// 冲突时在 SQL 层累加增量。
+		if err := upsertQuotaData(quotaData); err != nil {
+			common.SysLog(fmt.Sprintf("保存数据看板数据失败（保留待重试）: %s", err))
 			continue
-		}
-		if quotaDataDB.Id > 0 {
-			//quotaDataDB.Count += quotaData.Count
-			//quotaDataDB.Quota += quotaData.Quota
-			//DB.Table("quota_data").Save(quotaDataDB)
-			if err := increaseQuotaData(quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.Count, quotaData.Quota, quotaData.CreatedAt, quotaData.TokenUsed); err != nil {
-				common.SysLog(fmt.Sprintf("保存数据看板数据失败（更新阶段，保留待重试）: %s", err))
-				continue
-			}
-		} else {
-			if err := DB.Table("quota_data").Create(quotaData).Error; err != nil {
-				common.SysLog(fmt.Sprintf("保存数据看板数据失败（写入阶段，保留待重试）: %s", err))
-				continue
-			}
 		}
 		saved[key] = quotaData
 	}
@@ -196,15 +184,27 @@ func SaveQuotaDataCache() {
 	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", size))
 }
 
-// increaseQuotaData 返回错误供调用方决定是否保留缓存条目；原实现只记日志，
-// 上层无法区分成功与失败。
-func increaseQuotaData(userId int, username string, modelName string, count int, quota int, createdAt int64, tokenUsed int) error {
-	return DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
-		userId, username, modelName, createdAt).Updates(map[string]interface{}{
-		"count":      gorm.Expr("count + ?", count),
-		"quota":      gorm.Expr("quota + ?", quota),
-		"token_used": gorm.Expr("token_used + ?", tokenUsed),
-	}).Error
+// upsertQuotaData inserts one hourly bucket or, when the bucket row already
+// exists, adds the deltas in SQL. The unique index on the bucket columns makes
+// this atomic: two processes flushing the same bucket concurrently can no
+// longer both take the "row not found" branch and insert duplicate rows.
+func upsertQuotaData(quotaData *QuotaData) error {
+	if quotaData == nil {
+		return errors.New("quota data is nil")
+	}
+	return DB.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "user_id"},
+			{Name: "username"},
+			{Name: "model_name"},
+			{Name: "created_at"},
+		},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"count":      gorm.Expr("count + ?", quotaData.Count),
+			"quota":      gorm.Expr("quota + ?", quotaData.Quota),
+			"token_used": gorm.Expr("token_used + ?", quotaData.TokenUsed),
+		}),
+	}).Table("quota_data").Create(quotaData).Error
 }
 
 func getQuotaDataGroupedByModel(baseQuery *gorm.DB, defaultTime string) (quotaData []*QuotaData, err error) {
