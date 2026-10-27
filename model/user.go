@@ -380,15 +380,27 @@ func HardDeleteUserById(id int) error {
 	return err
 }
 
+// inviteUser credits the inviter with one more invite. All three counters are
+// maintained with SQL-level relative updates: a full-row DB.Save would write
+// the pre-read snapshot back and revert any settlement (quota = quota - ?)
+// that landed between the read and the write.
 func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+	if inviterId == 0 {
+		return errors.New("id 为空！")
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
+		"aff_count": gorm.Expr("aff_count + ?", 1),
+		"aff_quota": gorm.Expr("aff_quota + ?", common.QuotaForInviter),
+		// 列名来自 User 的 gorm tag：aff_history_quota 的 column 是 aff_history。
+		"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("inviter %d not found", inviterId)
+	}
+	return nil
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
@@ -483,7 +495,9 @@ func (user *User) Insert(inviterId int) error {
 		if common.QuotaForInviter > 0 {
 			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+			if err := inviteUser(inviterId); err != nil {
+				common.SysLog(fmt.Sprintf("failed to credit inviter %d: %s", inviterId, err.Error()))
+			}
 			RecordInvitationRegisterReward(inviterId, user.Id, common.QuotaForInviter)
 		}
 	}
@@ -544,7 +558,9 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 		}
 		if common.QuotaForInviter > 0 {
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+			if err := inviteUser(inviterId); err != nil {
+				common.SysLog(fmt.Sprintf("failed to credit inviter %d: %s", inviterId, err.Error()))
+			}
 			RecordInvitationRegisterReward(inviterId, user.Id, common.QuotaForInviter)
 		}
 	}
