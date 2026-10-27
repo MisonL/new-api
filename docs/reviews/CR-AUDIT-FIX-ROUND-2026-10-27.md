@@ -190,7 +190,17 @@ Claude 侧修完后，OpenAI 兼容渠道存在同类缺口：中断判定要求
 退出码 0；新增 3 条用例（role 帧后断流可重试、内容帧后断流不重试、健康流
 成功且标记已清）。
 
-### 3.5 其他（9abfc0b21、3cbe3c75d）
+### 3.5 Gemini 格式上游同样可重试（1e7ea6119）
+
+`geminiStreamHandler` 扫描结束后直接返回成功，不看 `StreamStatus`。原生
+Gemini 与 Gemini→OpenAI/Claude 两条路径共用该函数，一处修复覆盖两处：
+流开始时置 prelude 标记，分片出现 text / inlineData / functionCall 才算
+提交并清标记，扫描结束后接入共享的中断判定。
+
+验证：`go test ./relay/... ./controller ./service ./middleware` 退出码 0；
+新增 3 条用例。
+
+### 3.6 其他（9abfc0b21、3cbe3c75d）
 
 - `common/page_info.go`：负数 page/page_size 归一化，避免负 LIMIT 退化成
   无上限查询。
