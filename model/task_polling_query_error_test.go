@@ -109,6 +109,9 @@ func TestUnfinishedTaskQueriesIncludeNullStatus(t *testing.T) {
 			"INSERT INTO tasks (task_id, status, progress, submit_time, private_data) VALUES (?, NULL, ?, ?, ?)",
 			"null-status-task", "10%", int64(1), "{}",
 		).Error)
+		// progress 已到 100% 但 status 仍是 NULL：状态才是终态的唯一依据，
+		// 这行必须继续被轮询选中，否则它会永久不可见（既不会被推进，也不会
+		// 被超时清扫回收）。与 Midjourney 侧的行为保持一致。
 		require.NoError(t, db.Exec(
 			"INSERT INTO tasks (task_id, status, progress, submit_time, private_data) VALUES (?, NULL, ?, ?, ?)",
 			"completed-progress-task", "100%", int64(1), "{}",
@@ -125,14 +128,14 @@ func TestUnfinishedTaskQueriesIncludeNullStatus(t *testing.T) {
 
 		tasks, err := GetAllUnFinishSyncTasksWithError(10)
 		require.NoError(t, err)
-		require.Len(t, tasks, 1)
+		require.Len(t, tasks, 2)
 		require.Equal(t, "null-status-task", tasks[0].TaskID)
+		require.Equal(t, "completed-progress-task", tasks[1].TaskID)
 
 		timedOut, err := GetTimedOutUnfinishedTasksWithError(2, 10)
 		require.NoError(t, err)
-		require.Len(t, timedOut, 1)
-		require.Equal(t, "null-status-task", timedOut[0].TaskID)
-		require.Equal(t, int64(1), TaskCountUnfinished())
+		require.Len(t, timedOut, 2)
+		require.Equal(t, int64(2), TaskCountUnfinished())
 	})
 
 	t.Run("Midjourney task", func(t *testing.T) {

@@ -1131,8 +1131,10 @@ func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 // route snapshot must not be mistaken for an empty result by background
 // polling callers.
 func GetTimedOutUnfinishedTasksWithError(cutoffUnix int64, limit int) ([]*Task, error) {
-	query := backgroundDB().Model(&Task{}).Where("progress != ?", "100%").
-		Where("COALESCE(status, '') NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+	// 进度不是终端状态的唯一依据：provider 可能在终态前把 progress 写到 100%，
+	// 或者 legacy 行已把 status 改成 FAILURE/SUCCESS 但 progress 仍停在中间值。
+	// 以 status 为准，progress 只在输出时解析；这里只筛选非终端状态。
+	query := backgroundDB().Model(&Task{}).Where("COALESCE(status, '') NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
 		Where("submit_time < ?", cutoffUnix).
 		Order("submit_time")
 	return loadTasksWithPrivateDataIsolation(query, limit)
@@ -1148,9 +1150,9 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 // that drive a polling loop should handle the error explicitly and leave the
 // rows pending for a later retry instead of treating the batch as empty.
 func GetAllUnFinishSyncTasksWithError(limit int) ([]*Task, error) {
-	// get all tasks progress is not 100%
-	query := backgroundDB().Model(&Task{}).Where("progress != ?", "100%").
-		Where("COALESCE(status, '') NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+	// 同上：用 status 而不是 progress，避免遗漏非终端的 100% 进度行或误删
+	// 已终态的行。polling loop 按此查询会漏掉所有 progress="100%" 但 status!=FAILURE/SUCCESS 的任务。
+	query := backgroundDB().Model(&Task{}).Where("COALESCE(status, '') NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
 		Order("id")
 	return loadTasksWithPrivateDataIsolation(query, limit)
 }
@@ -1232,7 +1234,7 @@ func TaskCountUnfinishedWithError() (int64, error) {
 	if DB == nil {
 		return 0, errors.New("database is not initialized")
 	}
-	err := backgroundDB().Model(&Task{}).Where("progress != ?", "100%").
+	err := backgroundDB().Model(&Task{}).
 		Where("COALESCE(status, '') NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
 		Count(&count).Error
 	if err != nil {
