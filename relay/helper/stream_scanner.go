@@ -29,7 +29,17 @@ const (
 	DefaultMaxScannerBufferSize = 64 << 20 // 64MB (64*1024*1024) default SSE buffer size
 	DefaultStreamingTimeout     = 300 * time.Second
 	DefaultPingInterval         = 10 * time.Second
+
+	// streamShutdownWriteGrace 是扫描器返回前等待阻塞写入失败的宽限期。
+	streamShutdownWriteGrace = 5 * time.Second
 )
+
+// responseWriterUnwrapper exposes gin's underlying http.ResponseWriter to
+// http.ResponseController; gin's ResponseWriter implements neither
+// SetWriteDeadline nor Unwrap.
+type responseWriterUnwrapper struct{ gin.ResponseWriter }
+
+func (w responseWriterUnwrapper) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func getScannerBufferSize() int {
 	if constant.StreamScannerMaxBufferMB > 0 {
@@ -196,17 +206,19 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 			firstDataTimer.Stop()
 		}
 
-		// 等待所有 goroutine 退出，最多等待5秒
-		done := make(chan struct{})
-		gopool.Go(func() {
-			wg.Wait()
-			close(done)
-		})
-
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			logger.LogError(c, "timeout waiting for goroutines to exit")
+		// 返回后不允许任何协程再写 c.Writer：gin 会把 Context 放回池里复用，
+		// 遗留协程的写会落到另一个请求的响应上。给底层连接设一个写截止时间，
+		// 让卡在客户端写入上的 data handler / ping 写协程在宽限期内失败退出，
+		// 然后等它们全部结束再返回。此前的实现最多等 5 秒就返回，遗留协程
+		// 仍在写响应。
+		if c.Writer != nil {
+			_ = http.NewResponseController(responseWriterUnwrapper{c.Writer}).
+				SetWriteDeadline(time.Now().Add(streamShutdownWriteGrace))
+		}
+		wg.Wait()
+		if c.Writer != nil {
+			_ = http.NewResponseController(responseWriterUnwrapper{c.Writer}).
+				SetWriteDeadline(time.Time{})
 		}
 		info.ReceivedResponseCount = int(receivedResponseCount.Load())
 		if info.StreamStatus.EndReason == relaycommon.StreamEndReasonNone {
@@ -254,9 +266,14 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 			for {
 				select {
 				case <-pingTicker.C:
-					// 使用超时机制防止写操作阻塞
+					// 使用超时机制防止写操作阻塞。写协程计入 wg：超时放弃等待后
+					// 它可能仍持有 writeMutex 并写 c.Writer，扫描器必须等它退出
+					// 才能返回。计数在 ping 协程自己的 +1 尚未 Done 时增加，
+					// 与 Wait 并发是合法的。
 					done := make(chan error, 1)
+					wg.Add(1)
 					gopool.Go(func() {
+						defer wg.Done()
 						writeMutex.Lock()
 						defer writeMutex.Unlock()
 						done <- PingData(c)
