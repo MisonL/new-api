@@ -31,6 +31,12 @@ import (
 var zhipuTokens sync.Map
 var expSeconds int64 = 24 * 3600
 
+// invalidZhipuKeyLogMessage 描述格式错误的 key 但不回显其内容：它可能是
+// 用户误粘的其它厂商有效密钥，完整落盘等于把凭据写进日志。
+func invalidZhipuKeyLogMessage(apikey string) string {
+	return fmt.Sprintf("invalid zhipu key: length=%d masked=%s", len(apikey), common.MaskSensitiveInfo(apikey))
+}
+
 func getZhipuToken(apikey string) string {
 	data, ok := zhipuTokens.Load(apikey)
 	if ok {
@@ -42,7 +48,7 @@ func getZhipuToken(apikey string) string {
 
 	split := strings.Split(apikey, ".")
 	if len(split) != 2 {
-		common.SysLog("invalid zhipu key: " + apikey)
+		common.SysLog(invalidZhipuKeyLogMessage(apikey))
 		return ""
 	}
 
