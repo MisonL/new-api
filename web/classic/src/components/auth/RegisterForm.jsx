@@ -40,6 +40,7 @@ import {
   onCustomOAuthClicked,
   isDesktopApp,
   consumeAuthRedirectTarget,
+  getOAuthState,
 } from '../../helpers';
 import Turnstile from '../common/lazy/LazyTurnstile';
 import {
@@ -209,9 +210,14 @@ const RegisterForm = () => {
     }
     setWechatCodeSubmitLoading(true);
     try {
-      const res = await API.get(
-        `/api/oauth/wechat?code=${inputs.wechat_verification_code}`,
-      );
+      const state = await getOAuthState();
+      if (!state) {
+        showError(t('无法发起微信登录，请刷新页面重试'));
+        return;
+      }
+      const res = await API.get('/api/oauth/wechat', {
+        params: { code: inputs.wechat_verification_code, state },
+      });
       const { success, message, data } = res.data;
       if (success) {
         if (data && data.require_2fa) {
@@ -471,6 +477,14 @@ const RegisterForm = () => {
       }
     });
     try {
+      // 绑定发起登录的浏览器：签名 payload 不能证明它来自本浏览器，
+      // 缺少 state 时后端会拒绝。
+      const state = await getOAuthState();
+      if (!state) {
+        showError(t('无法发起 Telegram 登录，请刷新页面重试'));
+        return;
+      }
+      params.state = state;
       const res = await API.get(`/api/oauth/telegram/login`, { params });
       const { success, message, data } = res.data;
       if (success) {

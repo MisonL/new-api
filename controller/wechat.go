@@ -59,6 +59,17 @@ func WeChatAuth(c *gin.Context) {
 		})
 		return
 	}
+	// 微信登录是公开 GET，必须绑定发起登录的浏览器：state 由 /api/oauth/state
+	// 写进会话，前端在提交 code 时带回。否则攻击者用自己的微信拿到 code，
+	// 把 /api/oauth/wechat?code=... 送进受害者浏览器，就把受害者登进了
+	// 攻击者账号（登录 CSRF）。
+	if !validateOAuthState(c, c.Query("state")) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "OAuth state 校验失败，请刷新页面后重试",
+		})
+		return
+	}
 	code := c.Query("code")
 	wechatId, err := getWeChatIdByCode(code)
 	if err != nil {

@@ -1,3 +1,4 @@
+import i18next from 'i18next'
 import { api } from '@/lib/api'
 import type {
   LoginPayload,
@@ -75,17 +76,30 @@ export async function getOAuthState(): Promise<string> {
   return ''
 }
 
-// WeChat login by authorization code
+// WeChat login by authorization code. Requires a browser session with a
+// matching OAuth state nonce to prevent login CSRF (sending our own code
+// to the victim's browser would otherwise log them into our account).
 export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/wechat', { params: { code } })
+  const state = await getOAuthState()
+  if (!state) {
+    throw new Error(i18next.t('无法发起微信登录，请刷新页面重试'))
+  }
+  const res = await api.get('/api/oauth/wechat', { params: { code, state } })
   return res.data
 }
 
-// Telegram login with widget-signed parameters
+// Telegram login with widget-signed parameters. Requires a browser session
+// with a matching OAuth state nonce: the signed payload only proves it was
+// issued by our bot; it doesn't prove it came from this browser. Sending
+// our own signed URL to the victim would otherwise log them into our account.
 export async function telegramLoginByParams(
   params: Record<string, string>
 ): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/telegram/login', { params })
+  const state = await getOAuthState()
+  if (!state) {
+    throw new Error(i18next.t('无法发起 Telegram 登录，请刷新页面重试'))
+  }
+  const res = await api.get('/api/oauth/telegram/login', { params: { ...params, state } })
   return res.data
 }
 

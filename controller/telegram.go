@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"io"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -152,6 +153,16 @@ func TelegramLogin(c *gin.Context) {
 		})
 		return
 	}
+	// 与微信登录同理：签名 payload 只能证明它由 bot 签发，不能证明它来自
+	// 发起登录的浏览器。要求会话内的 state，挡住把攻击者自己的 payload
+	// 拼成链接送进受害者浏览器的登录 CSRF。
+	if !validateOAuthState(c, c.Query("state")) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "OAuth state 校验失败，请刷新页面后重试",
+		})
+		return
+	}
 	params := c.Request.URL.Query()
 	if !checkTelegramAuthorization(params, common.TelegramBotToken) {
 		c.JSON(200, gin.H{
@@ -208,6 +219,10 @@ func checkTelegramAuthorization(params map[string][]string, token string) bool {
 	for k, v := range params {
 		if k == "hash" {
 			hash = v[0]
+			continue
+		}
+		// state 由网关自己追加，不是 widget 签名载荷的一部分。
+		if k == "state" {
 			continue
 		}
 		strs = append(strs, k+"="+v[0])
