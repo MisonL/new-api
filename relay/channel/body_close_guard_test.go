@@ -13,7 +13,7 @@ import (
 // 每个从 resp.Body 读到内存的响应处理函数都必须在入口 defer 关闭响应体。
 // 只在成功路径显式关闭时，读失败/超限的分支会直接返回：没有任何调用方会再
 // 替它关闭，连接与文件描述符泄漏。审计把这类读错误分支列为同型缺陷；这里
-// 在整棵 relay/channel 树上断言"读 resp.Body ⇒ defer 关闭"的不变量，防止
+// 在整棵 relay/channel 树上断言"读 resp.Body 就必须 defer 关闭"的不变量，防止
 // 新增渠道或改动分支时重新引入。
 func TestResponseBodyReadersDeferClose(t *testing.T) {
 	var violations []string
