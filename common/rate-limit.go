@@ -41,6 +41,28 @@ func (l *InMemoryRateLimiter) clearExpiredItems() {
 	}
 }
 
+// Allow 只读地判断一次请求是否会被放行，不写入计数。用于"配额只统计成功
+// 请求"的场景：预检时不能把当前请求记进去，否则失败请求也会消耗配额，
+// 与 Redis 版只按成功计数列表判定的语义不一致。
+// Request parameter duration's unit is seconds
+func (l *InMemoryRateLimiter) Allow(key string, maxRequestNum int, duration int64) bool {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if maxRequestNum <= 0 {
+		// 0 表示不限制，与 Request 在中间件层的解释保持一致。
+		return true
+	}
+	queue, ok := l.store[key]
+	if !ok {
+		return true
+	}
+	now := time.Now().Unix()
+	if len(*queue) < maxRequestNum {
+		return true
+	}
+	return now-(*queue)[0] >= duration
+}
+
 // Request parameter duration's unit is seconds
 func (l *InMemoryRateLimiter) Request(key string, maxRequestNum int, duration int64) bool {
 	l.mutex.Lock()

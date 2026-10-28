@@ -142,10 +142,10 @@ func memoryRateLimitHandler(subject string, duration int64, totalMaxCount, succe
 			return
 		}
 
-		// 2. 检查成功请求数限制
-		// 使用一个临时key来检查限制，这样可以避免实际记录
-		checkKey := successKey + "_check"
-		if !inMemoryRateLimiter.Request(checkKey, successMaxCount, duration) {
+		// 2. 检查成功请求数限制。只读计数、不写入：用临时 key 预检会把
+		// 失败请求也算进"仅成功请求"的配额，与 Redis 版语义不一致，连续
+		// 失败后连正常请求都会被误 429。
+		if !inMemoryRateLimiter.Allow(successKey, successMaxCount, duration) {
 			c.Status(http.StatusTooManyRequests)
 			c.Abort()
 			return
@@ -154,8 +154,9 @@ func memoryRateLimitHandler(subject string, duration int64, totalMaxCount, succe
 		// 3. 处理请求
 		c.Next()
 
-		// 4. 如果请求成功，记录到实际的成功请求计数中
-		if c.Writer.Status() < 400 {
+		// 4. 如果请求成功，记录到实际的成功请求计数中；阈值为 0 时与
+		// recordRedisRequest 一致，不写入无意义的遗留条目。
+		if successMaxCount > 0 && c.Writer.Status() < 400 {
 			inMemoryRateLimiter.Request(successKey, successMaxCount, duration)
 		}
 	}
