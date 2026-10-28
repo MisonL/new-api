@@ -89,6 +89,15 @@ func setupLogin(user *model.User, c *gin.Context) {
 // 未签发会话时第二个返回值说明原因，供审计使用："twofa_required"（已写入挑战响应，
 // 等待 Verify2FALogin）、"session_save_failed"、"twofa_check_failed"。
 func setupLoginWithResult(user *model.User, c *gin.Context) (bool, string) {
+	// 禁用账号不签发会话。这是会话签发的唯一收口，密码、OAuth、微信、
+	// Telegram、Passkey、2FA 完成登录与桌面端 handoff 全部经过这里；此前
+	// Telegram 登录与 Verify2FALogin 不检查状态，签发的是 status=disabled 的
+	// 会话，违反"禁用账号不得签发会话"的不变量。
+	if user == nil || user.Status != common.UserStatusEnabled {
+		common.ApiErrorI18n(c, i18n.MsgAuthUserBanned)
+		return false, "user_banned"
+	}
+
 	session := sessions.Default(c)
 
 	// OAuth 登录走到会话签发即 state 校验已通过：在这里消费一次性 nonce，
