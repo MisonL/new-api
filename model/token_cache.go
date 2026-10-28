@@ -60,6 +60,13 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 	if err != nil {
 		return nil, err
 	}
+	// RedisHIncrBy 在 key 过期后会重建一个只含 RemainQuota 的哈希；命中这种
+	// 残缺哈希会得到 Id=0、Status=0 的 Token，ValidateUserToken 判为无效，
+	// 该令牌在残缺哈希过期前（最长 60 秒）的请求全部 401。与用户缓存的完整性
+	// 校验保持一致：字段不全即视为缓存缺失，由调用方回源数据库。
+	if token.Id <= 0 || token.Status == 0 {
+		return nil, fmt.Errorf("token cache entry is incomplete")
+	}
 	token.Key = key
 	return &token, nil
 }
