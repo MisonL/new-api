@@ -1063,6 +1063,41 @@ func decreaseUserQuota(id int, quota int) (err error) {
 	return err
 }
 
+// ErrUserQuotaInsufficient 表示带守卫的额度扣减因余额不足被拒绝。
+var ErrUserQuotaInsufficient = errors.New("user quota is insufficient")
+
+// DecreaseUserQuotaGuarded 在 SQL 层带余额守卫地扣减用户额度：只有余额足以
+// 覆盖本次扣减时语句才生效，否则返回 ErrUserQuotaInsufficient 且不改动余额。
+//
+// 预扣费此前是"读余额 → Go 里比较 → 相对扣减"三步，并发请求都能通过准入
+// 检查，随后各自扣减，把余额扣成负数。守卫让准入判定与扣减在同一条语句里
+// 完成，与 TransferAffQuotaToQuota 的既有写法一致。
+func DecreaseUserQuotaGuarded(id int, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&User{}).
+		Where("id = ? AND quota >= ?", id, quota).
+		Update("quota", gorm.Expr("quota - ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserQuotaInsufficient
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheDecrUserQuota(id, int64(quota)); err != nil {
+				common.SysLog("failed to decrease user quota cache: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
 func DeltaUpdateUserQuota(id int, delta int) (err error) {
 	if delta == 0 {
 		return nil

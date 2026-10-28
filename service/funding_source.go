@@ -37,7 +37,9 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if amount <= 0 {
 		return nil
 	}
-	if err := model.DecreaseUserQuota(w.userId, amount, false); err != nil {
+	// 预扣费必须带 SQL 余额守卫：准入检查（NewBillingSession 里读余额再比较）
+	// 与扣减是两步，并发请求都能通过判定，随后各自扣减把余额扣成负数。
+	if err := model.DecreaseUserQuotaGuarded(w.userId, amount); err != nil {
 		return err
 	}
 	w.consumed = amount
