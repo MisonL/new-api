@@ -15,6 +15,9 @@ import (
 )
 
 func RerankHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	// 读取失败同样要关闭响应体，否则连接无法回收；defer 幂等，成功路径的
+	// 显式关闭仍保留。
+	defer service.CloseResponseBodyGracefully(resp)
 	// 重排响应会回显请求文档（cohere 转换强制 return_documents），上限随
 	// 请求入口上限缩放而不是固定常数。
 	maxRerankResponseBodyBytes := common.RequestBodyIngressLimit(c) * 2
@@ -22,7 +25,6 @@ func RerankHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
-	service.CloseResponseBodyGracefully(resp)
 	if common.DebugEnabled {
 		println("reranker response body: ", string(responseBody))
 	}

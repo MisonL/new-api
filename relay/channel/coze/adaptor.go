@@ -76,6 +76,8 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *common.RelayInfo, requestBody 
 	// 解析 resp
 	var cozeResponse CozeChatResponse
 	respBody, err := io.ReadAll(resp.Body)
+	// create-chat 的响应体读完后必须关闭，错误与成功路径都一样。
+	_ = resp.Body.Close()
 	if err != nil {
 		return nil, err
 	}
