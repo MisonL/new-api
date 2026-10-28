@@ -135,9 +135,9 @@ func TestTelegramLoginRequiresBrowserState(t *testing.T) {
 	router := newBrowserBoundLoginRouter()
 	cookies := withLoginState(t, router, "tg-state")
 	signedQuery := telegramSignedQuery(t, "login-state-bot-token", map[string]string{
-		"id":        "424242",
+		"id":         "424242",
 		"first_name": "Victim",
-		"username":  "tg_login_state_user",
+		"username":   "tg_login_state_user",
 	})
 
 	// 没有 state：拒绝，且不签发会话。
