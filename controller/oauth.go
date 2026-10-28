@@ -268,6 +268,10 @@ func handleOAuthBindWithUser(c *gin.Context, provider oauth.Provider, oauthUser 
 		common.ApiError(c, err)
 		return
 	}
+	// 绑定成功即消费一次性 state，与 github/discord/oidc/linuxdo 各自的绑定
+	// 路径保持一致。否则统一路径下 state 会随 30 天会话长期有效：观察到
+	// 一次回调 URL 的人可重放它，把自己的 IdP 身份绑到受害者账户。
+	consumeOAuthState(c)
 
 	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
 		"action": "bind",
