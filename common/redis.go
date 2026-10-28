@@ -71,7 +71,9 @@ func RedisDelKey(key string) error {
 
 func RedisHSetObj(key string, obj interface{}, expiration time.Duration) error {
 	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis HSET: key=%s, obj=%+v, expiration=%v", key, obj, expiration))
+		// 缓存对象里可能有凭据（UserBase.Setting 的 webhook_secret/gotify_token
+		// 等），DEBUG 日志不能原样落盘。
+		SysLog(fmt.Sprintf("Redis HSET: key=%s, obj=%s, expiration=%v", key, MaskSensitiveInfo(fmt.Sprintf("%+v", obj)), expiration))
 	}
 	ctx := context.Background()
 
@@ -244,7 +246,8 @@ func RedisHIncrBy(key, field string, delta int64) error {
 
 func RedisHSetField(key, field string, value interface{}) error {
 	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis HSET field: key=%s, field=%s, value=%v", key, field, value))
+		// 字段值可能是整段用户设置（含 webhook_secret/gotify_token），先脱敏。
+		SysLog(fmt.Sprintf("Redis HSET field: key=%s, field=%s, value=%s", key, field, MaskSensitiveInfo(fmt.Sprintf("%v", value))))
 	}
 	ttlCmd := RDB.TTL(context.Background(), key)
 	ttl, err := ttlCmd.Result()

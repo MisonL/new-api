@@ -155,7 +155,9 @@ func (p *GenericOAuthProvider) ExchangeToken(ctx context.Context, code string, c
 	}
 
 	bodyStr := string(body)
-	logger.LogDebug(ctx, "[OAuth-Generic-%s] ExchangeToken response body: %s", p.config.Slug, bodyStr[:min(len(bodyStr), 500)])
+	// token 端点响应体本身就是凭据，直写日志等于把 access_token 等落盘；
+	// 脱敏后保留端点诊断所需的其余字段。
+	logger.LogDebug(ctx, "[OAuth-Generic-%s] ExchangeToken response body: %s", p.config.Slug, common.MaskSensitiveInfo(bodyStr[:min(len(bodyStr), 500)]))
 
 	// Try to parse as JSON first
 	var tokenResponse struct {
@@ -241,7 +243,8 @@ func (p *GenericOAuthProvider) GetUserInfo(ctx context.Context, token *OAuthToke
 	}
 
 	bodyStr := string(body)
-	logger.LogDebug(ctx, "[OAuth-Generic-%s] GetUserInfo response body: %s", p.config.Slug, bodyStr[:min(len(bodyStr), 500)])
+	// userinfo 响应可能回显凭据字段，与 token 端点同样脱敏后再写日志。
+	logger.LogDebug(ctx, "[OAuth-Generic-%s] GetUserInfo response body: %s", p.config.Slug, common.MaskSensitiveInfo(bodyStr[:min(len(bodyStr), 500)]))
 
 	// Extract fields using gjson (supports JSONPath-like syntax)
 	userId := gjson.Get(bodyStr, p.config.UserIdField).String()
