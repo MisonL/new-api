@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,6 +23,18 @@ type desktopOAuthRequestStore interface {
 	Complete(state string, resultUserID int) error
 	Fail(state string, message string) error
 	Consume(handoffToken string) (*desktopOAuthRequest, bool, error)
+	// AwaitConfirmation records the account and third-party identity resolved by
+	// the IdP callback without completing the handoff: the browser that ran the
+	// callback still has to confirm on the gateway page before the desktop client
+	// may claim a session, and a bind may take effect. browserToken is delivered
+	// to that browser as an HttpOnly cookie by the callback response itself;
+	// knowing the state and the confirmation code is not enough to complete the
+	// handoff from another client.
+	AwaitConfirmation(state string, pendingUserID int, pendingProviderUserID string, browserToken string) error
+	// IncrementConfirmationAttempts bumps the wrong-code counter and returns the
+	// new value. It is atomic per state so parallel guesses cannot exceed the
+	// attempt limit.
+	IncrementConfirmationAttempts(state string) (int, error)
 }
 
 type memoryDesktopOAuthStore struct {
@@ -69,6 +82,49 @@ local nextPayload = cjson.encode(request)
 redis.call("SET", handoffKey, nextPayload, "EX", tonumber(ARGV[5]))
 redis.call("EXPIRE", KEYS[1], tonumber(ARGV[5]))
 return nextPayload
+`)
+	// desktopOAuthPatchScript applies a JSON patch to the stored request. The
+	// confirmation flow writes several small fields (pending user, browser
+	// token, attempt counter) and must not clobber the rest of the record.
+	desktopOAuthPatchScript = redis.NewScript(`
+local handoffToken = redis.call("GET", KEYS[1])
+if not handoffToken then
+	return nil
+end
+local handoffKey = ARGV[1] .. handoffToken
+local payload = redis.call("GET", handoffKey)
+if not payload then
+	redis.call("DEL", KEYS[1])
+	return nil
+end
+local request = cjson.decode(payload)
+local patch = cjson.decode(ARGV[2])
+for field, value in pairs(patch) do
+	request[field] = value
+end
+local nextPayload = cjson.encode(request)
+redis.call("SET", handoffKey, nextPayload, "EX", tonumber(ARGV[3]))
+redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
+return nextPayload
+`)
+	desktopOAuthAttemptsScript = redis.NewScript(`
+local handoffToken = redis.call("GET", KEYS[1])
+if not handoffToken then
+	return -1
+end
+local handoffKey = ARGV[1] .. handoffToken
+local payload = redis.call("GET", handoffKey)
+if not payload then
+	redis.call("DEL", KEYS[1])
+	return -1
+end
+local request = cjson.decode(payload)
+local attempts = (tonumber(request["ConfirmationAttempts"]) or 0) + 1
+request["ConfirmationAttempts"] = attempts
+local nextPayload = cjson.encode(request)
+redis.call("SET", handoffKey, nextPayload, "EX", tonumber(ARGV[2]))
+redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
+return attempts
 `)
 )
 
@@ -152,6 +208,31 @@ func (s *memoryDesktopOAuthStore) Consume(handoffToken string) (*desktopOAuthReq
 	delete(s.byHandoff, handoffToken)
 	delete(s.byState, request.State)
 	return cloneDesktopOAuthRequest(request), true, nil
+}
+
+func (s *memoryDesktopOAuthStore) AwaitConfirmation(state string, pendingUserID int, pendingProviderUserID string, browserToken string) error {
+	return s.update(state, func(request *desktopOAuthRequest) {
+		request.PendingUserID = pendingUserID
+		request.PendingProviderUserID = pendingProviderUserID
+		request.ConfirmBrowserToken = browserToken
+		request.ConfirmationRequired = true
+		request.ErrorMessage = ""
+	})
+}
+
+func (s *memoryDesktopOAuthStore) IncrementConfirmationAttempts(state string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpiredLocked(time.Now())
+	request, found := s.byState[state]
+	if !found {
+		return 0, nil
+	}
+	request.ConfirmationAttempts++
+	if handoffRequest, ok := s.byHandoff[request.HandoffToken]; ok {
+		*handoffRequest = *request
+	}
+	return request.ConfirmationAttempts, nil
 }
 
 func (s *memoryDesktopOAuthStore) update(state string, mutate func(request *desktopOAuthRequest)) error {
@@ -258,6 +339,67 @@ func (s *redisDesktopOAuthStore) Consume(handoffToken string) (*desktopOAuthRequ
 		return nil, false, err
 	}
 	return request, true, nil
+}
+
+func (s *redisDesktopOAuthStore) AwaitConfirmation(state string, pendingUserID int, pendingProviderUserID string, browserToken string) error {
+	return s.patchByStateAtomic(state, map[string]interface{}{
+		"PendingUserID":         pendingUserID,
+		"PendingProviderUserID": pendingProviderUserID,
+		"ConfirmBrowserToken":   browserToken,
+		"ConfirmationRequired":  true,
+		"ErrorMessage":          "",
+	})
+}
+
+func (s *redisDesktopOAuthStore) IncrementConfirmationAttempts(state string) (int, error) {
+	ctx := context.Background()
+	ttlSeconds := int(desktopOAuthTTL / time.Second)
+	result, err := desktopOAuthAttemptsScript.Run(
+		ctx,
+		s.client,
+		[]string{s.stateKey(state)},
+		s.handoffKeyPrefix(),
+		ttlSeconds,
+	).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return 0, nil
+		}
+		return 0, wrapDesktopOAuthStoreError(err)
+	}
+	switch value := result.(type) {
+	case int64:
+		return int(value), nil
+	case string:
+		parsed, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			return 0, fmt.Errorf("unexpected confirmation attempts result %q: %w", value, parseErr)
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("unexpected confirmation attempts result type %T", result)
+	}
+}
+
+func (s *redisDesktopOAuthStore) patchByStateAtomic(state string, patch map[string]interface{}) error {
+	payload, err := common.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	ttlSeconds := int(desktopOAuthTTL / time.Second)
+	_, err = desktopOAuthPatchScript.Run(
+		ctx,
+		s.client,
+		[]string{s.stateKey(state)},
+		s.handoffKeyPrefix(),
+		string(payload),
+		ttlSeconds,
+	).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil
+	}
+	return wrapDesktopOAuthStoreError(err)
 }
 
 func (s *redisDesktopOAuthStore) updateByStateAtomic(state string, resultUserID int, errorMessage string) error {

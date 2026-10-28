@@ -75,6 +75,12 @@ const OAuth2Callback = (props) => {
   };
 
   const handleCallbackSuccess = (data) => {
+    if (data?.confirm_required && data?.confirm_url) {
+      // 桌面端登录/绑定需要浏览器侧确认：后端只登记了待确认状态，必须由
+      // 完成授权的这台浏览器打开确认页并输入桌面端显示的确认码。
+      window.location.assign(data.confirm_url);
+      return;
+    }
     if (data?.desktop_handoff) {
       // 桌面端 login 的回调跑在系统浏览器里，后端不在这里签发会话；
       // 会话由桌面应用自己轮询 handoff 拿到。提示用户切回应用即可。

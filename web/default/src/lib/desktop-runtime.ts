@@ -35,7 +35,7 @@ export async function startDesktopOAuth(
   provider: string,
   mode: 'login' | 'bind',
   affCode = ''
-): Promise<{ state: string; handoffToken: string }> {
+): Promise<{ state: string; handoffToken: string; confirmCode: string }> {
   const response = await api.get('/api/oauth/desktop/start', {
     params: { provider, mode, ...(affCode ? { aff: affCode } : {}) },
     skipBusinessError: true,
@@ -48,7 +48,13 @@ export async function startDesktopOAuth(
   if (typeof state !== 'string' || typeof handoffToken !== 'string') {
     throw new Error('Desktop OAuth returned incomplete handoff data')
   }
-  return { state, handoffToken }
+  // confirmCode 必须展示给用户：浏览器完成第三方授权后会停在网关确认页，
+  // 要求输入它，handoff 才会完成。
+  const confirmCode =
+    typeof response.data?.data?.confirm_code === 'string'
+      ? response.data.data.confirm_code
+      : ''
+  return { state, handoffToken, confirmCode }
 }
 
 export async function completeDesktopOAuth(
@@ -82,13 +88,17 @@ export async function runDesktopOAuth(
   provider: string,
   mode: 'login' | 'bind',
   buildUrl: (state: string) => string,
-  affCode = ''
+  affCode = '',
+  onConfirmCode?: (code: string) => void
 ) {
-  const { state, handoffToken } = await startDesktopOAuth(
+  const { state, handoffToken, confirmCode } = await startDesktopOAuth(
     provider,
     mode,
     affCode
   )
+  if (confirmCode && onConfirmCode) {
+    onConfirmCode(confirmCode)
+  }
   await openExternalUrl(buildUrl(state))
   return completeDesktopOAuth(handoffToken)
 }

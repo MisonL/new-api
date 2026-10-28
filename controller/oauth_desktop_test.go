@@ -21,6 +21,7 @@ type desktopOAuthStartResponse struct {
 	State        string `json:"state"`
 	HandoffToken string `json:"handoff_token"`
 	Mode         string `json:"mode"`
+	ConfirmCode  string `json:"confirm_code"`
 }
 
 type desktopOAuthTestProvider struct {
@@ -52,6 +53,14 @@ func (s *unavailableDesktopOAuthStore) Fail(state string, message string) error 
 
 func (s *unavailableDesktopOAuthStore) Consume(handoffToken string) (*desktopOAuthRequest, bool, error) {
 	return nil, false, errDesktopOAuthStoreUnavailable
+}
+
+func (s *unavailableDesktopOAuthStore) AwaitConfirmation(state string, pendingUserID int, pendingProviderUserID string, browserToken string) error {
+	return errDesktopOAuthStoreUnavailable
+}
+
+func (s *unavailableDesktopOAuthStore) IncrementConfirmationAttempts(state string) (int, error) {
+	return 0, errDesktopOAuthStoreUnavailable
 }
 
 func (p *desktopOAuthTestProvider) GetName() string {
@@ -124,6 +133,8 @@ func newDesktopOAuthTestRouter() *gin.Engine {
 	router.Use(sessions.Sessions("desktop-oauth-test", cookie.NewStore([]byte("desktop-oauth-test-secret"))))
 	router.GET("/api/oauth/desktop/start", StartDesktopOAuth)
 	router.GET("/api/oauth/desktop/poll", PollDesktopOAuth)
+	router.GET("/api/oauth/desktop/confirm", DesktopOAuthConfirmPage)
+	router.POST("/api/oauth/desktop/confirm", DesktopOAuthConfirmSubmit)
 	router.GET("/api/oauth/:provider", HandleOAuth)
 	return router
 }
@@ -250,13 +261,13 @@ func TestHandleOAuthDesktopLoginIgnoresExistingBrowserSession(t *testing.T) {
 	if !found {
 		t.Fatalf("expected desktop oauth request to remain available for polling")
 	}
-	if stored.CompletedAt.IsZero() {
-		t.Fatalf("expected desktop oauth login request to complete even when browser session exists")
+	if !stored.ConfirmationRequired || !stored.CompletedAt.IsZero() {
+		t.Fatalf("expected desktop oauth login request to wait for browser confirmation, got %+v", stored)
 	}
-	if stored.ResultUserID == 0 {
-		t.Fatalf("expected desktop oauth login request to capture a login user")
+	if stored.PendingUserID == 0 {
+		t.Fatalf("expected desktop oauth login request to capture a pending login user")
 	}
-	if stored.ResultUserID == browserUser.Id {
+	if stored.PendingUserID == browserUser.Id {
 		t.Fatalf("expected desktop oauth login to ignore existing browser session user %d", browserUser.Id)
 	}
 }
@@ -289,6 +300,8 @@ func TestDesktopOAuthRedisLoginFlowCompletesViaPoll(t *testing.T) {
 	router.Use(sessions.Sessions("desktop-oauth-test", cookie.NewStore([]byte("desktop-oauth-test-secret"))))
 	router.GET("/api/oauth/:provider", HandleOAuth)
 	router.GET("/api/oauth/desktop/poll", PollDesktopOAuth)
+	router.GET("/api/oauth/desktop/confirm", DesktopOAuthConfirmPage)
+	router.POST("/api/oauth/desktop/confirm", DesktopOAuthConfirmSubmit)
 
 	callbackRecorder := httptest.NewRecorder()
 	callbackRequest := httptest.NewRequest(
@@ -308,9 +321,10 @@ func TestDesktopOAuthRedisLoginFlowCompletesViaPoll(t *testing.T) {
 	if !found {
 		t.Fatalf("expected redis-backed desktop oauth request to remain available for polling")
 	}
-	if stored.ResultUserID == 0 || stored.CompletedAt.IsZero() {
-		t.Fatalf("expected redis-backed desktop oauth request to be completed before polling")
+	if stored.PendingUserID == 0 || !stored.ConfirmationRequired || !stored.CompletedAt.IsZero() {
+		t.Fatalf("expected redis-backed desktop oauth request to wait for confirmation, got %+v", stored)
 	}
+	confirmDesktopOAuthForTest(t, router, callbackRecorder, request.State, request.ConfirmCode)
 
 	pollRecorder := httptest.NewRecorder()
 	pollRequest := httptest.NewRequest(
@@ -397,6 +411,7 @@ func TestDesktopOAuthRedisFlowSurvivesCrossRouterLifecycle(t *testing.T) {
 	if callbackRecorder.Code != http.StatusOK {
 		t.Fatalf("expected callback on second router to return 200, got %d", callbackRecorder.Code)
 	}
+	confirmDesktopOAuthForTest(t, routerB, callbackRecorder, payload.State, payload.ConfirmCode)
 
 	pollRecorder := httptest.NewRecorder()
 	pollRequest := httptest.NewRequest(
@@ -458,5 +473,31 @@ func TestPollDesktopOAuthReturnsServiceUnavailableWhenStoreUnavailable(t *testin
 	}
 	if !strings.Contains(recorder.Body.String(), "状态存储暂不可用") {
 		t.Fatalf("expected service unavailable message, got %s", recorder.Body.String())
+	}
+}
+
+// confirmDesktopOAuthForTest 用回调响应下发的浏览器凭据完成确认，模拟用户
+// 在完成授权的同一台浏览器里输入桌面端确认码。
+func confirmDesktopOAuthForTest(t *testing.T, router *gin.Engine, callbackRecorder *httptest.ResponseRecorder, state, code string) {
+	t.Helper()
+	var cookies []*http.Cookie
+	for _, cookie := range callbackRecorder.Result().Cookies() {
+		if cookie.Name == desktopOAuthConfirmCookieName {
+			cookies = append(cookies, cookie)
+		}
+	}
+	if len(cookies) == 0 {
+		t.Fatalf("expected callback to hand the confirmation cookie to the browser")
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/oauth/desktop/confirm",
+		strings.NewReader("state="+state+"&code="+code))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected browser confirmation to succeed, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 }

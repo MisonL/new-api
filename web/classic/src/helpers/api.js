@@ -31,6 +31,7 @@ export {
   isUsingRuntimeServerAddress,
   updateAPI,
 } from './apiCore';
+import { Modal } from '@douyinfe/semi-ui';
 import i18n from '../i18n/i18n';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
 import { isDesktopApp, openDesktopExternalUrl } from './desktopRuntime';
@@ -41,6 +42,7 @@ function redirectToOAuthUrl(url, options = {}) {
   const {
     openInNewTab = false,
     desktopHandoffToken = '',
+    desktopConfirmCode = '',
     bindProviderId = null,
   } = options;
   const targetUrl = typeof url === 'string' ? url : url.toString();
@@ -48,6 +50,7 @@ function redirectToOAuthUrl(url, options = {}) {
   if (desktopHandoffToken) {
     return openDesktopOAuthUrlAndWait(targetUrl, {
       handoffToken: desktopHandoffToken,
+      confirmCode: desktopConfirmCode,
       bindProviderId,
     });
   }
@@ -120,9 +123,19 @@ async function pollDesktopOAuthCompletion(handoffToken, bindProviderId = null) {
 }
 
 async function openDesktopOAuthUrlAndWait(url, options = {}) {
-  const { handoffToken, bindProviderId = null } = options;
+  const { handoffToken, confirmCode = '', bindProviderId = null } = options;
   await openDesktopExternalUrl(url);
-  showSuccess(i18n.t('已在系统默认浏览器打开登录页面'));
+  if (confirmCode) {
+    // 浏览器完成第三方授权后会停在网关的确认页，要求输入这个码。用常驻
+    // 弹窗而不是 toast：用户切到浏览器后还要回来核对，toast 早就消失了。
+    Modal.info({
+      title: i18n.t('在浏览器中输入确认码'),
+      content: `${i18n.t('完成第三方授权后，请在浏览器页面中输入：')} ${confirmCode}`,
+      okText: i18n.t('知道了'),
+    });
+  } else {
+    showSuccess(i18n.t('已在系统默认浏览器打开登录页面'));
+  }
   return pollDesktopOAuthCompletion(handoffToken, bindProviderId);
 }
 
@@ -426,6 +439,7 @@ async function prepareDesktopOAuthStart(providerSlug, options = {}) {
   return {
     state: data.state,
     desktopHandoffToken: data.handoff_token,
+    desktopConfirmCode: data.confirm_code || '',
     bindProviderId,
   };
 }
@@ -457,6 +471,7 @@ export async function onDiscordOAuthClicked(client_id, options = {}) {
     `https://discord.com/oauth2/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&response_type=${response_type}&scope=${scope}&state=${oauthFlow.state}`,
     {
       desktopHandoffToken: oauthFlow.desktopHandoffToken,
+      desktopConfirmCode: oauthFlow.desktopConfirmCode,
     },
   );
 }
@@ -478,6 +493,7 @@ export async function onOIDCClicked(
   return redirectToOAuthUrl(url, {
     openInNewTab,
     desktopHandoffToken: oauthFlow.desktopHandoffToken,
+    desktopConfirmCode: oauthFlow.desktopConfirmCode,
   });
 }
 
@@ -488,6 +504,7 @@ export async function onGitHubOAuthClicked(github_client_id, options = {}) {
     `https://github.com/login/oauth/authorize?client_id=${github_client_id}&state=${oauthFlow.state}&scope=user:email`,
     {
       desktopHandoffToken: oauthFlow.desktopHandoffToken,
+      desktopConfirmCode: oauthFlow.desktopConfirmCode,
     },
   );
 }
@@ -502,6 +519,7 @@ export async function onLinuxDOOAuthClicked(
     `https://connect.linux.do/oauth2/authorize?response_type=code&client_id=${linuxdo_client_id}&state=${oauthFlow.state}`,
     {
       desktopHandoffToken: oauthFlow.desktopHandoffToken,
+      desktopConfirmCode: oauthFlow.desktopConfirmCode,
     },
   );
 }
@@ -587,6 +605,7 @@ export async function onCustomOAuthClicked(provider, options = {}) {
 
     return redirectToOAuthUrl(authUrl, {
       desktopHandoffToken: oauthFlow.desktopHandoffToken,
+      desktopConfirmCode: oauthFlow.desktopConfirmCode,
       bindProviderId: oauthFlow.bindProviderId,
     });
   } catch (error) {

@@ -84,8 +84,11 @@ func TestDesktopOAuthLoginCallbackDoesNotIssueBrowserSession(t *testing.T) {
 	if !found {
 		t.Fatalf("expected desktop oauth request to remain available for polling")
 	}
-	if stored.CompletedAt.IsZero() || stored.ResultUserID == 0 {
-		t.Fatalf("expected desktop handoff to complete, got %+v", stored)
+	if !stored.ConfirmationRequired || stored.PendingUserID == 0 {
+		t.Fatalf("expected desktop handoff to wait for browser confirmation, got %+v", stored)
+	}
+	if !stored.CompletedAt.IsZero() {
+		t.Fatalf("callback must not complete the handoff before the browser confirms, got %+v", stored)
 	}
 }
 

@@ -194,24 +194,31 @@ func HandleOAuth(c *gin.Context) {
 	}
 
 	if hasDesktopRequest {
-		if err := completeDesktopOAuthRequest(state, resolvedUser.User.Id); err != nil {
+		// 桌面端 login 的回调跑在系统浏览器里，桌面应用自己的会话由 poll 在
+		// 桌面 webview 内签发。回调本身不能完成 handoff，也不能给系统浏览器
+		// setupLogin：
+		//
+		//   - state 只与状态存储比对，不绑定任何浏览器会话。若回调一到达就
+		//     完成 handoff，第三方页面把带自己 state 的授权链接送进受害者
+		//     浏览器，就能让那台浏览器把受害者账号交给发起轮询的攻击者。
+		//   - 因此这里只登记"待确认"，并把一次性浏览器令牌写进当前响应；
+		//     必须在这台浏览器里输入桌面端显示的确认码，handoff 才完成。
+		//   - 二次验证门控也在 setupLoginWithResult 内，跳过它不会削弱 2FA：
+		//     poll 走的是同一收口，桌面端仍会收到 require_2fa。
+		if desktopRequest.ConfirmCode == "" {
+			message := "该桌面端登录请求缺少确认码，请重新发起登录"
+			if storeErr := failDesktopOAuthRequest(state, message); storeErr != nil {
+				common.ApiError(c, storeErr)
+				return
+			}
+			respondDesktopOAuthCallbackFailure(c, message)
+			return
+		}
+		if err := stageDesktopOAuthConfirmation(c, state, resolvedUser.User.Id, oauthUser.ProviderUserID); err != nil {
 			common.ApiError(c, err)
 			return
 		}
-		// 桌面端 login 的回调跑在系统浏览器里，桌面应用自己的会话由 poll 在
-		// 桌面 webview 内签发。这里不能给系统浏览器 setupLogin：
-		//
-		//   - state 只与状态存储比对，不绑定任何浏览器会话，第三方页面拿一个
-		//     自己发起的 state 拼出回调 URL 就能让受害者浏览器登录进攻击者
-		//     账号（登录 CSRF）；而签发在这台浏览器上的会话对桌面端毫无用途。
-		//   - 二次验证门控也在 setupLoginWithResult 内，跳过它不会削弱 2FA：
-		//     poll 走的是同一收口，桌面端仍会收到 require_2fa。
-		//
-		// 回调只回一个标记，由前端提示用户返回桌面应用等待 poll 完成。
-		common.ApiSuccess(c, gin.H{
-			"desktop_handoff": true,
-			"action":          desktopOAuthModeLogin,
-		})
+		respondDesktopOAuthAwaitingConfirmation(c, state, desktopOAuthModeLogin)
 		return
 	}
 
@@ -327,22 +334,24 @@ func handleDesktopOAuthBind(c *gin.Context, provider oauth.Provider, request *de
 		common.ApiError(c, err)
 		return
 	}
-	if err := bindOAuthIdentityToUser(&user, provider, oauthUser.ProviderUserID); err != nil {
-		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+
+	// 真正的绑定推迟到浏览器确认之后：回调跑在系统浏览器里，若在这里直接
+	// bindOAuthIdentityToUser，把授权链接送进受害者浏览器的人无需任何确认，
+	// 就能把受害者的第三方身份挂到自己账户上。
+	if request.ConfirmCode == "" {
+		message := "该桌面端绑定请求缺少确认码，请重新发起操作"
+		if storeErr := failDesktopOAuthRequest(request.State, message); storeErr != nil {
 			common.ApiError(c, storeErr)
 			return
 		}
+		respondDesktopOAuthCallbackFailure(c, message)
+		return
+	}
+	if err := stageDesktopOAuthConfirmation(c, request.State, user.Id, oauthUser.ProviderUserID); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-
-	if err := completeDesktopOAuthRequest(request.State, user.Id); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
-		"action": "bind",
-	})
+	respondDesktopOAuthAwaitingConfirmation(c, request.State, desktopOAuthModeBind)
 }
 
 func bindOAuthIdentityToCurrentUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser) error {

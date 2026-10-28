@@ -20,6 +20,7 @@ export type OAuthCallbackOutcome =
   | { kind: 'bind' }
   | { kind: 'require_2fa' }
   | { kind: 'desktop_handoff' }
+  | { kind: 'desktop_confirm_required'; confirmUrl: string }
   | { kind: 'login'; user: OAuthCallbackUserPayload }
 
 export function resolveOAuthCallbackOutcome(
@@ -36,6 +37,15 @@ export function resolveOAuthCallbackOutcome(
     return { kind: 'require_2fa' }
   }
   if (payload.desktop_handoff === true) {
+    // 桌面端登录/绑定需要浏览器侧确认时，后端给出确认页地址；本页面必须
+    // 整页跳转过去，确认码只在那台完成授权的浏览器里有效。
+    if (
+      payload.confirm_required === true &&
+      typeof payload.confirm_url === 'string' &&
+      payload.confirm_url !== ''
+    ) {
+      return { kind: 'desktop_confirm_required', confirmUrl: payload.confirm_url }
+    }
     return { kind: 'desktop_handoff' }
   }
   return { kind: 'login', user: payload }

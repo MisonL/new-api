@@ -187,6 +187,12 @@ function OAuthCallback() {
           const outcome = resolveOAuthCallbackOutcome(res.data?.data)
           // 桌面端 login 的回调跑在系统浏览器里，后端不在这里签发会话；
           // 会话由桌面应用自己轮询 handoff 拿到。提示用户切回应用即可。
+          if (outcome.kind === 'desktop_confirm_required') {
+            // 桌面端登录/绑定要求浏览器侧确认：整页跳到网关确认页，
+            // 由用户输入桌面应用中显示的确认码。
+            window.location.assign(outcome.confirmUrl)
+            return
+          }
           if (outcome.kind === 'desktop_handoff') {
             toast.success(
               i18next.t('Authorization complete. Return to the desktop app.')

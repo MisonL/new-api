@@ -1,6 +1,8 @@
 package controller
 
 import (
+	crand "crypto/rand"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -22,6 +24,14 @@ const (
 	desktopOAuthPollRateLimitFallbackKey = "DOP-FALLBACK:"
 	desktopOAuthHandoffTokenMinLength    = 1
 	desktopOAuthHandoffTokenMaxLength    = 128
+
+	// 确认码由桌面端显示、由用户在浏览器页面里输入。字符集去掉易混字符
+	// （I/L/1、O/0），长度 8 位约 40 bit，配合下面的错误次数上限使用。
+	desktopOAuthConfirmCodeLength      = 8
+	desktopOAuthConfirmCodeAlphabet    = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	desktopOAuthConfirmMaxWrongAttempt = 5
+	desktopOAuthConfirmCookieName      = "desktop_oauth_confirm"
+	desktopOAuthConfirmPath            = "/api/oauth/desktop/confirm"
 )
 
 var (
@@ -40,6 +50,35 @@ type desktopOAuthRequest struct {
 	CompletedAt  time.Time
 	ResultUserID int
 	ErrorMessage string
+
+	// ConfirmCode 在发起时生成，桌面端把它显示给用户；用户在网关的确认页面
+	// 里输入它，handoff 才完成。ConfirmBrowserToken 只下发给打开过确认页的
+	// 浏览器（HttpOnly Cookie），提交必须带上它——这样"知道 state 与确认码"
+	// 不等于"能完成 handoff"。PendingUserID 是回调解析出的目标账号，
+	// ConfirmationRequired 为真且 CompletedAt 为零值时，handoff 尚未完成。
+	// bind 模式把真正的解绑/绑定动作也推迟到确认后执行，因此还要记住待绑定
+	// 的第三方身份（ProviderSlug 已在记录上）。
+	ConfirmCode           string
+	ConfirmationRequired  bool
+	PendingUserID         int
+	PendingProviderUserID string
+	ConfirmBrowserToken   string
+	ConfirmationAttempts  int
+}
+
+// generateDesktopOAuthConfirmCode 用 crypto/rand 取确认码。随机源失败是系统级
+// 故障，返回空串会让 handoff 变成"无码可确认"，宁可 panic 也不降级。
+func generateDesktopOAuthConfirmCode() string {
+	code := make([]byte, desktopOAuthConfirmCodeLength)
+	max := big.NewInt(int64(len(desktopOAuthConfirmCodeAlphabet)))
+	for i := range code {
+		n, err := crand.Int(crand.Reader, max)
+		if err != nil {
+			panic("crypto/rand unavailable: " + err.Error())
+		}
+		code[i] = desktopOAuthConfirmCodeAlphabet[n.Int64()]
+	}
+	return string(code)
 }
 
 func StartDesktopOAuth(c *gin.Context) {
@@ -102,6 +141,10 @@ func StartDesktopOAuth(c *gin.Context) {
 			"state":         request.State,
 			"handoff_token": request.HandoffToken,
 			"mode":          request.Mode,
+			// 确认码由桌面端显示；用户在系统浏览器的确认页面里输入它，
+			// handoff 才会完成。没有它，受害者浏览器完成 IdP 授权后，
+			// 持有 handoff_token 的一方仍无法领取会话。
+			"confirm_code": request.ConfirmCode,
 		},
 	})
 }
@@ -153,6 +196,10 @@ func PollDesktopOAuth(c *gin.Context) {
 			"message": "",
 			"data": gin.H{
 				"status": "pending",
+				// 回调已解析出账号、但浏览器还没确认时给桌面端一个提示，
+				// 让它能告诉用户"请在浏览器里输入确认码"。旧客户端只读
+				// status，仍按 pending 继续轮询。
+				"awaiting_confirmation": request.ConfirmationRequired,
 			},
 		})
 		return
@@ -202,6 +249,7 @@ func createDesktopOAuthRequest(providerSlug string, mode string, bindUserID int,
 		Mode:         mode,
 		State:        common.GetRandomString(24),
 		HandoffToken: common.GetRandomString(40),
+		ConfirmCode:  generateDesktopOAuthConfirmCode(),
 		BindUserID:   bindUserID,
 		AffCode:      strings.TrimSpace(affCode),
 		CreatedAt:    now,

@@ -57,6 +57,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/state", middleware.CriticalRateLimit(), controller.GenerateOAuthCode)
 		apiRouter.GET("/oauth/desktop/start", middleware.CriticalRateLimit(), controller.StartDesktopOAuth)
 		apiRouter.GET("/oauth/desktop/poll", middleware.DesktopOAuthPollRateLimit(), controller.PollDesktopOAuth)
+		apiRouter.GET("/oauth/desktop/confirm", middleware.CriticalRateLimit(), controller.DesktopOAuthConfirmPage)
+		apiRouter.POST("/oauth/desktop/confirm", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.DesktopOAuthConfirmSubmit)
 		apiRouter.POST("/oauth/email/bind", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.EmailBind)
 		// Non-standard OAuth (WeChat, Telegram) - keep original routes
 		apiRouter.GET("/oauth/wechat", middleware.CriticalRateLimit(), controller.WeChatAuth)
