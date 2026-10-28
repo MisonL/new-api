@@ -157,6 +157,13 @@ func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark s
 }
 
 func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gin.Context) {
+	// 参数为 0 表示"不限制"，与模型限流对 totalMaxCount=0 的解释一致。
+	// 不加这个出口时：Redis 路径在空列表上 LIndex(-1) 得到空串，time.Parse
+	// 失败直接 500；内存路径第二个请求起恒为 429。运维把限额设为 0 期望关闭
+	// 限流时，实际得到一个全站 500、一个全站 429。
+	if maxRequestNum <= 0 {
+		return defNext
+	}
 	if common.RedisEnabled {
 		return func(c *gin.Context) {
 			redisRateLimiter(c, maxRequestNum, duration, mark)
@@ -267,6 +274,10 @@ func UploadRateLimit() func(c *gin.Context) {
 }
 
 func requestKeyRateLimitFactory(maxRequestNum int, duration int64, mark string, keyFunc func(c *gin.Context) string) func(c *gin.Context) {
+	// 同 rateLimitFactory：0 表示不限制。
+	if maxRequestNum <= 0 {
+		return defNext
+	}
 	if common.RedisEnabled {
 		return func(c *gin.Context) {
 			redisRequestKeyRateLimiter(c, maxRequestNum, duration, mark, keyFunc)
