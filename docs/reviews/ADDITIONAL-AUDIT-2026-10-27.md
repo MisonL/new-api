@@ -274,7 +274,7 @@ mokaai、siliconflow、ali/rerank、coze 的若干读错误分支。
 | 10 DEBUG 日志泄漏 | a1e405784 | OAuth 响应体与 Redis 缓存对象/字段值统一 `MaskSensitiveInfo`；捕获真实日志断言凭据不出现 |
 | 11 限流 0 语义 | 746f6a434 | 两条限流路径在参数为 0 时返回放行；`rate_limit_zero_test.go`（内存 + miniredis） |
 | 12 模型限流成功配额 | 2f0e95a6b | 新增只读 `Allow` 预检，失败请求不消耗成功配额；`model_rate_limit_success_semantics_test.go` |
-| 13 错误路径响应体未关闭 | 4a2ab15cf、849a9192d | 首轮修 rerank/Gemini/coze；二轮把 relay/channel 全树 40 余处读后关闭改为入口 defer，新增 AST 守卫 `body_close_guard_test.go` 与运行时用例 |
+| 13 错误路径响应体未关闭 | 4a2ab15cf、849a9192d | 首轮修 rerank/Gemini/coze；二轮把 relay/channel 全树 33 处"读后显式关闭"改为入口 defer（新增 33 处 defer、移除 29 处旧关闭，另 4 处原本就没有关闭），新增 AST 守卫 `body_close_guard_test.go` 与 baidu 运行时用例 |
 | 14 zhipu 密钥入日志 | ce600dc95 | 长度 + 脱敏替代完整密钥；同包测试 |
 
 本轮验证命令与结果（2026-10-28，dev 分支）：
