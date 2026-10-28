@@ -105,6 +105,7 @@ func OaiSyntheticRemoteResponsesCompactionHandler(c *gin.Context, info *relaycom
 }
 
 func buildSyntheticResponsesCompaction(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.OpenAIResponsesCompactionResponse, *dto.Usage, *types.NewAPIError) {
+	defer service.CloseResponseBodyGracefully(resp)
 
 	// 远端压缩响应是 Responses JSON 负载，封顶 64MB
 	const maxSyntheticResponsesCompactionBodyBytes int64 = 64 << 20

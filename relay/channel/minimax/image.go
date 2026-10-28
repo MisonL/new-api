@@ -177,11 +177,11 @@ func responseMiniMax2OpenAIImage(response *MiniMaxImageResponse, info *relaycomm
 func miniMaxImageHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
 	// 图像响应可能内联 base64 图片，128MB 在留足空间的同时封顶
 	const maxMiniMaxImageResponseBodyBytes int64 = 128 << 20
+	defer service.CloseResponseBodyGracefully(resp)
 	responseBody, err := common.ReadAllWithLimit(resp.Body, maxMiniMaxImageResponseBodyBytes)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
-	service.CloseResponseBodyGracefully(resp)
 
 	var minimaxResponse MiniMaxImageResponse
 	if err := common.Unmarshal(responseBody, &minimaxResponse); err != nil {

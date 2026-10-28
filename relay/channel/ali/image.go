@@ -395,11 +395,11 @@ func aliImageHandler(a *Adaptor, c *gin.Context, resp *http.Response, info *rela
 	var aliTaskResponse AliResponse
 	// 图像响应可能内联 base64 图片，128MB 在留足空间的同时封顶
 	const maxAliImageResponseBodyBytes int64 = 128 << 20
+	defer service.CloseResponseBodyGracefully(resp)
 	responseBody, err := common.ReadAllWithLimit(resp.Body, maxAliImageResponseBodyBytes)
 	if err != nil {
 		return types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError), nil
 	}
-	service.CloseResponseBodyGracefully(resp)
 	err = common.Unmarshal(responseBody, &aliTaskResponse)
 	if err != nil {
 		return types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError), nil

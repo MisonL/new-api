@@ -51,11 +51,11 @@ func responseJimeng2OpenAIImage(_ *gin.Context, response *ImageResponse, info *r
 // jimengImageHandler handles the Jimeng image generation response
 func jimengImageHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
 	var jimengResponse ImageResponse
+	defer service.CloseResponseBodyGracefully(resp)
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
-	service.CloseResponseBodyGracefully(resp)
 
 	err = basecommon.Unmarshal(responseBody, &jimengResponse)
 	if err != nil {
