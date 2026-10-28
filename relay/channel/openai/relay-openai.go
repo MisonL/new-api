@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -481,7 +482,14 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	localUsage := &dto.RealtimeUsage{}
 	sumUsage := &dto.RealtimeUsage{}
 
+	// 两个读协程必须在本函数返回前退出：返回后调用方立即执行
+	// PostWssConsumeQuota 终态结算，遗留协程仍会累计用量并扣费（与结算
+	// 竞争，漏计或重复扣），连接和上游租约也要等读超时才释放。
+	var readers sync.WaitGroup
+	readers.Add(2)
+
 	gopool.Go(func() {
+		defer readers.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				errChan <- fmt.Errorf("panic in client reader: %v", r)
@@ -549,6 +557,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	})
 
 	gopool.Go(func() {
+		defer readers.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				errChan <- fmt.Errorf("panic in target reader: %v", r)
@@ -661,6 +670,21 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 		logger.LogError(c, "realtime error: "+err.Error())
 	case <-c.Done():
 	}
+
+	// 两个读协程必须在本函数返回前退出：返回后调用方立即执行
+	// PostWssConsumeQuota 终态结算，遗留协程会继续累计用量并扣费（与结算
+	// 竞争，导致漏计或重复扣），连接和上游并发租约也要等读超时才释放。
+	// 先停心跳，避免 ping 循环对已关闭连接写控制帧；再给客户端发标准关闭
+	// 帧（上游先断时客户端不应只看到 TCP 异常关闭），最后关闭连接让阻塞中
+	// 的 ReadMessage/WriteMessage 立即返回并等待两个读协程退出。
+	stopClientKeepalive()
+	stopTargetKeepalive()
+	_ = clientConn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		time.Now().Add(time.Second))
+	_ = clientConn.Close()
+	_ = targetConn.Close()
+	readers.Wait()
 
 	usageMu.Lock()
 	if usage.TotalTokens != 0 {
