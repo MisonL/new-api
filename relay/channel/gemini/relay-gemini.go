@@ -1806,8 +1806,11 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if len(geminiResponse.Candidates) == 0 {
-		usage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
-
+		// Gemini 用 HTTP 200 携带 promptFeedback.blockReason 或空 candidates
+		// 表达失败。与 OpenAI 通道对"200 响应体即错误"的处理一致：返回
+		// nil usage + 错误，由上层统一写错误响应、退还预扣费并按状态码
+		// 决定重试。这里不能返回 usage：估算的 prompt token 会把一次
+		// 客户端可见的失败按成功计费，渠道失败也不会被记录。
 		var newAPIError *types.NewAPIError
 		if geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, fmt.Sprintf("gemini_block_reason=%s", *geminiResponse.PromptFeedback.BlockReason))
@@ -1824,21 +1827,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 				http.StatusInternalServerError,
 			)
 		}
-
-		service.ResetStatusCode(newAPIError, c.GetString("status_code_mapping"))
-
-		switch info.RelayFormat {
-		case types.RelayFormatClaude:
-			c.JSON(newAPIError.StatusCode, gin.H{
-				"type":  "error",
-				"error": newAPIError.ToClaudeError(),
-			})
-		default:
-			c.JSON(newAPIError.StatusCode, gin.H{
-				"error": newAPIError.ToOpenAIError(),
-			})
-		}
-		return &usage, nil
+		return nil, newAPIError
 	}
 	fullTextResponse, conversionErr := responseGeminiChat2OpenAIWithError(c, &geminiResponse)
 	if conversionErr != nil {
