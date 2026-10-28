@@ -177,15 +177,19 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			streamItems = append(streamItems, data)
 		}
 	})
-	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonHandlerStop && info.StreamStatus.EndError != nil {
-		return nil, types.NewOpenAIError(info.StreamStatus.EndError, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
-	}
-
 	// 帧级错误在 HTTP 200 流内到达：按上游错误内容映射状态码返回，且不产出
-	// 计费 usage（失败请求不能按成功结算）。
+	// 计费 usage（失败请求不能按成功结算）。这个判断必须先于下面的
+	// HandlerStop 分支：data handler 对 error 帧调用 sr.Stop，而
+	// SetEndReason 是 once 语义，先记下 HandlerStop，后者会把限流帧一律
+	// 折叠成 502 bad_response_body，429/402 映射永远走不到（真实上游的
+	// error 帧是最后一帧，后面没有 [DONE]，必然命中 HandlerStop）。
 	if streamFrameError != nil {
 		statusCode := frameErrorStatusCode(streamFrameError)
 		return nil, types.WithOpenAIError(*streamFrameError, statusCode, types.ErrOptionWithSkipRetry())
+	}
+
+	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonHandlerStop && info.StreamStatus.EndError != nil {
+		return nil, types.NewOpenAIError(info.StreamStatus.EndError, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 	}
 
 	// 最后一帧在扫描期间不会经过 HandleStreamFormat（它被压后到流结束才

@@ -162,3 +162,27 @@ func TestOaiStreamHandlerFailsOnCodeOnlyErrorFrame(t *testing.T) {
 	require.NotNil(t, apiErr, "an error frame carrying a code must fail the request")
 	require.False(t, info.StreamStatus.IsSuccessfulEnd())
 }
+
+// 真实上游的 error 帧是流的最后一帧，后面不会补 [DONE]。此时扫描器先以
+// HandlerStop 结束，状态码映射不能因此被 502 bad_response_body 分支遮蔽：
+// 限流要按 429 返回，客户端才能正确退避，渠道限流观测也才看得到。
+func TestOaiStreamHandlerMapsTerminalErrorFrameWithoutDone(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	body := strings.Join([]string{
+		"data: " + `{"id":"chatcmpl-1","object":"chat.completion.chunk","model":"gpt-5.6-sol","choices":[{"index":0,"delta":{"content":"partial"}}]}`,
+		"",
+		"data: " + `{"error":{"message":"upstream rate limited","type":"rate_limit_error","code":"rate_limit_exceeded"}}`,
+		"",
+	}, "\n")
+	info := newErrorFrameRelayInfo()
+
+	usage, apiErr := OaiStreamHandler(c, info, newErrorFrameResponse(body))
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode,
+		"a terminal rate-limit error frame must map to 429, not 502")
+}
