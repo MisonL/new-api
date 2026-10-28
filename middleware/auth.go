@@ -268,16 +268,22 @@ func WssAuth(c *gin.Context) {
 // Used for endpoints that need to be accessible from both the dashboard and API clients.
 func TokenOrUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		// Try session auth first (dashboard users)
+		// Try session auth first (dashboard users). 会话里的 status 只是登录时的
+		// 快照：管理员禁用用户后，只要该用户不再触发 UserAuth 路径刷新会话，
+		// 快照会一直停在 enabled。这里必须回读用户身份，禁用即时生效。
 		session := sessions.Default(c)
 		if id := session.Get("id"); id != nil {
-			if status, ok := session.Get("status").(int); ok && status == common.UserStatusEnabled {
-				c.Set("id", id)
-				c.Next()
-				return
+			if userID, ok := id.(int); ok && userID > 0 {
+				user, err := loadSessionUserIdentity(session)
+				if err == nil && user != nil && user.Status == common.UserStatusEnabled {
+					c.Set("id", userID)
+					c.Next()
+					return
+				}
 			}
 		}
-		// Fall back to token auth (API clients)
+		// Fall back to token auth (API clients). TokenAuth 自身会再检查用户状态，
+		// 因此禁用用户的会话不会因为落到这里而被放行。
 		TokenAuth()(c)
 	}
 }
