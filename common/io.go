@@ -7,6 +7,18 @@ import (
 	"math"
 )
 
+// 上游响应体读取上限，分档与仓库既有封顶（claude/xai/responses 64 MiB、
+// gemini native 128 MiB、模型列表 8 MiB）保持一致。上游返回超大响应时，
+// 直接 io.ReadAll 会让每个并发请求各持一份完整响应体。
+const (
+	// UpstreamSmallResponseLimit 用于模型列表、状态查询等小 JSON 信封。
+	UpstreamSmallResponseLimit int64 = 8 << 20
+	// UpstreamJSONResponseLimit 用于非流式 JSON 响应。
+	UpstreamJSONResponseLimit int64 = 64 << 20
+	// UpstreamMediaResponseLimit 用于可能内联 base64 媒体或音频的响应。
+	UpstreamMediaResponseLimit int64 = 128 << 20
+)
+
 // ReadAllWithLimit reads a response body with an explicit byte limit. An
 // oversized body returns an error instead of the truncated prefix that
 // io.LimitReader alone would silently produce, so callers never parse or

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -52,7 +51,7 @@ func convertCozeChatRequest(c *gin.Context, request dto.GeneralOpenAIRequest) (*
 
 func cozeChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body, common.UpstreamJSONResponseLimit)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -263,7 +262,7 @@ func checkIfChatComplete(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo
 
 	// 解析 resp 到 CozeChatResponse
 	var cozeResponse CozeChatResponse
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body, common.UpstreamSmallResponseLimit)
 	if err != nil {
 		return fmt.Errorf("read response body failed: %w", err), false
 	}

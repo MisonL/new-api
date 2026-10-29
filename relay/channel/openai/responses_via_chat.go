@@ -99,7 +99,7 @@ func OaiChatToResponsesHandlerWithOptionsAndState(c *gin.Context, info *relaycom
 	defer service.CloseResponseBodyGracefully(resp)
 
 	var chatResp dto.OpenAITextResponse
-	body, err := io.ReadAll(resp.Body)
+	body, err := common.ReadAllWithLimit(resp.Body, common.UpstreamJSONResponseLimit)
 	if err != nil {
 		return nil, newResponsesReadResponseBodyError(err)
 	}

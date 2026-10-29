@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1793,7 +1792,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	// 读取失败同样要关闭响应体，否则连接无法回收。
 	defer service.CloseResponseBodyGracefully(resp)
 	captureGeminiResponseHeaders(info, resp)
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body, common.UpstreamMediaResponseLimit)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -1867,7 +1866,7 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	captureGeminiResponseHeaders(info, resp)
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, readErr := io.ReadAll(resp.Body)
+	responseBody, readErr := common.ReadAllWithLimit(resp.Body, common.UpstreamJSONResponseLimit)
 	if readErr != nil {
 		return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -1913,7 +1912,7 @@ func GeminiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	// 读取失败同样要关闭响应体，否则连接无法回收。
 	defer service.CloseResponseBodyGracefully(resp)
 	captureGeminiResponseHeaders(info, resp)
-	responseBody, readErr := io.ReadAll(resp.Body)
+	responseBody, readErr := common.ReadAllWithLimit(resp.Body, common.UpstreamMediaResponseLimit)
 	if readErr != nil {
 		return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -2009,13 +2008,13 @@ func FetchGeminiModels(ctx context.Context, baseURL, apiKey, proxyURL string, ex
 		}
 
 		if response.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(response.Body)
+			body, _ := common.ReadAllWithLimit(response.Body, common.UpstreamSmallResponseLimit)
 			response.Body.Close()
 			cancel()
 			return nil, fmt.Errorf("服务器返回错误 %d: %s", response.StatusCode, common.LocalUpstreamErrorPreview(string(body)))
 		}
 
-		body, err := io.ReadAll(response.Body)
+		body, err := common.ReadAllWithLimit(response.Body, common.UpstreamSmallResponseLimit)
 		response.Body.Close()
 		cancel()
 		if err != nil {

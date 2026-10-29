@@ -1,7 +1,6 @@
 package siliconflow
 
 import (
-	"io"
 	"net/http"
 
 	basecommon "github.com/QuantumNous/new-api/common"
@@ -15,7 +14,7 @@ import (
 
 func siliconflowRerankHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := basecommon.ReadAllWithLimit(resp.Body, basecommon.UpstreamJSONResponseLimit)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
