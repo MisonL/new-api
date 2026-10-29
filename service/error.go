@@ -147,7 +147,11 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	}
 	defer CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
+	// 上游错误页可能达到 MB 级（Ollama 8MB、Dify 1MB）。日志与消息只用到
+	// 前 2KB/512B，全量读取只是给错误路径放大内存。超过上限的部分截断丢弃，
+	// 与 LocalLogPreview/LocalUpstreamErrorPreview 的截断语义一致。
+	const relayErrorBodyReadLimit = 1 << 20
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, relayErrorBodyReadLimit))
 	if err != nil {
 		return
 	}
