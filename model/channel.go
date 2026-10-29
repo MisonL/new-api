@@ -1249,12 +1249,14 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 	return nil
 }
 
-func UpdateChannelUsedQuota(id int, quota int) {
+// UpdateChannelUsedQuota 累加渠道已用额度。与用户用量计数同理：写入失败
+// 必须返回给调用方，才能写进消费日志并定位到具体请求。
+func UpdateChannelUsedQuota(id int, quota int) error {
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeChannelUsedQuota, id, quota)
-		return
+		return nil
 	}
-	_ = updateChannelUsedQuota(id, quota)
+	return updateChannelUsedQuota(id, quota)
 }
 
 func updateChannelUsedQuota(id int, quota int) error {

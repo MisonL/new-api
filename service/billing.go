@@ -1,9 +1,11 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -31,6 +33,40 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 
 // settleErrorLogField 是结算失败写进消费日志 other 的键。
 const settleErrorLogField = "settle_error"
+
+// RecordUsageStats 累加用户与渠道的用量统计。两者都是 SQL 相对增量，
+// 写入失败后没有可回放的来源，所以把两边的错误合并返回给调用方。
+func RecordUsageStats(userId, channelId, quota int) error {
+	var errs []error
+	if err := model.UpdateUserUsedQuotaAndRequestCount(userId, quota); err != nil {
+		errs = append(errs, fmt.Errorf("user used_quota: %w", err))
+	}
+	if err := model.UpdateChannelUsedQuota(channelId, quota); err != nil {
+		errs = append(errs, fmt.Errorf("channel used_quota: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+// usageStatsErrorLogField 是用量统计写入失败写进消费日志 other 的键。
+const usageStatsErrorLogField = "usage_stats_error"
+
+// MarkUsageStatsFailure 把用量统计写入失败记录到消费日志的 other 字段。
+// 统计是相对增量，失败后无法从日志回放；只在服务端 stderr 留一行时
+// 既不知道是哪个请求丢的增量，也无法对账。
+func MarkUsageStatsFailure(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int, statsErr error, other map[string]interface{}) {
+	if statsErr == nil {
+		return
+	}
+	if other != nil {
+		other[usageStatsErrorLogField] = statsErr.Error()
+	}
+	userId, channelId := 0, 0
+	if relayInfo != nil {
+		userId, channelId = relayInfo.UserId, relayInfo.ChannelId
+	}
+	logger.LogError(ctx, fmt.Sprintf("error recording usage stats: %s (userId %d, channelId %d, actualQuota %d)",
+		statsErr.Error(), userId, channelId, actualQuota))
+}
 
 // MarkSettleFailure 把结算失败写进消费日志的 other 字段，并记录带身份字段的
 // 错误日志。结算发生在响应写完之后：HTTP 状态已不可改，而 used_quota 与

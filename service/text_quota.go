@@ -936,6 +936,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 调用 %d 次，调用花费 %s", summary.ImageGenerationCallCount, decimal.NewFromFloat(summary.ImageGenerationTotal).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
 
+	var usageStatsErr error
 	if summary.TotalTokens == 0 && !summary.hasObservedNonTokenUsage() && !summary.hasClaudeCacheOnlyUsage() {
 		if isBenignCanceledTextStream(relayInfo) {
 			extraContent = append(extraContent, "客户端已断开，未收到完整计费信息，无法扣费")
@@ -945,8 +946,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
 		}
 	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
+		usageStatsErr = RecordUsageStats(relayInfo.UserId, relayInfo.ChannelId, summary.Quota)
 	}
 
 	settleErr := SettleBilling(ctx, relayInfo, summary.Quota)
@@ -1032,6 +1032,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	extraContent, other = appendResponsesCompactLogInfo(ctx, relayInfo, extraContent, other, time.Now())
+	MarkUsageStatsFailure(ctx, relayInfo, summary.Quota, usageStatsErr, other)
 	MarkSettleFailure(ctx, relayInfo, summary.Quota, settleErr, other)
 	logContent := strings.Join(extraContent, ", ")
 

@@ -128,9 +128,6 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
-	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
-	model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
-
 	useTimeSeconds := relayInfo.UseTimeSeconds(time.Now())
 	tokenName := ctx.GetString("token_name")
 	oai := apiErr.ToOpenAIError()
@@ -146,6 +143,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"upstream_error_code":  fmt.Sprintf("%v", oai.Code),
 		"violation_fee_marker": CSAMViolationMarker,
 	}
+	MarkUsageStatsFailure(ctx, relayInfo, feeQuota, RecordUsageStats(relayInfo.UserId, relayInfo.ChannelId, feeQuota), other)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:      relayInfo.ChannelId,

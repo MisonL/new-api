@@ -1125,16 +1125,19 @@ func UpdateUserLastLoginAt(id int) {
 	}
 }
 
-func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
+// UpdateUserUsedQuotaAndRequestCount 累加用户的已用额度与请求数。
+// 增量更新没有可回放的来源，写入失败必须返回给调用方，才能写进消费日志
+// 并定位到具体请求；只在服务端打一行日志时无法对账。
+func UpdateUserUsedQuotaAndRequestCount(id int, quota int) error {
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
 		addNewRecord(BatchUpdateTypeRequestCount, id, 1)
-		return
+		return nil
 	}
-	updateUserUsedQuotaAndRequestCount(id, quota, 1)
+	return updateUserUsedQuotaAndRequestCount(id, quota, 1)
 }
 
-func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
+func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) error {
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
 			"used_quota":    gorm.Expr("used_quota + ?", quota),
@@ -1142,14 +1145,10 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 		},
 	).Error
 	if err != nil {
-		common.SysLog("failed to update user used quota and request count: " + err.Error())
-		return
+		common.SysLog(fmt.Sprintf("failed to update user used quota and request count: userId=%d, delta_quota=%d, delta_count=%d, error=%v", id, quota, count, err))
+		return err
 	}
-
-	//// 更新缓存
-	//if err := invalidateUserCache(id); err != nil {
-	//	common.SysError("failed to invalidate user cache: " + err.Error())
-	//}
+	return nil
 }
 
 func updateUserUsedQuota(id int, quota int) {
