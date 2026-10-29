@@ -1755,8 +1755,12 @@ func FetchModels(c *gin.Context) {
 	key := strings.TrimSpace(req.Key)
 	key = strings.Split(key, "\n")[0]
 
+	// baseURL 来自请求体，是用户可控的 fetch URL，与本函数通用分支同一
+	// 信任边界：显式标记 SSRF 校验，避免该分支成为内网探测器。
+	fetchModelsCtx := common.WithSSRFValidation(c.Request.Context())
+
 	if req.Type == constant.ChannelTypeOllama {
-		models, err := ollama.FetchOllamaModels(baseURL, key)
+		models, err := ollama.FetchOllamaModels(fetchModelsCtx, baseURL, key)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -1778,7 +1782,7 @@ func FetchModels(c *gin.Context) {
 	}
 
 	if req.Type == constant.ChannelTypeGemini {
-		models, err := gemini.FetchGeminiModels(baseURL, key, "")
+		models, err := gemini.FetchGeminiModels(fetchModelsCtx, baseURL, key, "")
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

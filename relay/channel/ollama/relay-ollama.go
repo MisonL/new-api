@@ -598,7 +598,10 @@ func ollamaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	return usage, nil
 }
 
-func FetchOllamaModels(baseURL, apiKey string, extraHeaders ...http.Header) ([]OllamaModel, error) {
+// FetchOllamaModels 由调用方提供 context：fetch_models 处理器用
+// common.WithSSRFValidation 标记该请求进入用户可控抓取边界，后台模型同步
+// 用普通 context（渠道 base_url 属管理员配置，不套用抓取边界）。
+func FetchOllamaModels(ctx context.Context, baseURL, apiKey string, extraHeaders ...http.Header) ([]OllamaModel, error) {
 	url, err := ollamaAPIURL(baseURL, "/api/tags")
 	if err != nil {
 		return nil, err
@@ -608,7 +611,7 @@ func FetchOllamaModels(baseURL, apiKey string, extraHeaders ...http.Header) ([]O
 	if err != nil {
 		return nil, err
 	}
-	request, cancel, err := newOllamaRequest(http.MethodGet, url, nil, 30*time.Second)
+	request, cancel, err := newOllamaRequestFromContext(ctx, http.MethodGet, url, nil, 30*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %v", err)
 	}
@@ -902,7 +905,16 @@ func getOllamaHTTPClient(operationTimeout time.Duration) (*http.Client, error) {
 }
 
 func newOllamaRequest(method, url string, body io.Reader, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return newOllamaRequestFromContext(context.Background(), method, url, body, timeout)
+}
+
+// newOllamaRequestFromContext 在调用方 context 上派生操作级超时，保留调用方
+// 的取消与请求标记（如 fetch_models 的 SSRF 边界标记）。
+func newOllamaRequestFromContext(ctx context.Context, method, url string, body io.Reader, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	request, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		cancel()

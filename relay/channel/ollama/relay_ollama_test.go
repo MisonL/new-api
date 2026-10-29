@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -96,7 +97,7 @@ func TestFetchOllamaModelsNormalizesBaseURLAndAppliesHeaders(t *testing.T) {
 	headers := http.Header{}
 	headers.Add("X-Multi", "one")
 	headers.Add("X-Multi", "two")
-	models, err := FetchOllamaModels(server.URL+"///", "sk-test", headers)
+	models, err := FetchOllamaModels(context.Background(), server.URL+"///", "sk-test", headers)
 	require.NoError(t, err)
 	require.Len(t, models, 1)
 	require.Equal(t, "llama3.1:8b", models[0].Name)
@@ -127,11 +128,11 @@ func TestFetchOllamaModelsReturnsNonOKAndOversizedErrors(t *testing.T) {
 	}))
 	defer oversizedServer.Close()
 
-	_, err := FetchOllamaModels(server.URL, "")
+	_, err := FetchOllamaModels(context.Background(), server.URL, "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "服务器返回错误 502")
 
-	_, err = FetchOllamaModels(oversizedServer.URL, "")
+	_, err = FetchOllamaModels(context.Background(), oversizedServer.URL, "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "读取响应失败")
 	require.Contains(t, err.Error(), "超过")

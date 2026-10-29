@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -283,7 +284,9 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("构建 Ollama 模型同步请求头失败 channel_id=%d: %w", channel.Id, err)
 		}
-		models, err := ollama.FetchOllamaModels(baseURL, key, headers)
+		// 渠道 base_url 属管理员配置（非用户请求可控的 fetch URL），
+		// 与 relay 请求一致不套用抓取 SSRF 边界。
+		models, err := ollama.FetchOllamaModels(context.Background(), baseURL, key, headers)
 		if err != nil {
 			return nil, fmt.Errorf("获取 Ollama 上游模型失败 channel_id=%d base_url=%s: %w", channel.Id, baseURL, err)
 		}
@@ -302,7 +305,7 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("构建 Gemini 模型同步请求头失败 channel_id=%d: %w", channel.Id, err)
 		}
-		models, err := gemini.FetchGeminiModels(baseURL, key, channel.GetSetting().Proxy, headers)
+		models, err := gemini.FetchGeminiModels(context.Background(), baseURL, key, channel.GetSetting().Proxy, headers)
 		if err != nil {
 			return nil, fmt.Errorf("获取 Gemini 上游模型失败 channel_id=%d base_url=%s: %w", channel.Id, baseURL, err)
 		}

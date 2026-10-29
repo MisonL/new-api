@@ -1970,7 +1970,13 @@ type GeminiModelsResponse struct {
 	NextPageToken string            `json:"nextPageToken"`
 }
 
-func FetchGeminiModels(baseURL, apiKey, proxyURL string, extraHeaders ...http.Header) ([]string, error) {
+// FetchGeminiModels 由调用方提供 context：fetch_models 处理器用
+// common.WithSSRFValidation 标记该请求进入用户可控抓取边界，后台模型同步
+// 用普通 context（渠道 base_url 属管理员配置，不套用抓取边界）。
+func FetchGeminiModels(ctx context.Context, baseURL, apiKey, proxyURL string, extraHeaders ...http.Header) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	client, err := service.GetHttpClientWithProxy(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("创建HTTP客户端失败: %v", err)
@@ -1986,8 +1992,8 @@ func FetchGeminiModels(baseURL, apiKey, proxyURL string, extraHeaders ...http.He
 			url = fmt.Sprintf("%s?pageToken=%s", url, nextPageToken)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		request, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		pageCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		request, err := http.NewRequestWithContext(pageCtx, "GET", url, nil)
 		if err != nil {
 			cancel()
 			return nil, fmt.Errorf("创建请求失败: %v", err)
