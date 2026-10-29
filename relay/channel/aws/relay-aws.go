@@ -42,11 +42,26 @@ func getAwsErrorStatusCode(err error) int {
 	return http.StatusInternalServerError
 }
 
-func newAwsInvokeContext() (context.Context, context.CancelFunc) {
-	if common.RelayTimeout <= 0 {
-		return context.Background(), func() {}
+// requestContextOf 取 gin 请求的 context。真实请求里 Request 永远非空；
+// 仅为 gin 测试上下文（CreateTestContext 不设置 Request）保留空值兜底。
+func requestContextOf(c *gin.Context) context.Context {
+	if c == nil || c.Request == nil {
+		return context.Background()
 	}
-	return context.WithTimeout(context.Background(), time.Duration(common.RelayTimeout)*time.Second)
+	return c.Request.Context()
+}
+
+// newAwsInvokeContext 在调用方 context 上派生 relay 超时。AWS SDK 只认
+// 传进去的 context：用 context.Background() 会让客户端断开、上游取消
+// 都无法传到 Bedrock 调用，请求会一直挂到 SDK 自己的重试耗尽。
+func newAwsInvokeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if common.RelayTimeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, time.Duration(common.RelayTimeout)*time.Second)
 }
 
 type awsRateLimitAwareRetryer struct {
@@ -321,7 +336,7 @@ func getAwsModelID(requestModel string) string {
 
 func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
 
-	ctx, cancel := newAwsInvokeContext()
+	ctx, cancel := newAwsInvokeContext(requestContextOf(c))
 	defer cancel()
 
 	if !service.StartUpstreamRateLimitRetryFollowup(c) {
@@ -354,7 +369,7 @@ func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types
 }
 
 func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
-	ctx, cancel := newAwsInvokeContext()
+	ctx, cancel := newAwsInvokeContext(requestContextOf(c))
 	defer cancel()
 
 	if !service.StartUpstreamRateLimitRetryFollowup(c) {
@@ -400,7 +415,7 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 // Nova模型处理函数
 func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
 
-	ctx, cancel := newAwsInvokeContext()
+	ctx, cancel := newAwsInvokeContext(requestContextOf(c))
 	defer cancel()
 
 	if !service.StartUpstreamRateLimitRetryFollowup(c) {

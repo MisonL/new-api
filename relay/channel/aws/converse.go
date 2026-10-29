@@ -715,7 +715,7 @@ func converseHandler(c *gin.Context, info *relaycommon.RelayInfo, adaptor *Adapt
 	if !ok || request == nil {
 		return apitypes.NewError(fmt.Errorf("AWS Converse request is not initialized"), apitypes.ErrorCodeBadRequestBody), nil
 	}
-	ctx, cancel := newAwsInvokeContext()
+	ctx, cancel := newAwsInvokeContext(requestContextOf(c))
 	defer cancel()
 	if !service.StartUpstreamRateLimitRetryFollowup(c) {
 		return service.NewUpstreamRateLimitRetryExhaustedError(), nil
@@ -956,7 +956,7 @@ func converseStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, adaptor 
 	if !ok || request == nil {
 		return apitypes.NewError(fmt.Errorf("AWS ConverseStream request is not initialized"), apitypes.ErrorCodeBadRequestBody), nil
 	}
-	ctx, cancel := newAwsInvokeContext()
+	ctx, cancel := newAwsInvokeContext(requestContextOf(c))
 	defer cancel()
 	if !service.StartUpstreamRateLimitRetryFollowup(c) {
 		return service.NewUpstreamRateLimitRetryExhaustedError(), nil
