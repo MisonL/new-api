@@ -202,6 +202,10 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	dataChan := make(chan string)
 	metaChan := make(chan string)
 	stopChan := make(chan bool)
+	// 客户端断开时 c.Stream 直接返回，不再消费 dataChan/metaChan，生产者会
+	// 永久卡在无缓冲发送上。done 在 handler 返回时关闭，给生产者一条退出路径。
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		for scanner.Scan() {
 			data := scanner.Text()
@@ -211,16 +215,31 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 					continue
 				}
 				if line[:5] == "data:" {
-					dataChan <- line[5:]
+					select {
+					case dataChan <- line[5:]:
+					case <-done:
+						return
+					}
 					if i != len(lines)-1 {
-						dataChan <- "\n"
+						select {
+						case dataChan <- "\n":
+						case <-done:
+							return
+						}
 					}
 				} else if line[:5] == "meta:" {
-					metaChan <- line[5:]
+					select {
+					case metaChan <- line[5:]:
+					case <-done:
+						return
+					}
 				}
 			}
 		}
-		stopChan <- true
+		select {
+		case stopChan <- true:
+		case <-done:
+		}
 	}()
 	helper.SetEventStreamHeaders(c)
 	c.Stream(func(w io.Writer) bool {

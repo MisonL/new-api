@@ -144,24 +144,41 @@ func palmStreamHandler(c *gin.Context, resp *http.Response) (*types.NewAPIError,
 	responseId := helper.GetResponseID(c)
 	createdTime := common.GetTimestamp()
 	// 流式写盘 panic 或客户端断开都会跳过函数末尾的关闭，只有 defer 能覆盖
-	// 所有退出路径。goroutine 的成功分支也会关一次，重复关闭对 http.Body 是
-	// 幂等的。
+	// 所有退出路径。响应体只由本函数关闭：读取协程退出时会与这里的关闭并发，
+	// 两个协程各自关闭同一个 Body 没有并发安全保证。
 	defer service.CloseResponseBodyGracefully(resp)
 	dataChan := make(chan string)
 	stopChan := make(chan bool)
+	// 客户端断开时 c.Stream 直接返回，不再消费 dataChan/stopChan，生产者会
+	// 永久卡在无缓冲发送上。done 在 handler 返回时关闭，给生产者一条退出路径。
+	done := make(chan struct{})
+	defer close(done)
+	sendData := func(v string) bool {
+		select {
+		case dataChan <- v:
+			return true
+		case <-done:
+			return false
+		}
+	}
+	sendStop := func() {
+		select {
+		case stopChan <- true:
+		case <-done:
+		}
+	}
 	go func() {
-		defer service.CloseResponseBodyGracefully(resp)
 		responseBody, err := io.ReadAll(resp.Body)
 		if err != nil {
 			common.SysLog("error reading stream response: " + err.Error())
-			stopChan <- true
+			sendStop()
 			return
 		}
 		var palmResponse PaLMChatResponse
 		err = common.Unmarshal(responseBody, &palmResponse)
 		if err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			stopChan <- true
+			sendStop()
 			return
 		}
 		fullTextResponse := streamResponsePaLM2OpenAI(&palmResponse)
@@ -173,11 +190,13 @@ func palmStreamHandler(c *gin.Context, resp *http.Response) (*types.NewAPIError,
 		jsonResponse, err := common.Marshal(fullTextResponse)
 		if err != nil {
 			common.SysLog("error marshalling stream response: " + err.Error())
-			stopChan <- true
+			sendStop()
 			return
 		}
-		dataChan <- string(jsonResponse)
-		stopChan <- true
+		if !sendData(string(jsonResponse)) {
+			return
+		}
+		sendStop()
 	}()
 	helper.SetEventStreamHeaders(c)
 	c.Stream(func(w io.Writer) bool {

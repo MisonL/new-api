@@ -123,12 +123,23 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	})
 	dataChan := make(chan string)
 	stopChan := make(chan bool)
+	// 客户端断开时 c.Stream 直接返回，不再消费 dataChan，生产者会永久卡在
+	// 无缓冲发送上。done 在 handler 返回时关闭，给生产者一条退出路径。
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		for scanner.Scan() {
 			data := scanner.Text()
-			dataChan <- data
+			select {
+			case dataChan <- data:
+			case <-done:
+				return
+			}
 		}
-		stopChan <- true
+		select {
+		case stopChan <- true:
+		case <-done:
+		}
 	}()
 	helper.SetEventStreamHeaders(c)
 	isFirst := true
