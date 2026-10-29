@@ -134,7 +134,7 @@ func clampThinkingBudgetByEffort(modelName string, effort string) int {
 }
 
 func ThinkingAdaptor(geminiRequest *dto.GeminiChatRequest, info *relaycommon.RelayInfo, oaiRequest ...dto.GeneralOpenAIRequest) {
-	if model_setting.GetGeminiSettings().ThinkingAdapterEnabled {
+	if model_setting.GeminiSettingsSnapshot().ThinkingAdapterEnabled {
 		modelName := info.UpstreamModelName
 		isNew25Pro := strings.HasPrefix(modelName, "gemini-2.5-pro") &&
 			!strings.HasPrefix(modelName, "gemini-2.5-pro-preview-05-06") &&
@@ -173,7 +173,7 @@ func ThinkingAdaptor(geminiRequest *dto.GeminiChatRequest, info *relaycommon.Rel
 					IncludeThoughts: true,
 				}
 				if geminiRequest.GenerationConfig.MaxOutputTokens != nil && *geminiRequest.GenerationConfig.MaxOutputTokens > 0 {
-					budgetTokens := model_setting.GetGeminiSettings().ThinkingAdapterBudgetTokensPercentage * float64(*geminiRequest.GenerationConfig.MaxOutputTokens)
+					budgetTokens := model_setting.GeminiSettingsSnapshot().ThinkingAdapterBudgetTokensPercentage * float64(*geminiRequest.GenerationConfig.MaxOutputTokens)
 					clampedBudget := clampThinkingBudget(modelName, int(budgetTokens))
 					geminiRequest.GenerationConfig.ThinkingConfig.ThinkingBudget = common.GetPointer(clampedBudget)
 				} else {
@@ -247,7 +247,7 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 	}
 	attachThoughtSignature := (channelType == constant.ChannelTypeGemini ||
 		channelType == constant.ChannelTypeVertexAi) &&
-		model_setting.GetGeminiSettings().FunctionCallThoughtSignatureEnabled
+		model_setting.GeminiSettingsSnapshot().FunctionCallThoughtSignatureEnabled
 
 	if model_setting.IsGeminiModelSupportImagine(upstreamModelName) {
 		geminiRequest.GenerationConfig.ResponseModalities = []string{

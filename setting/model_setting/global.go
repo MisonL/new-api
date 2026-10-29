@@ -169,8 +169,39 @@ func GetGlobalSettings() *GlobalSettings {
 	return &globalSettings
 }
 
+// readGlobalSettings 在配置管理器读锁内把当前配置交给 fn。直接读包级变量
+// 会与管理端 Update 构成数据竞争；写入方发布的是全新的切片/映射，旧对象
+// 替换后不再被改写，因此把切片头复制出去后在锁外读取是安全的。
+func readGlobalSettings(fn func(*GlobalSettings)) {
+	if fn == nil {
+		return
+	}
+	applied := config.GlobalConfig.ReadLive("global", func(cfg interface{}) {
+		if settings, ok := cfg.(*GlobalSettings); ok && settings != nil {
+			fn(settings)
+		}
+	})
+	if !applied {
+		fn(&globalSettings)
+	}
+}
+
+// GlobalSettingsSnapshot 返回当前全局配置的浅拷贝。slice 字段的底层数组在
+// 发布后不再被改写，浅拷贝足以让调用方在锁外安全读取。
+func GlobalSettingsSnapshot() GlobalSettings {
+	var snapshot GlobalSettings
+	readGlobalSettings(func(settings *GlobalSettings) {
+		snapshot = *settings
+	})
+	return snapshot
+}
+
 func GetRequestBodyLimitPolicy() RequestBodyLimitPolicy {
-	return globalSettings.RequestBodyLimitPolicy.Normalize()
+	var policy RequestBodyLimitPolicy
+	readGlobalSettings(func(settings *GlobalSettings) {
+		policy = settings.RequestBodyLimitPolicy
+	})
+	return policy.Normalize()
 }
 
 func ValidateAndNormalizeRequestBodyLimitPolicy(policy *RequestBodyLimitPolicy) error {
@@ -211,12 +242,16 @@ func ShouldPreserveThinkingSuffix(modelName string) bool {
 		return false
 	}
 
-	for _, entry := range globalSettings.ThinkingModelBlacklist {
-		if strings.TrimSpace(entry) == target {
-			return true
+	found := false
+	readGlobalSettings(func(settings *GlobalSettings) {
+		for _, entry := range settings.ThinkingModelBlacklist {
+			if strings.TrimSpace(entry) == target {
+				found = true
+				return
+			}
 		}
-	}
-	return false
+	})
+	return found
 }
 
 func normalizeProtocolEndpoint(endpoint string) string {

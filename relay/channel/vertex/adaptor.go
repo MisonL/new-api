@@ -55,7 +55,7 @@ type Adaptor struct {
 
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
 	// Vertex AI does not support functionResponse.id; keep it stripped here for consistency.
-	if model_setting.GetGeminiSettings().RemoveFunctionResponseIdEnabled {
+	if model_setting.GeminiSettingsSnapshot().RemoveFunctionResponseIdEnabled {
 		removeFunctionResponseID(request)
 	}
 	geminiAdaptor := gemini.Adaptor{}
@@ -168,7 +168,7 @@ func (a *Adaptor) getRequestUrl(info *relaycommon.RelayInfo, modelName, suffix s
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	suffix := ""
 	if a.RequestMode == RequestModeGemini {
-		if model_setting.GetGeminiSettings().ThinkingAdapterEnabled &&
+		if model_setting.GeminiSettingsSnapshot().ThinkingAdapterEnabled &&
 			!model_setting.ShouldPreserveThinkingSuffix(info.OriginModelName) {
 			// 新增逻辑：处理 -thinking-<budget> 格式
 			if strings.Contains(info.UpstreamModelName, "-thinking-") {

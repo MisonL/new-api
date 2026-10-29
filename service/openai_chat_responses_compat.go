@@ -121,7 +121,7 @@ func FindResponsesViaChatRule(ctx context.Context, relayMode int, passThroughGlo
 		}
 	}
 	return openaicompat.FindProtocolConversionRulePolicyWithFilter(
-		model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy,
+		model_setting.GlobalSettingsSnapshot().ChatCompletionsToResponsesPolicy,
 		model_setting.ProtocolEndpointResponses,
 		model_setting.ProtocolEndpointChatCompletions,
 		channelID,
@@ -145,7 +145,7 @@ func firstChannelOtherSettings(settings []dto.ChannelOtherSettings) dto.ChannelO
 
 func FindUnconditionalResponsesViaChatRule(channelID int, channelType int, model string) (*model_setting.ProtocolConversionRule, error) {
 	return openaicompat.FindProtocolConversionRulePolicyWithFilter(
-		model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy,
+		model_setting.GlobalSettingsSnapshot().ChatCompletionsToResponsesPolicy,
 		model_setting.ProtocolEndpointResponses,
 		model_setting.ProtocolEndpointChatCompletions,
 		channelID,

@@ -267,7 +267,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
-	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	passThroughGlobal := model_setting.GlobalSettingsSnapshot().PassThroughRequestEnabled
 	compatibilityRequest, contextCompactionResult, err := prepareResponsesRequestForChatCompatibility(info, request, relaycommon.GinRequestContext(c))
 	if err != nil {
 		return newResponsesConvertRequestError(err)

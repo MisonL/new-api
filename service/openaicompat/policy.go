@@ -86,7 +86,7 @@ func FindProtocolConversionRulePolicy(policy model_setting.ChatCompletionsToResp
 
 func FindProtocolConversionRuleGlobal(sourceEndpoint string, targetEndpoint string, channelID int, channelType int, model string) *model_setting.ProtocolConversionRule {
 	return FindProtocolConversionRulePolicy(
-		model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy,
+		model_setting.GlobalSettingsSnapshot().ChatCompletionsToResponsesPolicy,
 		sourceEndpoint,
 		targetEndpoint,
 		channelID,

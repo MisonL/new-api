@@ -32,3 +32,19 @@ func init() {
 func GetFetchSetting() *FetchSetting {
 	return &defaultFetchSetting
 }
+
+// GetFetchSettingSnapshot 在配置管理器读锁内复制当前抓取设置。直接使用
+// GetFetchSetting 返回的指针与管理端 Update 构成数据竞争；写入方发布全新的
+// 切片，旧对象替换后不再被改写，浅拷贝在锁外读取是安全的。
+func GetFetchSettingSnapshot() FetchSetting {
+	var snapshot FetchSetting
+	applied := config.GlobalConfig.ReadLive("fetch_setting", func(cfg interface{}) {
+		if settings, ok := cfg.(*FetchSetting); ok && settings != nil {
+			snapshot = *settings
+		}
+	})
+	if !applied {
+		snapshot = defaultFetchSetting
+	}
+	return snapshot
+}

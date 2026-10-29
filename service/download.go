@@ -31,7 +31,7 @@ func DoWorkerRequest(req *WorkerRequest) (*http.Response, error) {
 	}
 
 	// SSRF防护：验证请求URL
-	fetchSetting := system_setting.GetFetchSetting()
+	fetchSetting := system_setting.GetFetchSettingSnapshot()
 	if err := common.ValidateURLWithFetchSetting(req.URL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
 		return nil, fmt.Errorf("request reject: %v", err)
 	}
@@ -60,7 +60,7 @@ func DoDownloadRequest(originUrl string, reason ...string) (resp *http.Response,
 		return DoWorkerRequest(req)
 	} else {
 		common.SysLog(fmt.Sprintf("downloading from origin: %s, reason: %s", common.MaskSensitiveInfo(originUrl), strings.Join(reason, ", ")))
-		fetchSetting := system_setting.GetFetchSetting()
+		fetchSetting := system_setting.GetFetchSettingSnapshot()
 		if err := common.ValidateURLWithFetchSetting(originUrl, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
 			return nil, fmt.Errorf("invalid request URL: %v", err)
 		}

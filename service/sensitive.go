@@ -38,23 +38,25 @@ func CheckSensitiveText(text string) (bool, []string) {
 
 // SensitiveWordContains 是否包含敏感词，返回是否包含敏感词和敏感词列表
 func SensitiveWordContains(text string) (bool, []string) {
-	if len(setting.SensitiveWords) == 0 {
+	words := setting.SensitiveWordsSnapshot()
+	if len(words) == 0 {
 		return false, nil
 	}
 	if len(text) == 0 {
 		return false, nil
 	}
 	checkText := strings.ToLower(text)
-	return AcSearch(checkText, setting.SensitiveWords, true)
+	return AcSearch(checkText, words, true)
 }
 
 // SensitiveWordReplace 敏感词替换，返回是否包含敏感词和替换后的文本
 func SensitiveWordReplace(text string, returnImmediately bool) (bool, []string, string) {
-	if len(setting.SensitiveWords) == 0 {
+	words := setting.SensitiveWordsSnapshot()
+	if len(words) == 0 {
 		return false, nil, text
 	}
 	checkText := strings.ToLower(text)
-	m := getOrBuildAC(setting.SensitiveWords)
+	m := getOrBuildAC(words)
 	hits := m.MultiPatternSearch([]rune(checkText), returnImmediately)
 	if len(hits) > 0 {
 		words := make([]string, 0, len(hits))

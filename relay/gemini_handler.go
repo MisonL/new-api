@@ -101,7 +101,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
 
-	if model_setting.GetGeminiSettings().ThinkingAdapterEnabled {
+	if model_setting.GeminiSettingsSnapshot().ThinkingAdapterEnabled {
 		if isNoThinkingRequest(request) {
 			applyGeminiNoThinkingBillingModel(info, helper.HasModelBillingConfig)
 		}
@@ -158,7 +158,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	var requestBody io.Reader
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	if model_setting.GlobalSettingsSnapshot().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())

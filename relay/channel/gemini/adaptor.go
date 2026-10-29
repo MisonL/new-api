@@ -131,7 +131,7 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
-	if model_setting.GetGeminiSettings().ThinkingAdapterEnabled &&
+	if model_setting.GeminiSettingsSnapshot().ThinkingAdapterEnabled &&
 		!model_setting.ShouldPreserveThinkingSuffix(info.OriginModelName) {
 		// 新增逻辑：处理 -thinking-<budget> 格式
 		if strings.Contains(info.UpstreamModelName, "-thinking-") {

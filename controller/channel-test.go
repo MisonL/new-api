@@ -972,7 +972,7 @@ func applyChannelTestProtocolStrategy(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func findChannelTestResponsesViaChatRule(info *relaycommon.RelayInfo, request dto.Request) (*model_setting.ProtocolConversionRule, error) {
-	settings := model_setting.GetGlobalSettings()
+	settings := model_setting.GlobalSettingsSnapshot()
 	if info == nil ||
 		info.ChannelMeta == nil ||
 		info.RelayMode != relayconstant.RelayModeResponses ||

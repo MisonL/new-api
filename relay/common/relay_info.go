@@ -1330,7 +1330,7 @@ func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.Channel
 // RemoveGeminiDisabledFields removes disabled fields from Gemini request JSON data
 // Currently supports removing functionResponse.id field which Vertex AI does not support
 func RemoveGeminiDisabledFields(jsonData []byte) ([]byte, error) {
-	if !model_setting.GetGeminiSettings().RemoveFunctionResponseIdEnabled {
+	if !model_setting.GeminiSettingsSnapshot().RemoveFunctionResponseIdEnabled {
 		return jsonData, nil
 	}
 

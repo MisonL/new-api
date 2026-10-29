@@ -42,10 +42,25 @@ func GetQwenSettings() *QwenSettings {
 
 // IsSyncImageModel
 func IsSyncImageModel(model string) bool {
-	for _, m := range qwenSettings.SyncImageModels {
-		if strings.Contains(model, m) {
-			return true
+	found := false
+	applied := config.GlobalConfig.ReadLive("qwen", func(cfg interface{}) {
+		settings, ok := cfg.(*QwenSettings)
+		if !ok || settings == nil {
+			return
+		}
+		for _, m := range settings.SyncImageModels {
+			if strings.Contains(model, m) {
+				found = true
+				return
+			}
+		}
+	})
+	if !applied {
+		for _, m := range qwenSettings.SyncImageModels {
+			if strings.Contains(model, m) {
+				return true
+			}
 		}
 	}
-	return false
+	return found
 }

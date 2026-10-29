@@ -334,7 +334,16 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 				continue
 			}
 			field.Set(fresh.Elem())
-		case reflect.Slice, reflect.Struct:
+		case reflect.Slice:
+			// json 解码会复用非 nil 切片的底层数组并原地覆盖元素，已持有旧切片头
+			// 的读者会读到撕裂数据。切片一律解码到新值再整体替换发布，使旧对象
+			// 在替换后不再被改写。
+			fresh := reflect.New(field.Type())
+			if err := common.UnmarshalJsonStr(strValue, fresh.Interface()); err != nil {
+				continue
+			}
+			field.Set(fresh.Elem())
+		case reflect.Struct:
 			if err := common.UnmarshalJsonStr(strValue, field.Addr().Interface()); err != nil {
 				continue
 			}

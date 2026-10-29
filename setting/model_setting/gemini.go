@@ -54,27 +54,67 @@ func GetGeminiSettings() *GeminiSettings {
 	return &geminiSettings
 }
 
+// readGeminiSettings 在配置管理器读锁内把当前配置交给 fn；直接读包级变量
+// 与管理端 Update 构成数据竞争。写入方发布全新的 map/slice，旧对象替换后
+// 不再被改写，复制切片头或 map 引用后在锁外读取是安全的。
+func readGeminiSettings(fn func(*GeminiSettings)) {
+	if fn == nil {
+		return
+	}
+	applied := config.GlobalConfig.ReadLive("gemini", func(cfg interface{}) {
+		if settings, ok := cfg.(*GeminiSettings); ok && settings != nil {
+			fn(settings)
+		}
+	})
+	if !applied {
+		fn(&geminiSettings)
+	}
+}
+
+// GeminiSettingsSnapshot 返回当前 Gemini 配置的浅拷贝。
+func GeminiSettingsSnapshot() GeminiSettings {
+	var snapshot GeminiSettings
+	readGeminiSettings(func(settings *GeminiSettings) {
+		snapshot = *settings
+	})
+	return snapshot
+}
+
 // GetGeminiSafetySetting 获取安全设置
 func GetGeminiSafetySetting(key string) string {
-	if value, ok := geminiSettings.SafetySettings[key]; ok {
-		return value
-	}
-	return geminiSettings.SafetySettings["default"]
+	value := ""
+	readGeminiSettings(func(settings *GeminiSettings) {
+		if v, ok := settings.SafetySettings[key]; ok {
+			value = v
+			return
+		}
+		value = settings.SafetySettings["default"]
+	})
+	return value
 }
 
 // GetGeminiVersionSetting 获取版本设置
 func GetGeminiVersionSetting(key string) string {
-	if value, ok := geminiSettings.VersionSettings[key]; ok {
-		return value
-	}
-	return geminiSettings.VersionSettings["default"]
+	value := ""
+	readGeminiSettings(func(settings *GeminiSettings) {
+		if v, ok := settings.VersionSettings[key]; ok {
+			value = v
+			return
+		}
+		value = settings.VersionSettings["default"]
+	})
+	return value
 }
 
 func IsGeminiModelSupportImagine(model string) bool {
-	for _, v := range geminiSettings.SupportedImagineModels {
-		if v == model {
-			return true
+	found := false
+	readGeminiSettings(func(settings *GeminiSettings) {
+		for _, v := range settings.SupportedImagineModels {
+			if v == model {
+				found = true
+				return
+			}
 		}
-	}
-	return false
+	})
+	return found
 }

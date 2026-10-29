@@ -1386,11 +1386,11 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		return false, nil
 	}
 	if nativeToolIdentity := codexLiteNativeToolIdentityDecisionFor(c, request); nativeToolIdentity.required &&
-		!(model_setting.GetGlobalSettings().PassThroughRequestEnabled || nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled) {
+		!(model_setting.GlobalSettingsSnapshot().PassThroughRequestEnabled || nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled) {
 		rule, err := service.FindResponsesViaChatRule(
 			c.Request.Context(),
 			info.RelayMode,
-			model_setting.GetGlobalSettings().PassThroughRequestEnabled,
+			model_setting.GlobalSettingsSnapshot().PassThroughRequestEnabled,
 			nativeCompactionChannelSetting(c, info, channel),
 			channel.Id,
 			channel.Type,
@@ -1449,7 +1449,7 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 		namespace:  namespaceToolsUnsupported,
 		toolSearch: toolSearchUnsupported,
 	}
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
+	if model_setting.GlobalSettingsSnapshot().PassThroughRequestEnabled ||
 		nativeCompactionChannelSetting(c, info, channel).PassThroughBodyEnabled {
 		if skipExplicitlyUnsupportedResponsesTools(c, info, channel, unsupportedTools) {
 			return true, nil
@@ -1536,7 +1536,7 @@ func shouldSkipChannelForResponsesToChatCompatibility(c *gin.Context, info *rela
 	rule, err := service.FindResponsesViaChatRule(
 		c.Request.Context(),
 		info.RelayMode,
-		model_setting.GetGlobalSettings().PassThroughRequestEnabled,
+		model_setting.GlobalSettingsSnapshot().PassThroughRequestEnabled,
 		nativeCompactionChannelSetting(c, info, channel),
 		channel.Id,
 		channel.Type,

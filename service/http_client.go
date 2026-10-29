@@ -119,8 +119,8 @@ func (t ssrfGuardedTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if !common.RequiresSSRFValidation(req.Context()) {
 		return t.base.RoundTrip(req)
 	}
-	fetchSetting := system_setting.GetFetchSetting()
-	if fetchSetting == nil || !fetchSetting.EnableSSRFProtection {
+	fetchSetting := system_setting.GetFetchSettingSnapshot()
+	if !fetchSetting.EnableSSRFProtection {
 		return t.base.RoundTrip(req)
 	}
 	validatedIPs, err := common.ValidateURLWithFetchSettingAndResolveContextOptions(
@@ -348,10 +348,7 @@ func checkRedirectWithRemoteDNSMode(req *http.Request, via []*http.Request, remo
 		}
 		return nil
 	}
-	fetchSetting := system_setting.GetFetchSetting()
-	if fetchSetting == nil {
-		return fmt.Errorf("redirect validation unavailable: fetch settings are not initialized")
-	}
+	fetchSetting := system_setting.GetFetchSettingSnapshot()
 	if remoteDNS && !common.UsesSSRFRemoteDNS(req.Context()) {
 		// Client.Do keeps this request pointer and copies its context into the
 		// next redirect request after CheckRedirect returns. Mutating the request

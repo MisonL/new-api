@@ -32,7 +32,7 @@ func doAwsConverseRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor *
 	if requestBody == nil {
 		return nil, fmt.Errorf("AWS Converse request body is nil")
 	}
-	if info != nil && (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) {
+	if info != nil && (model_setting.GlobalSettingsSnapshot().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) {
 		return nil, fmt.Errorf("AWS API-key Converse does not support pass-through request bodies; send OpenAI or Claude compatible input")
 	}
 	body, err := io.ReadAll(requestBody)
