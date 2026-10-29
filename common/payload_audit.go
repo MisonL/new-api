@@ -42,6 +42,13 @@ func (w *payloadAuditResponseWriter) WriteString(s string) (int, error) {
 	return w.ResponseWriter.WriteString(s)
 }
 
+// Unwrap 让 http.ResponseController 穿透审计包装访问底层 writer。
+// 没有它时 SetWriteDeadline 在审计开启的请求上返回 "feature not supported"，
+// 流式响应收尾依赖的写超时会静默失效。
+func (w *payloadAuditResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 func (w *payloadAuditResponseWriter) capture(data []byte) {
 	w.total += int64(len(data))
 	if w.truncated || len(data) == 0 {
