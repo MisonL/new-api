@@ -250,9 +250,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
-	}
+	settleErr := SettleBilling(ctx, relayInfo, quota)
 
 	// 日志与 quota_data 也按用户请求的模型名归集，与预扣、文本/音频结算一致；
 	// 上游映射名会让按模型维度的对账与看板出现两套口径。
@@ -265,6 +263,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	if tieredResult != nil {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
+	MarkSettleFailure(ctx, relayInfo, quota, settleErr, other)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     usage.InputTokens,
@@ -374,9 +373,6 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 
 	settleErr := SettleBilling(ctx, relayInfo, quota)
-	if settleErr != nil {
-		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
-	}
 
 	logModel := relayInfo.OriginModelName
 	if extraContent != "" {
@@ -387,6 +383,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	if tieredResult != nil {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
+	MarkSettleFailure(ctx, relayInfo, quota, settleErr, other)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     usage.PromptTokens,

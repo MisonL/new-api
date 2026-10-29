@@ -949,9 +949,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
-	}
+	settleErr := SettleBilling(ctx, relayInfo, summary.Quota)
 
 	logModel := summary.ModelName
 	if strings.HasPrefix(logModel, "gpt-4-gizmo") {
@@ -1034,6 +1032,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	extraContent, other = appendResponsesCompactLogInfo(ctx, relayInfo, extraContent, other, time.Now())
+	MarkSettleFailure(ctx, relayInfo, summary.Quota, settleErr, other)
 	logContent := strings.Join(extraContent, ", ")
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{

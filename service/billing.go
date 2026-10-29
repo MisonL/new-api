@@ -29,6 +29,30 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 // SettleBilling - 后结算辅助函数
 // ---------------------------------------------------------------------------
 
+// settleErrorLogField 是结算失败写进消费日志 other 的键。
+const settleErrorLogField = "settle_error"
+
+// MarkSettleFailure 把结算失败写进消费日志的 other 字段，并记录带身份字段的
+// 错误日志。结算发生在响应写完之后：HTTP 状态已不可改，而 used_quota 与
+// 渠道用量已经累加、消费日志也已写入。失败只留在服务端 stderr 时，这笔差额
+// 无法对账，因此必须落进日志行本身。
+//
+// 这里不重试：IncreaseUserQuota 是 quota += N 的非幂等操作，重试可能重复退款。
+func MarkSettleFailure(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int, settleErr error, other map[string]interface{}) {
+	if settleErr == nil {
+		return
+	}
+	if other != nil {
+		other[settleErrorLogField] = settleErr.Error()
+	}
+	userId, channelId, tokenId := 0, 0, 0
+	if relayInfo != nil {
+		userId, channelId, tokenId = relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId
+	}
+	logger.LogError(ctx, fmt.Sprintf("error settling billing: %s (userId %d, channelId %d, tokenId %d, actualQuota %d)",
+		settleErr.Error(), userId, channelId, tokenId, actualQuota))
+}
+
 // SettleBilling 执行计费结算。如果 RelayInfo 上有 BillingSession 则通过 session 结算，
 // 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
 func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
