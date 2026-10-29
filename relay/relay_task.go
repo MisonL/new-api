@@ -739,11 +739,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 6. 将 OtherRatios 应用到基础额度
 	if !common.StringsContains(constant.TaskPricePatches, modelName) {
-		for _, ra := range info.PriceData.OtherRatios {
-			if ra != 1.0 {
-				info.PriceData.Quota = int(float64(info.PriceData.Quota) * ra)
-			}
-		}
+		info.PriceData.Quota = applyOtherRatiosToQuota(info.PriceData.Quota, info.PriceData.OtherRatios)
 	}
 
 	// 7. 预扣费（仅首次 - 重试时 info.Billing 已存在，跳过）
@@ -957,6 +953,20 @@ func syncTaskSubmissionChannelIdentity(info *relaycommon.RelayInfo) error {
 	return nil
 }
 
+// applyOtherRatiosToQuota 把 OtherRatios 依次乘到基础额度上。倍率来自
+// EstimateBilling，其中一部分直接取自客户端请求（如 sora 的 seconds），
+// 换算越界时必须饱和：负额度的预扣会被 PreConsume 的 amount <= 0 放行，
+// 最终落到退款方向。
+func applyOtherRatiosToQuota(baseQuota int, ratios map[string]float64) int {
+	quota := baseQuota
+	for _, ra := range ratios {
+		if ra != 1.0 {
+			quota = common.SafeQuotaIntFromFloat64(float64(quota) * ra)
+		}
+	}
+	return quota
+}
+
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
 // 公式: baseQuota x ∏(ratio) - 其中 baseQuota 是不含 OtherRatios 的基础额度。
 func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float64) int {
@@ -965,7 +975,7 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 	// 先除掉原有的 OtherRatios 恢复基础额度
 	for _, ra := range info.PriceData.OtherRatios {
 		if ra != 1.0 && ra > 0 {
-			baseQuota = int(float64(baseQuota) / ra)
+			baseQuota = common.SafeQuotaIntFromFloat64(float64(baseQuota) / ra)
 		}
 	}
 	// 应用新的 ratios
@@ -975,7 +985,7 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 			result *= ra
 		}
 	}
-	return int(result)
+	return common.SafeQuotaIntFromFloat64(result)
 }
 
 var fetchRespBuilders = map[int]func(c *gin.Context) (respBody []byte, taskResp *dto.TaskError){
