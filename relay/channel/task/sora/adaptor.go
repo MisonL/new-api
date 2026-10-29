@@ -208,7 +208,10 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 					}
 				}
 				h := make(textproto.MIMEHeader)
-				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldName, fh.Filename))
+				// fieldName 来自客户端表单的 name 参数，与 filename 一样可经
+				// RFC 2231 name* 解码出 CRLF，两者都必须清洗后再拼 header。
+				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
+					common.SanitizeMultipartFieldName(fieldName), common.SanitizeMultipartFilename(fh.Filename)))
 				h.Set("Content-Type", ct)
 				part, err := writer.CreatePart(h)
 				if err != nil {
