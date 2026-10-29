@@ -68,6 +68,11 @@ const EditTokenModal = (props) => {
   const isMobile = useIsMobile();
   const formApiRef = useRef(null);
   const containerRef = useRef(null);
+  // 打开弹窗时读取到的额度基线（展示金额）：只有用户实际改过额度才回传
+  // remain_quota，否则服务端保持当前余额，避免把弹窗打开期间消耗掉的额度
+  // 静默恢复。比较展示金额而不是换算后的 quota，避免单位换算的舍入误差
+  // 让「没改过」被误判成「改过」。
+  const loadedRemainAmountRef = useRef(null);
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
   const [showQuotaInput, setShowQuotaInput] = useState(false);
@@ -177,6 +182,7 @@ const EditTokenModal = (props) => {
       data.remain_amount = Number(
         quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
       );
+      loadedRemainAmountRef.current = data.remain_amount;
       if (formApiRef.current) {
         formApiRef.current.setValues({ ...getInitValues(), ...data });
       }
@@ -273,6 +279,14 @@ const EditTokenModal = (props) => {
         showError(t('请输入金额'));
         setLoading(false);
         return;
+      }
+      // 未改动额度时不下发该字段：服务端保持当前余额（含弹窗打开期间已消耗的
+      // 部分）。无限额度仍按原行为下发 0，避免列表展示残留旧余额。
+      if (
+        !localInputs.unlimited_quota &&
+        Number(localInputs.remain_amount) === loadedRemainAmountRef.current
+      ) {
+        delete localInputs.remain_quota;
       }
       if (localInputs.expired_time !== -1) {
         let time = Date.parse(localInputs.expired_time);

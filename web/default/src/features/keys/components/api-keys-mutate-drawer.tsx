@@ -53,7 +53,7 @@ import {
   transformFormDataToPayload,
   transformApiKeyToFormDefaults,
 } from '../lib'
-import { type ApiKey } from '../types'
+import { type ApiKey, type ApiKeyFormData } from '../types'
 import {
   ApiKeyGroupCombobox,
   type ApiKeyGroupOption,
@@ -169,10 +169,18 @@ export function ApiKeysMutateDrawer({
       const basePayload = transformFormDataToPayload(data)
 
       if (isUpdate && currentRow) {
-        const result = await updateApiKey({
+        const payload: ApiKeyFormData & { id: number } = {
           ...basePayload,
           id: currentRow.id,
-        })
+        }
+        // 未改动额度：不提交该字段，服务端保持当前余额（含已消耗部分）。
+        if (
+          !form.formState.dirtyFields.remain_quota_dollars &&
+          !data.unlimited_quota
+        ) {
+          delete (payload as Partial<typeof payload>).remain_quota
+        }
+        const result = await updateApiKey(payload)
         if (result.success) {
           toast.success(t(SUCCESS_MESSAGES.API_KEY_UPDATED))
           onOpenChange(false)

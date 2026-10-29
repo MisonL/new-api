@@ -283,6 +283,9 @@ func (token *Token) Insert() error {
 }
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
+// 注意：该方法不再自动更新 remain_quota/used_quota 列。这些由结算链路以 SQL 相对更新维护
+// (remain_quota = remain_quota - ?, used_quota = used_quota + ?)。管理端若需明确修改额度，应调用
+// UpdateWithExplicitRemainQuota；否则本方法只覆盖非计费字段，防止把编辑表单的陈旧快照写回余额。
 func (token *Token) Update() (err error) {
 	defer func() {
 		if shouldUpdateRedis(true, err) {
@@ -294,8 +297,42 @@ func (token *Token) Update() (err error) {
 			})
 		}
 	}()
-	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
+	// Editable columns that are safe to overwrite from the caller snapshot; exclude
+	// remain_quota/used_quota which must only change through SQL relative updates.
+	err = DB.Model(token).Select(
+		"name", "status", "expired_time", "unlimited_quota",
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry",
+	).Updates(token).Error
+	if err != nil {
+		return err
+	}
+	// 本次更新不写计费列，缓存回写前重新读取，避免把调用方快照里的陈旧余额
+	// 覆盖到 Redis（结算链路用 HINCRBY 维护缓存余额，与 DB 相对更新对应）。
+	if refreshErr := DB.Model(&Token{}).Where("id = ?", token.Id).
+		Select("remain_quota", "used_quota").Take(token).Error; refreshErr != nil {
+		common.SysLog("failed to refresh token billing columns before cache write: " + refreshErr.Error())
+	}
+	return nil
+}
+
+// UpdateWithExplicitRemainQuota 管理端明确修改剩余额度时使用；参数已在前端或 API
+// 校验过合法性。该路径会覆盖 remain_quota 并写回 Redis（含可能陈旧的快照值），因此仅当
+// 用户显式提交额度变更时调用。
+func (token *Token) UpdateWithExplicitRemainQuota() (err error) {
+	defer func() {
+		if shouldUpdateRedis(true, err) {
+			gopool.Go(func() {
+				err := cacheSetToken(*token)
+				if err != nil {
+					common.SysLog("failed to update token cache: " + err.Error())
+				}
+			})
+		}
+	}()
+	err = DB.Model(token).Select(
+		"name", "status", "expired_time", "remain_quota", "unlimited_quota",
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry",
+	).Updates(token).Error
 	return err
 }
 

@@ -253,36 +253,57 @@ func DeleteToken(c *gin.Context) {
 	})
 }
 
+// tokenUpdateRequest maps to the API contract for /api/token/ PUT.
+// RemainQuota is *int so we can distinguish "client omitted the field" from "explicit 0".
+// This enables safe edits that don't touch quota columns, preventing stale snapshots
+// from restoring consumed balances (the drawer loads once on open; saving without changes
+// must not revert quota).
+type tokenUpdateRequest struct {
+	Id                 int     `json:"id"`
+	Name               string  `json:"name"`
+	Status             int     `json:"status"`
+	ExpiredTime        int64   `json:"expired_time"`
+	RemainQuotaPtr     *int    `json:"remain_quota"`
+	UnlimitedQuota     bool    `json:"unlimited_quota"`
+	ModelLimitsEnabled bool    `json:"model_limits_enabled"`
+	ModelLimits        string  `json:"model_limits"`
+	AllowIps           *string `json:"allow_ips"`
+	Group              string  `json:"group"`
+	CrossGroupRetry    bool    `json:"cross_group_retry"`
+}
+
 func UpdateToken(c *gin.Context) {
 	userId := c.GetInt("id")
 	statusOnly := c.Query("status_only")
-	token := model.Token{}
-	err := c.ShouldBindJSON(&token)
+	var req tokenUpdateRequest
+	err := c.ShouldBindJSON(&req)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if len(token.Name) > 50 {
+	if len(req.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
-	if !token.UnlimitedQuota {
-		if token.RemainQuota < 0 {
+	// 余额校验：只有当客户端显式提交 remain_quota 时才有意义（指针非空）。
+	if req.RemainQuotaPtr != nil && !req.UnlimitedQuota {
+		quotaVal := *req.RemainQuotaPtr
+		if quotaVal < 0 {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
 			return
 		}
 		maxQuotaValue := int((1000000000 * common.QuotaPerUnit))
-		if token.RemainQuota > maxQuotaValue {
+		if quotaVal > maxQuotaValue {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
 			return
 		}
 	}
-	cleanToken, err := model.GetTokenByIds(token.Id, userId)
+	cleanToken, err := model.GetTokenByIds(req.Id, userId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if token.Status == common.TokenStatusEnabled {
+	if req.Status == common.TokenStatusEnabled {
 		if cleanToken.Status == common.TokenStatusExpired && cleanToken.ExpiredTime <= common.GetTimestamp() && cleanToken.ExpiredTime != -1 {
 			common.ApiErrorI18n(c, i18n.MsgTokenExpiredCannotEnable)
 			return
@@ -293,24 +314,30 @@ func UpdateToken(c *gin.Context) {
 		}
 	}
 	if statusOnly != "" {
-		cleanToken.Status = token.Status
+		cleanToken.Status = req.Status
 	} else {
 		// If you add more fields, please also update token.Update()
-		if err := validateTokenGroup(c, token.Group); err != nil {
+		if err := validateTokenGroup(c, req.Group); err != nil {
 			common.ApiError(c, err)
 			return
 		}
-		cleanToken.Name = token.Name
-		cleanToken.ExpiredTime = token.ExpiredTime
-		cleanToken.RemainQuota = token.RemainQuota
-		cleanToken.UnlimitedQuota = token.UnlimitedQuota
-		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
-		cleanToken.ModelLimits = token.ModelLimits
-		cleanToken.AllowIps = token.AllowIps
-		cleanToken.Group = token.Group
-		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		cleanToken.Name = req.Name
+		cleanToken.ExpiredTime = req.ExpiredTime
+		if req.RemainQuotaPtr != nil {
+			cleanToken.RemainQuota = *req.RemainQuotaPtr
+		}
+		cleanToken.UnlimitedQuota = req.UnlimitedQuota
+		cleanToken.ModelLimitsEnabled = req.ModelLimitsEnabled
+		cleanToken.ModelLimits = req.ModelLimits
+		cleanToken.AllowIps = req.AllowIps
+		cleanToken.Group = req.Group
+		cleanToken.CrossGroupRetry = req.CrossGroupRetry
 	}
-	err = cleanToken.Update()
+	if req.RemainQuotaPtr != nil && statusOnly == "" {
+		err = cleanToken.UpdateWithExplicitRemainQuota()
+	} else {
+		err = cleanToken.Update()
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return
