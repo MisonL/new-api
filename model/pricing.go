@@ -129,16 +129,33 @@ func resolvePricing(model string) Pricing {
 	return pricing
 }
 
+// recordPricingRefreshFailure 记录一次失败的刷新尝试。缓存本身保持不动：失败
+// 的刷新不该覆盖上一份正确数据。时间戳前进，使已发布过缓存的实例按正常 TTL
+// （1 分钟）重试，而不是每个请求都重打一次数据库。
+//
+// 调用方已持有 updatePricingLock（GetPricing/GetVendors/RefreshPricing 都在
+// 锁内调用 updatePricing），这里不能再取锁，否则自死锁。
+func recordPricingRefreshFailure() {
+	lastGetPricingTime = time.Now()
+}
+
 func updatePricing() {
 	//modelRatios := common.GetModelRatios()
 	enableAbilities, err := GetAllEnableAbilityWithChannels()
 	if err != nil {
 		common.SysLog(fmt.Sprintf("GetAllEnableAbilityWithChannels error: %v", err))
+		recordPricingRefreshFailure()
 		return
 	}
-	// 预加载模型元数据与供应商一次，避免循环查询
+	// 预加载模型元数据与供应商一次，避免循环查询。
+	// 查询失败不能当成"没有元数据"继续构建：那样会用一份缺少描述与供应商的
+	// 列表覆盖上一份正确缓存。失败时保留旧缓存，只记录错误。
 	var allMeta []Model
-	_ = DB.Find(&allMeta).Error
+	if err := DB.Find(&allMeta).Error; err != nil {
+		common.SysLog(fmt.Sprintf("failed to load model metadata for pricing: %v", err))
+		recordPricingRefreshFailure()
+		return
+	}
 	metaMap := make(map[string]*Model)
 	prefixList := make([]*Model, 0)
 	suffixList := make([]*Model, 0)
@@ -190,7 +207,11 @@ func updatePricing() {
 
 	// 预加载供应商
 	var vendors []Vendor
-	_ = DB.Find(&vendors).Error
+	if err := DB.Find(&vendors).Error; err != nil {
+		common.SysLog(fmt.Sprintf("failed to load vendors for pricing: %v", err))
+		recordPricingRefreshFailure()
+		return
+	}
 	vendorMap := make(map[int]*Vendor)
 	for i := range vendors {
 		vendorMap[vendors[i].Id] = &vendors[i]

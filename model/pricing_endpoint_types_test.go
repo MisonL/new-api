@@ -35,7 +35,9 @@ func setupPricingEndpointTypesTestDB(t *testing.T) *gorm.DB {
 
 	DB = db
 	LOG_DB = db
-	require.NoError(t, DB.AutoMigrate(&Channel{}, &Ability{}, &Model{}))
+	// Vendor 是 updatePricing 的第二个预加载表。真实库一定有它；fixture 缺表会
+	// 让刷新在供应商查询处失败，测试于是测不到定价构建本身。
+	require.NoError(t, DB.AutoMigrate(&Channel{}, &Ability{}, &Model{}, &Vendor{}))
 	InvalidatePricingCache()
 
 	t.Cleanup(func() {

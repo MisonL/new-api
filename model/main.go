@@ -129,7 +129,11 @@ func createRootAccountIfNeed() error {
 			AccessToken: nil,
 			Quota:       100000000,
 		}
-		DB.Create(&rootUser)
+		// 建号失败必须向上返回：吞掉错误时初始化流程认为 root 账号已就绪，
+		// 之后所有 root 登录都会失败，且没有留下任何线索。
+		if err := DB.Create(&rootUser).Error; err != nil {
+			return fmt.Errorf("failed to create root user: %w", err)
+		}
 	}
 	return nil
 }
