@@ -186,3 +186,26 @@ func TestOaiStreamHandlerMapsTerminalErrorFrameWithoutDone(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode,
 		"a terminal rate-limit error frame must map to 429, not 502")
 }
+
+// 帧级配额错误必须允许换渠道重试：上游账号配额耗尽是渠道级故障，不是客户端
+// 请求的问题。是否真的重放由控制器的 shouldRetry 决定（它已经用 stream prelude
+// 提交标记挡住了"内容已下发"的情况）。这里锁定的是 handler 不得再单方面标记
+// skip-retry，否则配置里的重试状态码对带内错误帧永远不生效。
+func TestOaiStreamHandlerQuotaErrorFrameIsNotMarkedSkipRetry(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	body := buildErrorFrameStream(
+		`{"error":{"message":"积分不足，请充值或兑换","type":"insufficient_quota","code":"insufficient_quota"}}`,
+	)
+	info := newErrorFrameRelayInfo()
+
+	usage, apiErr := OaiStreamHandler(c, info, newErrorFrameResponse(body))
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusPaymentRequired, apiErr.StatusCode)
+	require.False(t, types.IsSkipRetryError(apiErr),
+		"带内配额错误帧必须交给重试策略判断，不能在 handler 里被钉成终态")
+}
