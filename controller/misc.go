@@ -215,14 +215,14 @@ func TestStatus(c *gin.Context) {
 
 func GetStatus(c *gin.Context) {
 	serverAddress := resolveServerAddressForRequest(c.Request)
-	cs := console_setting.GetConsoleSetting()
+	cs := console_setting.ConsoleSettingSnapshot()
 	customProviders := getCustomOAuthStatusPayload()
 	generalSettings := operation_setting.GetGeneralSettingSnapshot()
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 
 	passkeySetting := system_setting.GetPasskeySettingsForServerAddress(serverAddress)
-	legalSetting := system_setting.GetLegalSettings()
+	legalSetting := system_setting.LegalSettingsSnapshot()
 
 	data := gin.H{
 		"version":                     common.Version,
@@ -230,14 +230,14 @@ func GetStatus(c *gin.Context) {
 		"email_verification":          common.EmailVerificationEnabled,
 		"github_oauth":                common.GitHubOAuthEnabled,
 		"github_client_id":            common.GitHubClientId,
-		"discord_oauth":               system_setting.GetDiscordSettings().Enabled,
-		"discord_client_id":           system_setting.GetDiscordSettings().ClientId,
+		"discord_oauth":               system_setting.DiscordSettingsSnapshot().Enabled,
+		"discord_client_id":           system_setting.DiscordSettingsSnapshot().ClientId,
 		"linuxdo_oauth":               common.LinuxDOOAuthEnabled,
 		"linuxdo_client_id":           common.LinuxDOClientId,
 		"linuxdo_minimum_trust_level": common.LinuxDOMinimumTrustLevel,
 		"telegram_oauth":              common.TelegramOAuthEnabled,
 		"telegram_bot_name":           common.TelegramBotName,
-		"theme":                       system_setting.GetThemeSettings().Frontend,
+		"theme":                       system_setting.ThemeSettingsSnapshot().Frontend,
 		"system_name":                 common.SystemName,
 		"logo":                        common.Logo,
 		"footer_html":                 common.Footer,
@@ -285,9 +285,9 @@ func GetStatus(c *gin.Context) {
 		"HeaderNavModules":    common.OptionMap["HeaderNavModules"],
 		"SidebarModulesAdmin": common.OptionMap["SidebarModulesAdmin"],
 
-		"oidc_enabled":                system_setting.GetOIDCSettings().Enabled,
-		"oidc_client_id":              system_setting.GetOIDCSettings().ClientId,
-		"oidc_authorization_endpoint": system_setting.GetOIDCSettings().AuthorizationEndpoint,
+		"oidc_enabled":                system_setting.OIDCSettingsSnapshot().Enabled,
+		"oidc_client_id":              system_setting.OIDCSettingsSnapshot().ClientId,
+		"oidc_authorization_endpoint": system_setting.OIDCSettingsSnapshot().AuthorizationEndpoint,
 		"passkey_login":               passkeySetting.Enabled,
 		"passkey_display_name":        passkeySetting.RPDisplayName,
 		"passkey_rp_id":               passkeySetting.RPID,
@@ -298,7 +298,7 @@ func GetStatus(c *gin.Context) {
 		"setup":                       constant.Setup,
 		"user_agreement_enabled":      legalSetting.UserAgreement != "",
 		"privacy_policy_enabled":      legalSetting.PrivacyPolicy != "",
-		"checkin_enabled":             operation_setting.GetCheckinSetting().Enabled,
+		"checkin_enabled":             operation_setting.CheckinSettingSnapshot().Enabled,
 	}
 
 	// 根据启用状态注入可选内容
@@ -351,7 +351,7 @@ func GetUserAgreement(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    system_setting.GetLegalSettings().UserAgreement,
+		"data":    system_setting.LegalSettingsSnapshot().UserAgreement,
 	})
 	return
 }
@@ -360,7 +360,7 @@ func GetPrivacyPolicy(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    system_setting.GetLegalSettings().PrivacyPolicy,
+		"data":    system_setting.LegalSettingsSnapshot().PrivacyPolicy,
 	})
 	return
 }

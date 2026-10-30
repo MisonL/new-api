@@ -412,6 +412,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
+	// 一次转换取一份配置快照，避免 max_tokens 与 thinking 预算读到两代配置。
+	claudeSettings := model_setting.ClaudeSettingsSnapshot()
+
 	for _, tool := range textRequest.Tools {
 		toolType := strings.TrimSpace(tool.Type)
 		if toolType != "" && toolType != "function" {
@@ -516,7 +519,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	}
 
 	if claudeRequest.MaxTokens == nil || *claudeRequest.MaxTokens == 0 {
-		defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(textRequest.Model))
+		defaultMaxTokens := uint(claudeSettings.GetDefaultMaxTokens(textRequest.Model))
 		claudeRequest.MaxTokens = &defaultMaxTokens
 	}
 
@@ -538,7 +541,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 			claudeRequest.TopP = nil
 			claudeRequest.Temperature = common.GetPointer[float64](1.0)
 		}
-	} else if model_setting.GetClaudeSettings().ThinkingAdapterEnabled &&
+	} else if claudeSettings.ThinkingAdapterEnabled &&
 		strings.HasSuffix(textRequest.Model, "-thinking") {
 
 		trimmedModel := strings.TrimSuffix(textRequest.Model, "-thinking")
@@ -558,7 +561,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 			// BudgetTokens 为 max_tokens 的 80%
 			claudeRequest.Thinking = &dto.Thinking{
 				Type:         "enabled",
-				BudgetTokens: common.GetPointer[int](int(float64(*claudeRequest.MaxTokens) * model_setting.GetClaudeSettings().ThinkingAdapterBudgetTokensPercentage)),
+				BudgetTokens: common.GetPointer[int](int(float64(*claudeRequest.MaxTokens) * claudeSettings.ThinkingAdapterBudgetTokensPercentage)),
 			}
 			// Extended thinking requires default sampling knobs except temperature=1.0.
 			// See Anthropic extended-thinking important considerations.

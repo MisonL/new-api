@@ -161,7 +161,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "discord.enabled":
-		if optionValueEnabled(option.Value) && system_setting.GetDiscordSettings().ClientId == "" {
+		if optionValueEnabled(option.Value) && system_setting.DiscordSettingsSnapshot().ClientId == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 Discord OAuth，请先填入 Discord Client Id 以及 Discord Client Secret！",
@@ -169,7 +169,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "oidc.enabled":
-		if optionValueEnabled(option.Value) && system_setting.GetOIDCSettings().ClientId == "" {
+		if optionValueEnabled(option.Value) && system_setting.OIDCSettingsSnapshot().ClientId == "" {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法启用 OIDC 登录，请先填入 OIDC Client Id 以及 OIDC Client Secret！",

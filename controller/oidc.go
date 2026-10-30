@@ -40,13 +40,13 @@ func getOidcUserInfoByCode(code string) (*OidcUser, error) {
 	}
 
 	values := url.Values{}
-	values.Set("client_id", system_setting.GetOIDCSettings().ClientId)
-	values.Set("client_secret", system_setting.GetOIDCSettings().ClientSecret)
+	values.Set("client_id", system_setting.OIDCSettingsSnapshot().ClientId)
+	values.Set("client_secret", system_setting.OIDCSettingsSnapshot().ClientSecret)
 	values.Set("code", code)
 	values.Set("grant_type", "authorization_code")
 	values.Set("redirect_uri", fmt.Sprintf("%s/oauth/oidc", system_setting.ServerAddress))
 	formData := values.Encode()
-	req, err := http.NewRequest("POST", system_setting.GetOIDCSettings().TokenEndpoint, strings.NewReader(formData))
+	req, err := http.NewRequest("POST", system_setting.OIDCSettingsSnapshot().TokenEndpoint, strings.NewReader(formData))
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func getOidcUserInfoByCode(code string) (*OidcUser, error) {
 		return nil, errors.New("OIDC 获取 Token 失败，请检查设置！")
 	}
 
-	req, err = http.NewRequest("GET", system_setting.GetOIDCSettings().UserInfoEndpoint, nil)
+	req, err = http.NewRequest("GET", system_setting.OIDCSettingsSnapshot().UserInfoEndpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func OidcAuth(c *gin.Context) {
 		OidcBind(c)
 		return
 	}
-	if !system_setting.GetOIDCSettings().Enabled {
+	if !system_setting.OIDCSettingsSnapshot().Enabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "管理员未开启通过 OIDC 登录以及注册",
@@ -181,7 +181,7 @@ func OidcAuth(c *gin.Context) {
 }
 
 func OidcBind(c *gin.Context) {
-	if !system_setting.GetOIDCSettings().Enabled {
+	if !system_setting.OIDCSettingsSnapshot().Enabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "管理员未开启通过 OIDC 登录以及注册",

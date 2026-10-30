@@ -121,7 +121,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	}
 
 	// check if free model pre-consume is disabled
-	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
+	if !operation_setting.FreeModelPreConsumeEnabled() {
 		// if model price or ratio is 0, do not pre-consume quota
 		if groupRatioInfo.GroupRatio == 0 {
 			preConsumedQuota = 0
@@ -195,7 +195,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 
 	if usePrice {
 		quota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
-		if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
+		if !operation_setting.FreeModelPreConsumeEnabled() {
 			if groupRatioInfo.GroupRatio == 0 || modelPrice == 0 {
 				quota = 0
 				freeModel = true
@@ -205,7 +205,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 		// 按量计费：以模型倍率的一半作为预扣额度
 		quota = int(modelRatio / 2 * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
 		modelPrice = -1
-		if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
+		if !operation_setting.FreeModelPreConsumeEnabled() {
 			if groupRatioInfo.GroupRatio == 0 || modelRatio == 0 {
 				quota = 0
 				freeModel = true
@@ -268,7 +268,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 	preConsumedQuota := billingexpr.QuotaRound(quotaBeforeGroup * groupRatioInfo.GroupRatio)
 
 	freeModel := false
-	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
+	if !operation_setting.FreeModelPreConsumeEnabled() {
 		if groupRatioInfo.GroupRatio == 0 {
 			preConsumedQuota = 0
 			freeModel = true

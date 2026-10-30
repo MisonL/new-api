@@ -33,7 +33,16 @@ func init() {
 	config.GlobalConfig.Register("console_setting", &consoleSetting)
 }
 
-// GetConsoleSetting 获取 ConsoleSetting 配置实例
+// GetConsoleSetting 指针 getter 只保留给测试播种配置；生产代码读
+// ConsoleSettingSnapshot，避免与写锁内的逐字段重写构成数据竞争。
 func GetConsoleSetting() *ConsoleSetting {
 	return &consoleSetting
+}
+
+// ConsoleSettingSnapshot 返回当前控制台配置的浅拷贝。字段均为标量，浅拷贝即完整。
+func ConsoleSettingSnapshot() ConsoleSetting {
+	if snapshot, ok := config.SnapshotOf[ConsoleSetting]("console_setting"); ok {
+		return snapshot
+	}
+	return consoleSetting
 }

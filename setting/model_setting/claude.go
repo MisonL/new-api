@@ -40,10 +40,34 @@ func init() {
 }
 
 // GetClaudeSettings 获取Claude配置
+//
+// 直接读包级变量会与管理端 Update 在写锁内的逐字段重写构成数据竞争。生产代码
+// 一律走 readClaudeSettings / ClaudeSettingsSnapshot；这个指针 getter 只保留给
+// 测试用于播种配置。
 func GetClaudeSettings() *ClaudeSettings {
 	// 缺省键的兜底不再就地写 map：并发读时写入是 fatal error（不可恢复），
 	// 兜底常量由 GetDefaultMaxTokens 在读取路径返回。
 	return &claudeSettings
+}
+
+// readClaudeSettings 在配置管理器读锁内把当前配置交给 fn。写入方发布全新的
+// map，旧对象替换后不再被改写，因此在锁内复制 map 头后在锁外读取是安全的。
+func readClaudeSettings(fn func(*ClaudeSettings)) {
+	if fn == nil {
+		return
+	}
+	if !config.ReadLiveAs("claude", fn) {
+		fn(&claudeSettings)
+	}
+}
+
+// ClaudeSettingsSnapshot 返回当前 Claude 配置的浅拷贝。map 字段在写入时整体
+// 替换，旧 map 不再被改写，浅拷贝足以让调用方在锁外安全读取。
+func ClaudeSettingsSnapshot() ClaudeSettings {
+	if snapshot, ok := config.SnapshotOf[ClaudeSettings]("claude"); ok {
+		return snapshot
+	}
+	return claudeSettings
 }
 
 // credentialHeaderNames are headers whose value is a single credential rather

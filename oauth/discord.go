@@ -43,7 +43,7 @@ func (p *DiscordProvider) GetName() string {
 }
 
 func (p *DiscordProvider) IsEnabled() bool {
-	return system_setting.GetDiscordSettings().Enabled
+	return system_setting.DiscordSettingsSnapshot().Enabled
 }
 
 func (p *DiscordProvider) ExchangeToken(ctx context.Context, code string, c *gin.Context) (*OAuthToken, error) {
@@ -53,7 +53,7 @@ func (p *DiscordProvider) ExchangeToken(ctx context.Context, code string, c *gin
 
 	logger.LogDebug(ctx, "[OAuth-Discord] ExchangeToken: code=%s...", code[:min(len(code), 10)])
 
-	settings := system_setting.GetDiscordSettings()
+	settings := system_setting.DiscordSettingsSnapshot()
 	redirectUri := fmt.Sprintf("%s/oauth/discord", system_setting.ServerAddress)
 	values := url.Values{}
 	values.Set("client_id", settings.ClientId)

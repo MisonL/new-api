@@ -85,7 +85,7 @@ type ChannelAffinityCacheStats struct {
 
 func getChannelAffinityCache() *cachex.HybridCache[int] {
 	channelAffinityCacheOnce.Do(func() {
-		setting := operation_setting.GetChannelAffinitySetting()
+		setting := operation_setting.ChannelAffinitySettingSnapshot()
 		capacity := setting.MaxEntries
 		if capacity <= 0 {
 			capacity = 100_000
@@ -119,15 +119,7 @@ func getChannelAffinityCache() *cachex.HybridCache[int] {
 }
 
 func GetChannelAffinityCacheStats() ChannelAffinityCacheStats {
-	setting := operation_setting.GetChannelAffinitySetting()
-	if setting == nil {
-		return ChannelAffinityCacheStats{
-			Enabled:    false,
-			Total:      0,
-			Unknown:    0,
-			ByRuleName: map[string]int{},
-		}
-	}
+	setting := operation_setting.ChannelAffinitySettingSnapshot()
 
 	cache := getChannelAffinityCache()
 	mainCap, _ := cache.Capacity()
@@ -226,10 +218,7 @@ func ClearChannelAffinityCacheByRuleName(ruleName string) (int, error) {
 		return 0, fmt.Errorf("rule_name 不能为空")
 	}
 
-	setting := operation_setting.GetChannelAffinitySetting()
-	if setting == nil {
-		return 0, fmt.Errorf("channel_affinity_setting 未初始化")
-	}
+	setting := operation_setting.ChannelAffinitySettingSnapshot()
 
 	var matchedRule *operation_setting.ChannelAffinityRule
 	for i := range setting.Rules {
@@ -618,8 +607,8 @@ func ApplyChannelAffinityOverrideTemplate(c *gin.Context, paramOverride map[stri
 }
 
 func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup string) (int, bool) {
-	setting := operation_setting.GetChannelAffinitySetting()
-	if setting == nil || !setting.Enabled {
+	setting := operation_setting.ChannelAffinitySettingSnapshot()
+	if !setting.Enabled {
 		return 0, false
 	}
 	path := ""
@@ -675,9 +664,9 @@ func getPreferredChannelByAffinityValue(c *gin.Context, rule operation_setting.C
 		return 0, false
 	}
 	sourceType := strings.TrimSpace(usedSource.Type)
-	setting := operation_setting.GetChannelAffinitySetting()
+	setting := operation_setting.ChannelAffinitySettingSnapshot()
 	ttlSeconds := rule.TTLSeconds
-	if setting != nil && ttlSeconds <= 0 {
+	if ttlSeconds <= 0 {
 		ttlSeconds = setting.DefaultTTLSeconds
 	}
 	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
@@ -785,8 +774,8 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	if channelID <= 0 {
 		return
 	}
-	setting := operation_setting.GetChannelAffinitySetting()
-	if setting == nil || !setting.Enabled {
+	setting := operation_setting.ChannelAffinitySettingSnapshot()
+	if !setting.Enabled {
 		return
 	}
 	if setting.SwitchOnSuccess && c != nil {
@@ -821,8 +810,8 @@ func RecordResponsesEncryptedContentAffinityWithStatus(c *gin.Context, responseB
 	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
 		return
 	}
-	setting := operation_setting.GetChannelAffinitySetting()
-	if setting == nil || !setting.Enabled {
+	setting := operation_setting.ChannelAffinitySettingSnapshot()
+	if !setting.Enabled {
 		return
 	}
 	requestPath := ""
@@ -948,7 +937,7 @@ func responsesEncryptedContentValues(value gjson.Result) []string {
 	return values
 }
 
-func recordResponsesEncryptedContentAffinityValue(setting *operation_setting.ChannelAffinitySetting, modelName string, usingGroup string, path string, userAgent string, valueFingerprint string, channelID int) {
+func recordResponsesEncryptedContentAffinityValue(setting operation_setting.ChannelAffinitySetting, modelName string, usingGroup string, path string, userAgent string, valueFingerprint string, channelID int) {
 	if valueFingerprint == "" {
 		return
 	}
@@ -1210,16 +1199,14 @@ func usageTotalTokens(usage *dto.Usage) int {
 
 func getChannelAffinityUsageCacheStatsCache() *cachex.HybridCache[ChannelAffinityUsageCacheCounters] {
 	channelAffinityUsageCacheStatsOnce.Do(func() {
-		setting := operation_setting.GetChannelAffinitySetting()
+		setting := operation_setting.ChannelAffinitySettingSnapshot()
 		capacity := 100_000
 		defaultTTLSeconds := 3600
-		if setting != nil {
-			if setting.MaxEntries > 0 {
-				capacity = setting.MaxEntries
-			}
-			if setting.DefaultTTLSeconds > 0 {
-				defaultTTLSeconds = setting.DefaultTTLSeconds
-			}
+		if setting.MaxEntries > 0 {
+			capacity = setting.MaxEntries
+		}
+		if setting.DefaultTTLSeconds > 0 {
+			defaultTTLSeconds = setting.DefaultTTLSeconds
 		}
 
 		channelAffinityUsageCacheStatsCache = cachex.NewHybridCache[ChannelAffinityUsageCacheCounters](cachex.HybridCacheConfig[ChannelAffinityUsageCacheCounters]{

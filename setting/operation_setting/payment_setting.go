@@ -18,6 +18,17 @@ func init() {
 	config.GlobalConfig.Register("payment_setting", &paymentSetting)
 }
 
+// GetPaymentSetting 指针 getter 只保留给测试播种配置；生产代码读
+// PaymentSettingSnapshot，避免与写锁内的逐字段重写构成数据竞争。
 func GetPaymentSetting() *PaymentSetting {
 	return &paymentSetting
+}
+
+// PaymentSettingSnapshot 返回当前支付配置的浅拷贝。slice/map 字段在写入时
+// 整体替换，旧对象不再被改写，浅拷贝足以让调用方在锁外安全读取。
+func PaymentSettingSnapshot() PaymentSetting {
+	if snapshot, ok := config.SnapshotOf[PaymentSetting]("payment_setting"); ok {
+		return snapshot
+	}
+	return paymentSetting
 }

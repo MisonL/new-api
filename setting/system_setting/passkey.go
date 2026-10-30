@@ -90,7 +90,7 @@ func isPasskeyDerivableLoopbackHost(host string) bool {
 }
 
 func GetPasskeySettingsForServerAddress(serverAddr string) *PasskeySettings {
-	settings := defaultPasskeySettings
+	settings := PasskeySettingsSnapshot()
 
 	if canDerivePasskeyFromServerAddress(serverAddr) {
 		derivedServerAddress := strings.TrimSpace(serverAddr)
@@ -103,6 +103,15 @@ func GetPasskeySettingsForServerAddress(serverAddr string) *PasskeySettings {
 	}
 
 	return &settings
+}
+
+// PasskeySettingsSnapshot 返回当前 Passkey 配置的浅拷贝。生产读取走这里，
+// 直接读包级变量会与管理端 Update 的逐字段重写构成数据竞争。
+func PasskeySettingsSnapshot() PasskeySettings {
+	if snapshot, ok := config.SnapshotOf[PasskeySettings]("passkey"); ok {
+		return snapshot
+	}
+	return defaultPasskeySettings
 }
 
 func GetPasskeySettings() *PasskeySettings {

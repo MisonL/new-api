@@ -1476,18 +1476,18 @@ func AutomaticallyTestChannels() {
 	}
 	autoTestChannelsOnce.Do(func() {
 		for {
-			if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
+			if !operation_setting.MonitorSettingSnapshot().AutoTestChannelEnabled {
 				time.Sleep(1 * time.Minute)
 				continue
 			}
 			for {
-				frequency := operation_setting.GetMonitorSetting().AutoTestChannelMinutes
+				frequency := operation_setting.MonitorSettingSnapshot().AutoTestChannelMinutes
 				time.Sleep(time.Duration(int(math.Round(frequency))) * time.Minute)
 				common.SysLog(fmt.Sprintf("automatically test channels with interval %f minutes", frequency))
 				common.SysLog("automatically testing all channels")
 				_ = testAllChannels(false)
 				common.SysLog("automatically channel test finished")
-				if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
+				if !operation_setting.MonitorSettingSnapshot().AutoTestChannelEnabled {
 					break
 				}
 			}

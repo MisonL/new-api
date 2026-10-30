@@ -215,6 +215,17 @@ func init() {
 	config.GlobalConfig.Register("channel_affinity_setting", &channelAffinitySetting)
 }
 
+// GetChannelAffinitySetting 指针 getter 只保留给测试播种配置；生产代码读
+// ChannelAffinitySettingSnapshot，避免与写锁内的逐字段重写构成数据竞争。
 func GetChannelAffinitySetting() *ChannelAffinitySetting {
 	return &channelAffinitySetting
+}
+
+// ChannelAffinitySettingSnapshot 返回当前渠道亲和配置的浅拷贝。Rules 切片在
+// 写入时整体替换，旧切片不再被改写，浅拷贝足以让调用方在锁外安全读取。
+func ChannelAffinitySettingSnapshot() ChannelAffinitySetting {
+	if snapshot, ok := config.SnapshotOf[ChannelAffinitySetting]("channel_affinity_setting"); ok {
+		return snapshot
+	}
+	return channelAffinitySetting
 }

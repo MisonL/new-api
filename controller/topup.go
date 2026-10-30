@@ -91,6 +91,9 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	// 金额档位与折扣取自同一份快照：各取一次时热更新可能让前端拿到两代配置。
+	paymentSetting := operation_setting.PaymentSettingSnapshot()
+
 	data := gin.H{
 		"enable_online_topup":        isEpayTopUpEnabled(),
 		"enable_stripe_topup":        isStripeTopUpEnabled(),
@@ -109,8 +112,8 @@ func GetTopUpInfo(c *gin.Context) {
 		"stripe_min_topup":        setting.StripeMinTopUp,
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
-		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
+		"amount_options":          paymentSetting.AmountOptions,
+		"discount":                paymentSetting.AmountDiscount,
 		"topup_link":              common.TopUpLink,
 	}
 	common.ApiSuccess(c, data)
@@ -157,7 +160,7 @@ func getPayMoney(amount int64, group string) float64 {
 	dPrice := decimal.NewFromFloat(operation_setting.Price)
 	// apply optional preset discount by the original request amount (if configured), default 1.0
 	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]; ok {
+	if ds, ok := operation_setting.PaymentSettingSnapshot().AmountDiscount[int(amount)]; ok {
 		if ds > 0 {
 			discount = ds
 		}

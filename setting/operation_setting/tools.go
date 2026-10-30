@@ -98,14 +98,23 @@ func ValidateToolPriceJSON(raw string) error {
 // RebuildToolPriceIndex rebuilds the lookup index from the current config.
 // Called on init and after config updates. Not on the billing hot path.
 func RebuildToolPriceIndex() {
-	merged := make(map[string]float64, len(defaultToolPrices)+len(defaultToolPriceOverrides)+len(toolPriceSetting.Prices))
+	// 在配置管理器读锁内取 prices：这个函数在 Update 返回之后才被调用，此时
+	// 另一个并发 Update 可能正在改写包级结构体，直接遍历 map 是数据竞争。
+	var prices map[string]float64
+	if snapshot, ok := config.SnapshotOf[ToolPriceSetting]("tool_price_setting"); ok {
+		prices = snapshot.Prices
+	} else {
+		prices = toolPriceSetting.Prices
+	}
+
+	merged := make(map[string]float64, len(defaultToolPrices)+len(defaultToolPriceOverrides)+len(prices))
 	for k, v := range defaultToolPrices {
 		merged[k] = v
 	}
 	for k, v := range defaultToolPriceOverrides {
 		merged[k] = v
 	}
-	for k, v := range toolPriceSetting.Prices {
+	for k, v := range prices {
 		merged[k] = v
 	}
 

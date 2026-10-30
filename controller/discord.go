@@ -38,8 +38,8 @@ func getDiscordUserInfoByCode(code string) (*DiscordUser, error) {
 	}
 
 	values := url.Values{}
-	values.Set("client_id", system_setting.GetDiscordSettings().ClientId)
-	values.Set("client_secret", system_setting.GetDiscordSettings().ClientSecret)
+	values.Set("client_id", system_setting.DiscordSettingsSnapshot().ClientId)
+	values.Set("client_secret", system_setting.DiscordSettingsSnapshot().ClientSecret)
 	values.Set("code", code)
 	values.Set("grant_type", "authorization_code")
 	values.Set("redirect_uri", fmt.Sprintf("%s/oauth/discord", system_setting.ServerAddress))
@@ -113,7 +113,7 @@ func DiscordOAuth(c *gin.Context) {
 		DiscordBind(c)
 		return
 	}
-	if !system_setting.GetDiscordSettings().Enabled {
+	if !system_setting.DiscordSettingsSnapshot().Enabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "管理员未开启通过 Discord 登录以及注册",
@@ -178,7 +178,7 @@ func DiscordOAuth(c *gin.Context) {
 }
 
 func DiscordBind(c *gin.Context) {
-	if !system_setting.GetDiscordSettings().Enabled {
+	if !system_setting.DiscordSettingsSnapshot().Enabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "管理员未开启通过 Discord 登录以及注册",

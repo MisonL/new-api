@@ -21,17 +21,27 @@ func init() {
 	config.GlobalConfig.Register("checkin_setting", &checkinSetting)
 }
 
-// GetCheckinSetting 获取签到配置
+// GetCheckinSetting 指针 getter 只保留给测试播种配置；生产代码读
+// CheckinSettingSnapshot，避免与写锁内的逐字段重写构成数据竞争。
 func GetCheckinSetting() *CheckinSetting {
 	return &checkinSetting
 }
 
+// CheckinSettingSnapshot 返回当前签到配置的浅拷贝。
+func CheckinSettingSnapshot() CheckinSetting {
+	if snapshot, ok := config.SnapshotOf[CheckinSetting]("checkin_setting"); ok {
+		return snapshot
+	}
+	return checkinSetting
+}
+
 // IsCheckinEnabled 是否启用签到功能
 func IsCheckinEnabled() bool {
-	return checkinSetting.Enabled
+	return CheckinSettingSnapshot().Enabled
 }
 
 // GetCheckinQuotaRange 获取签到额度范围
 func GetCheckinQuotaRange() (min, max int) {
-	return checkinSetting.MinQuota, checkinSetting.MaxQuota
+	snapshot := CheckinSettingSnapshot()
+	return snapshot.MinQuota, snapshot.MaxQuota
 }

@@ -59,7 +59,12 @@ func init() {
 	config.GlobalConfig.Register(ConfigName, &logRetentionSetting)
 }
 
+// GetLogRetentionSetting 返回当前日志保留配置的浅拷贝。直接返回包级变量的值
+// 会与管理端 Update 的逐字段重写构成数据竞争；字段均为标量，浅拷贝即完整。
 func GetLogRetentionSetting() LogRetentionSetting {
+	if snapshot, ok := config.SnapshotOf[LogRetentionSetting](ConfigName); ok {
+		return snapshot
+	}
 	return logRetentionSetting
 }
 

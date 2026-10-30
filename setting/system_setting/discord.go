@@ -16,6 +16,16 @@ func init() {
 	config.GlobalConfig.Register("discord", &defaultDiscordSettings)
 }
 
+// GetDiscordSettings 指针 getter 只保留给测试播种配置；生产代码读
+// DiscordSettingsSnapshot，避免与写锁内的逐字段重写构成数据竞争。
 func GetDiscordSettings() *DiscordSettings {
 	return &defaultDiscordSettings
+}
+
+// DiscordSettingsSnapshot 返回当前 Discord OAuth 配置的浅拷贝。
+func DiscordSettingsSnapshot() DiscordSettings {
+	if snapshot, ok := config.SnapshotOf[DiscordSettings]("discord"); ok {
+		return snapshot
+	}
+	return defaultDiscordSettings
 }

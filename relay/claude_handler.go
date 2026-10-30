@@ -47,8 +47,12 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 	adaptor.Init(info)
 
+	// 一次请求取一份配置快照：三次读取若各取一次，热更新可能让同一次请求用上
+	// 两代配置，max_tokens 与 thinking 预算就会对不同版本的系数。
+	claudeSettings := model_setting.ClaudeSettingsSnapshot()
+
 	if request.MaxTokens == nil || *request.MaxTokens == 0 {
-		defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
+		defaultMaxTokens := uint(claudeSettings.GetDefaultMaxTokens(request.Model))
 		request.MaxTokens = &defaultMaxTokens
 	}
 
@@ -70,7 +74,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			request.Temperature = common.GetPointer[float64](1.0)
 		}
 		info.UpstreamModelName = request.Model
-	} else if model_setting.GetClaudeSettings().ThinkingAdapterEnabled &&
+	} else if claudeSettings.ThinkingAdapterEnabled &&
 		strings.HasSuffix(request.Model, "-thinking") {
 		if request.Thinking == nil {
 			baseModel := strings.TrimSuffix(request.Model, "-thinking")
@@ -90,7 +94,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 				// BudgetTokens 为 max_tokens 的 80%
 				request.Thinking = &dto.Thinking{
 					Type:         "enabled",
-					BudgetTokens: common.GetPointer[int](int(float64(*request.MaxTokens) * model_setting.GetClaudeSettings().ThinkingAdapterBudgetTokensPercentage)),
+					BudgetTokens: common.GetPointer[int](int(float64(*request.MaxTokens) * claudeSettings.ThinkingAdapterBudgetTokensPercentage)),
 				}
 				// Extended thinking requires default sampling knobs except temperature=1.0.
 				// See Anthropic extended-thinking important considerations.

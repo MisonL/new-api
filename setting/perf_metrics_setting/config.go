@@ -20,12 +20,17 @@ func init() {
 	config.GlobalConfig.Register("perf_metrics_setting", &perfMetricsSetting)
 }
 
+// GetSetting 返回当前性能指标配置的浅拷贝。直接返回包级变量的值会与管理端
+// Update 的逐字段重写构成数据竞争；字段均为标量，浅拷贝即完整。
 func GetSetting() PerfMetricsSetting {
+	if snapshot, ok := config.SnapshotOf[PerfMetricsSetting]("perf_metrics_setting"); ok {
+		return snapshot
+	}
 	return perfMetricsSetting
 }
 
 func GetBucketSeconds() int64 {
-	switch perfMetricsSetting.BucketTime {
+	switch GetSetting().BucketTime {
 	case "minute":
 		return 60
 	case "5min":
@@ -38,8 +43,9 @@ func GetBucketSeconds() int64 {
 }
 
 func GetFlushIntervalMinutes() int {
-	if perfMetricsSetting.FlushInterval < 1 {
+	flushInterval := GetSetting().FlushInterval
+	if flushInterval < 1 {
 		return 1
 	}
-	return perfMetricsSetting.FlushInterval
+	return flushInterval
 }

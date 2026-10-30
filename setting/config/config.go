@@ -96,6 +96,39 @@ func (cm *ConfigManager) ReadLive(name string, fn func(config interface{})) bool
 	return true
 }
 
+// ReadLiveAs 是 ReadLive 的类型安全版本：在配置管理器读锁内把名为 name 的
+// 配置以 *T 交给 fn。模块未注册或注册类型不符时返回 false，由调用方决定
+// 回退到包级默认值。
+//
+// fn 在读锁内执行，只能读取对象：不能阻塞，也不能重入 ConfigManager。
+func ReadLiveAs[T any](name string, fn func(*T)) bool {
+	if fn == nil {
+		return false
+	}
+	delivered := false
+	GlobalConfig.ReadLive(name, func(cfg interface{}) {
+		if typed, ok := cfg.(*T); ok && typed != nil {
+			delivered = true
+			fn(typed)
+		}
+	})
+	return delivered
+}
+
+// SnapshotOf 返回名为 name 的已注册配置的浅拷贝，以及该模块是否已注册。写入
+// 方发布全新的 map/slice，旧对象替换后不再被改写，浅拷贝足以让调用方在锁外
+// 安全读取。
+//
+// 未注册时返回 ok=false，由调用方决定回退值。调用方不能把包级变量作为默认
+// 参数传进来：参数在调用前求值，那次无锁读本身就构成竞争。
+func SnapshotOf[T any](name string) (T, bool) {
+	var snapshot T
+	ok := ReadLiveAs[T](name, func(v *T) {
+		snapshot = *v
+	})
+	return snapshot, ok
+}
+
 // Update applies a map of "<field json tag>" -> string values to a registered
 // config module under the manager write lock.
 //

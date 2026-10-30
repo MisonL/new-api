@@ -112,8 +112,8 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
-	settings := model_setting.GetGrokSettings()
-	if settings == nil || !settings.ViolationDeductionEnabled {
+	settings := model_setting.GrokSettingsSnapshot()
+	if !settings.ViolationDeductionEnabled {
 		return false
 	}
 

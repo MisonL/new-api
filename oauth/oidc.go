@@ -45,7 +45,7 @@ func (p *OIDCProvider) GetName() string {
 }
 
 func (p *OIDCProvider) IsEnabled() bool {
-	return system_setting.GetOIDCSettings().Enabled
+	return system_setting.OIDCSettingsSnapshot().Enabled
 }
 
 func (p *OIDCProvider) ExchangeToken(ctx context.Context, code string, c *gin.Context) (*OAuthToken, error) {
@@ -55,7 +55,7 @@ func (p *OIDCProvider) ExchangeToken(ctx context.Context, code string, c *gin.Co
 
 	logger.LogDebug(ctx, "[OAuth-OIDC] ExchangeToken: code=%s...", code[:min(len(code), 10)])
 
-	settings := system_setting.GetOIDCSettings()
+	settings := system_setting.OIDCSettingsSnapshot()
 	redirectUri := fmt.Sprintf("%s/oauth/oidc", system_setting.ServerAddress)
 	values := url.Values{}
 	values.Set("client_id", settings.ClientId)
@@ -110,7 +110,7 @@ func (p *OIDCProvider) ExchangeToken(ctx context.Context, code string, c *gin.Co
 }
 
 func (p *OIDCProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*OAuthUser, error) {
-	settings := system_setting.GetOIDCSettings()
+	settings := system_setting.OIDCSettingsSnapshot()
 
 	logger.LogDebug(ctx, "[OAuth-OIDC] GetUserInfo: userinfo_endpoint=%s", settings.UserInfoEndpoint)
 

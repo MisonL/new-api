@@ -14,7 +14,7 @@ import (
 
 // GetCheckinStatus 获取用户签到状态和历史记录
 func GetCheckinStatus(c *gin.Context) {
-	setting := operation_setting.GetCheckinSetting()
+	setting := operation_setting.CheckinSettingSnapshot()
 	if !setting.Enabled {
 		common.ApiErrorMsg(c, "签到功能未启用")
 		return
@@ -43,7 +43,7 @@ func GetCheckinStatus(c *gin.Context) {
 
 // DoCheckin 执行用户签到
 func DoCheckin(c *gin.Context) {
-	setting := operation_setting.GetCheckinSetting()
+	setting := operation_setting.CheckinSettingSnapshot()
 	if !setting.Enabled {
 		common.ApiErrorMsg(c, "签到功能未启用")
 		return

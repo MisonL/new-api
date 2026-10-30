@@ -17,12 +17,16 @@ func init() {
 	config.GlobalConfig.Register("token_setting", &tokenSetting)
 }
 
-// GetTokenSetting 获取令牌配置
+// GetTokenSetting 指针 getter 只保留给测试播种配置；生产代码读
+// GetMaxUserTokens，它走锁内快照，避免与写锁内的逐字段重写构成数据竞争。
 func GetTokenSetting() *TokenSetting {
 	return &tokenSetting
 }
 
 // GetMaxUserTokens 获取每用户最大令牌数量
 func GetMaxUserTokens() int {
-	return GetTokenSetting().MaxUserTokens
+	if snapshot, ok := config.SnapshotOf[TokenSetting]("token_setting"); ok {
+		return snapshot.MaxUserTokens
+	}
+	return tokenSetting.MaxUserTokens
 }

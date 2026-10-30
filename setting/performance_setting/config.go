@@ -46,26 +46,37 @@ func init() {
 	syncToCommon()
 }
 
-// syncToCommon 将配置同步到 common 包
+// syncToCommon 将配置同步到 common 包。UpdateAndSync 在写锁释放之后调用，
+// 此时另一个并发 Update 可能正在改写包级结构体，所以这里取锁内快照。
 func syncToCommon() {
+	settings := PerformanceSettingSnapshot()
 	common.SetDiskCacheConfig(common.DiskCacheConfig{
-		Enabled:     performanceSetting.DiskCacheEnabled,
-		ThresholdMB: performanceSetting.DiskCacheThresholdMB,
-		MaxSizeMB:   performanceSetting.DiskCacheMaxSizeMB,
-		Path:        performanceSetting.DiskCachePath,
+		Enabled:     settings.DiskCacheEnabled,
+		ThresholdMB: settings.DiskCacheThresholdMB,
+		MaxSizeMB:   settings.DiskCacheMaxSizeMB,
+		Path:        settings.DiskCachePath,
 	})
 
 	common.SetPerformanceMonitorConfig(common.PerformanceMonitorConfig{
-		Enabled:         performanceSetting.MonitorEnabled,
-		CPUThreshold:    performanceSetting.MonitorCPUThreshold,
-		MemoryThreshold: performanceSetting.MonitorMemoryThreshold,
-		DiskThreshold:   performanceSetting.MonitorDiskThreshold,
+		Enabled:         settings.MonitorEnabled,
+		CPUThreshold:    settings.MonitorCPUThreshold,
+		MemoryThreshold: settings.MonitorMemoryThreshold,
+		DiskThreshold:   settings.MonitorDiskThreshold,
 	})
 }
 
-// GetPerformanceSetting 获取性能设置
+// GetPerformanceSetting 指针 getter 只保留给测试播种配置；生产代码读
+// PerformanceSettingSnapshot，避免与写锁内的逐字段重写构成数据竞争。
 func GetPerformanceSetting() *PerformanceSetting {
 	return &performanceSetting
+}
+
+// PerformanceSettingSnapshot 返回当前性能配置的浅拷贝。
+func PerformanceSettingSnapshot() PerformanceSetting {
+	if snapshot, ok := config.SnapshotOf[PerformanceSetting]("performance_setting"); ok {
+		return snapshot
+	}
+	return performanceSetting
 }
 
 // UpdateAndSync 更新配置并同步到 common 包

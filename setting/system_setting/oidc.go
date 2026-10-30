@@ -20,6 +20,16 @@ func init() {
 	config.GlobalConfig.Register("oidc", &defaultOIDCSettings)
 }
 
+// GetOIDCSettings 指针 getter 只保留给测试播种配置；生产代码读
+// OIDCSettingsSnapshot，避免与写锁内的逐字段重写构成数据竞争。
 func GetOIDCSettings() *OIDCSettings {
 	return &defaultOIDCSettings
+}
+
+// OIDCSettingsSnapshot 返回当前 OIDC 配置的浅拷贝。
+func OIDCSettingsSnapshot() OIDCSettings {
+	if snapshot, ok := config.SnapshotOf[OIDCSettings]("oidc"); ok {
+		return snapshot
+	}
+	return defaultOIDCSettings
 }

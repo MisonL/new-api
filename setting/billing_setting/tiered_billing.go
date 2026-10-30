@@ -284,12 +284,24 @@ func init() {
 // Read accessors (hot path, must be fast)
 // ---------------------------------------------------------------------------
 
+// billingSettingSnapshot 在配置管理器读锁内取一份 billingSetting 的浅拷贝。
+// BillingMode/BillingExpr 两个 map 在写入时整体替换，旧 map 不再被改写，因此
+// 复制 map 头后在锁外读取是安全的。直接读包级变量会与写锁内的逐字段重写构成
+// 数据竞争，而这两条读取都在中继计价热路径上。
+func billingSettingSnapshot() BillingSetting {
+	if snapshot, ok := config.SnapshotOf[BillingSetting]("billing_setting"); ok {
+		return snapshot
+	}
+	return billingSetting
+}
+
 func GetBillingMode(model string) string {
-	if mode, ok := billingSetting.BillingMode[model]; ok {
+	settings := billingSettingSnapshot()
+	if mode, ok := settings.BillingMode[model]; ok {
 		return mode
 	}
 	if canonical := ratio_setting.FormatMatchingModelName(model); canonical != model {
-		if mode, ok := billingSetting.BillingMode[canonical]; ok {
+		if mode, ok := settings.BillingMode[canonical]; ok {
 			return mode
 		}
 	}
@@ -297,11 +309,12 @@ func GetBillingMode(model string) string {
 }
 
 func GetBillingExpr(model string) (string, bool) {
-	if expr, ok := billingSetting.BillingExpr[model]; ok {
+	settings := billingSettingSnapshot()
+	if expr, ok := settings.BillingExpr[model]; ok {
 		return upgradeBillingExpr(model, expr), true
 	}
 	if canonical := ratio_setting.FormatMatchingModelName(model); canonical != model {
-		expr, ok := billingSetting.BillingExpr[canonical]
+		expr, ok := settings.BillingExpr[canonical]
 		if ok {
 			return upgradeBillingExpr(canonical, expr), true
 		}
@@ -426,11 +439,11 @@ func ValidateBillingExprJSON(raw string) error {
 }
 
 func GetBillingModeCopy() map[string]string {
-	return lo.Assign(billingSetting.BillingMode)
+	return lo.Assign(billingSettingSnapshot().BillingMode)
 }
 
 func GetBillingExprCopy() map[string]string {
-	return lo.Assign(billingSetting.BillingExpr)
+	return lo.Assign(billingSettingSnapshot().BillingExpr)
 }
 
 func GetPricingSyncData(base map[string]any) map[string]any {
