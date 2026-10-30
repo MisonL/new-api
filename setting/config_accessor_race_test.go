@@ -143,7 +143,8 @@ func TestSettingAccessorsDoNotRaceWithUpdate(t *testing.T) {
 	}
 }
 
-func moduleConfigMap(t *testing.T, module string) map[string]string {	t.Helper()
+func moduleConfigMap(t *testing.T, module string) map[string]string {
+	t.Helper()
 	registered := config.GlobalConfig.Get(module)
 	if registered == nil {
 		t.Fatalf("config module %q is not registered", module)
