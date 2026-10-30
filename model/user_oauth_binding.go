@@ -2,7 +2,10 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"time"
+
+	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
 )
@@ -53,10 +56,22 @@ func GetUserByOAuthBinding(providerId int, providerUserId string) (*User, error)
 	return &user, nil
 }
 
-// IsProviderUserIdTaken checks if a provider user ID is already bound to any user
+// IsProviderUserIdTaken checks if a provider user ID is already bound to any user.
+//
+// This is a security boundary: the caller uses it to decide whether an OAuth
+// account is new or belongs to an existing user. It must therefore answer
+// "is this identity taken", not "did the query return a row". Counting into an
+// error and treating the zero result as "free" would let a transient database
+// failure hand an existing binding out as a fresh registration, so a failed
+// count is reported as taken (fail closed), matching identityInUse.
 func IsProviderUserIdTaken(providerId int, providerUserId string) bool {
 	var count int64
-	DB.Model(&UserOAuthBinding{}).Where("provider_id = ? AND provider_user_id = ?", providerId, providerUserId).Count(&count)
+	if err := DB.Model(&UserOAuthBinding{}).
+		Where("provider_id = ? AND provider_user_id = ?", providerId, providerUserId).
+		Count(&count).Error; err != nil {
+		common.SysError(fmt.Sprintf("failed to check existing OAuth binding: providerId=%d, error=%v", providerId, err))
+		return true
+	}
 	return count > 0
 }
 
@@ -93,9 +108,15 @@ func CreateUserOAuthBindingWithTx(tx *gorm.DB, binding *UserOAuthBinding) error 
 		return errors.New("provider user ID is required")
 	}
 
-	// Check if this provider user ID is already taken (use tx to check within the same transaction)
+	// Check if this provider user ID is already taken (use tx to check within the same transaction).
+	// A failed check must abort the binding rather than fall through to the insert:
+	// the unique index is the last line of defence, not a licence to skip this one.
 	var count int64
-	tx.Model(&UserOAuthBinding{}).Where("provider_id = ? AND provider_user_id = ?", binding.ProviderId, binding.ProviderUserId).Count(&count)
+	if err := tx.Model(&UserOAuthBinding{}).
+		Where("provider_id = ? AND provider_user_id = ?", binding.ProviderId, binding.ProviderUserId).
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to check existing OAuth binding: %w", err)
+	}
 	if count > 0 {
 		return errors.New("this OAuth account is already bound to another user")
 	}
