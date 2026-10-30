@@ -17,11 +17,14 @@ type StatusCodeRange struct {
 var AutomaticDisableStatusCodeRanges = []StatusCodeRange{{Start: 401, End: 401}}
 
 // Default behavior matches legacy hardcoded retry rules in controller/relay.go shouldRetry:
-// retry for 1xx, 3xx, 4xx(except 400/408), 5xx(except 504/524), and no retry for 2xx.
+// retry for 1xx, 3xx, 4xx(except 408), 5xx(except 504/524), and no retry for 2xx.
+// 400/402 are included: a 400 invalid_request or 402 insufficient_quota from one
+// upstream is usually a channel-level condition, so a different channel can satisfy
+// the request. The stream-prelude commit marker keeps replay safe before content.
 var AutomaticRetryStatusCodeRanges = []StatusCodeRange{
 	{Start: 100, End: 199},
 	{Start: 300, End: 399},
-	{Start: 401, End: 407},
+	{Start: 400, End: 407},
 	{Start: 409, End: 499},
 	{Start: 500, End: 503},
 	{Start: 505, End: 523},
