@@ -581,9 +581,14 @@ func SyncUpstreamPreview(c *gin.Context) {
 	}
 
 	// 2) 本地已有模型
+	// 本地查询失败必须显式报错：把"查不出来"当成"本地没有"，预览会把上游
+	// 模型全部报成缺失，运营照此导入就会给每条已有模型再建一份。
 	var locals []model.Model
 	if len(upstreamNames) > 0 {
-		_ = model.DB.Where("model_name IN ? AND sync_official <> 0", upstreamNames).Find(&locals).Error
+		if err := model.DB.Where("model_name IN ? AND sync_official <> 0", upstreamNames).Find(&locals).Error; err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询本地模型失败: " + err.Error(), "locale": locale})
+			return
+		}
 	}
 
 	// 本地 vendor 名称映射
@@ -600,7 +605,10 @@ func SyncUpstreamPreview(c *gin.Context) {
 	idToVendorName := make(map[int]string)
 	if len(vendorIDs) > 0 {
 		var dbVendors []model.Vendor
-		_ = model.DB.Where("id IN ?", vendorIDs).Find(&dbVendors).Error
+		if err := model.DB.Where("id IN ?", vendorIDs).Find(&dbVendors).Error; err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询本地供应商失败: " + err.Error(), "locale": locale})
+			return
+		}
 		for _, v := range dbVendors {
 			idToVendorName[v.Id] = v.Name
 		}
