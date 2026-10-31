@@ -143,7 +143,11 @@ const (
 	InviteRebateRateMax = 100.0
 )
 
-var RetryTimes = 0
+// RetryTimes 是渠道 failover 的默认重试预算。必须 >= 1：shouldRetry 在
+// retryTimes <= 0 时直接放弃，0 会让自动重试状态码、402/400 可重试等整条链路
+// 在全新安装上空转。与生产环境校准过的取值一致（3）；数据库里保存过
+// RetryTimes 的存量部署不受代码默认值影响。
+var RetryTimes = 3
 
 //var RootUserEmail = ""
 

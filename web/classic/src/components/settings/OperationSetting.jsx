@@ -57,7 +57,7 @@ const OperationSetting = () => {
     'general_setting.channel_health_probe_lease_seconds': 15,
     QuotaPerUnit: 0,
     USDExchangeRate: 0,
-    RetryTimes: 0,
+    RetryTimes: 3,
     'general_setting.quota_display_type': 'USD',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
