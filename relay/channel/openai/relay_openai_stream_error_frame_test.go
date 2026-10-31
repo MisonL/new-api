@@ -209,3 +209,25 @@ func TestOaiStreamHandlerQuotaErrorFrameIsNotMarkedSkipRetry(t *testing.T) {
 	require.False(t, types.IsSkipRetryError(apiErr),
 		"带内配额错误帧必须交给重试策略判断，不能在 handler 里被钉成终态")
 }
+
+// 内容策略拒绝由请求内容本身决定：同一个 prompt 换到哪个渠道都会被拒。
+// handler 不做协议特定的内容策略判定，统一交给控制器 gate
+// isDeterministicContentPolicyRefusalError（对非流式、OpenAI 帧、Responses
+// 事件都生效）；这里的普通上游错误帧必须交给重试策略判断。
+func TestOaiStreamHandlerGenericErrorFrameFollowsRetryPolicy(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	body := buildErrorFrameStream(
+		`{"error":{"message":"upstream internal error","type":"server_error","code":"server_error"}}`,
+	)
+	info := newErrorFrameRelayInfo()
+
+	usage, apiErr := OaiStreamHandler(c, info, newErrorFrameResponse(body))
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.False(t, types.IsSkipRetryError(apiErr),
+		"普通上游错误帧必须交给重试策略判断")
+}

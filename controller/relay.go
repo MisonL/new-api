@@ -2093,6 +2093,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if isDeterministicModelNotFoundError(openaiErr) {
 		return false
 	}
+	// A content-policy or safety refusal is decided by the request body itself, so
+	// replaying it against another channel gets the same refusal, burns the retry
+	// budget, and cools every channel it touches. Deterministic, like the
+	// model-not-found case above: stop and surface the upstream's own error.
+	if isDeterministicContentPolicyRefusalError(openaiErr) {
+		return false
+	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) &&
 		!shouldRetryDespiteChannelAffinity(c, openaiErr) &&
 		!service.ShouldRetryAfterChannelHealthAuthenticationFailure(openaiErr) {
@@ -2330,6 +2337,63 @@ func isRetryableModelCapacityMessage(message string) bool {
 	return strings.Contains(normalized, "selected model is at capacity") ||
 		(strings.Contains(normalized, "model is at capacity") &&
 			strings.Contains(normalized, "try a different model"))
+}
+
+// String 类型断言辅助：OpenAIError.Code 是 any，可能是 string、ErrorCode 或
+// 上游的数字/对象 code。统一转小写字符串再匹配。
+func openAIErrorCodeString(code any) string {
+	lowered := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", code)))
+	return strings.ToLower(strings.Join(strings.Fields(lowered), " "))
+}
+
+// isContentPolicyRefusalMessage 覆盖最常见的确定性内容策略/安全拒绝形态。
+// 普通化后的 message 与 code 一起参与匹配。
+func isContentPolicyRefusalMessage(normalized, code string) bool {
+	for _, marker := range []string{
+		"content_policy_violation",
+		"content policy violation",
+		"content_policy",
+		"content policy",
+		"content filter",
+		"content_filter",
+		"safety system",
+		"prompt is blocked",
+	} {
+		if strings.Contains(code, marker) || strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDeterministicContentPolicyRefusalError 判定一条上游错误是否是内容策略/安全
+// 拒绝。这类拒绝由请求内容本身决定：把同一个 prompt 换到任何渠道都会得到同样
+// 的拒绝，重试只会白跑预算，并让每个被尝试的渠道各记一次健康冷却。因此在
+// shouldRetry 里统一判为不可重试。
+//
+// 判定放在控制器而不是某个协议 handler：非流式、OpenAI SSE 帧、Responses 事件
+// 等所有路径最终都汇聚到 shouldRetry，这里一处判定对全部协议生效。
+func isDeterministicContentPolicyRefusalError(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	openAIError := err.ToOpenAIError()
+	if openAIError.Type != "" {
+		typeLower := strings.ToLower(strings.Join(strings.Fields(openAIError.Type), " "))
+		for _, marker := range []string{
+			"content_policy_violation",
+			"content policy violation",
+			"content_filter",
+			"content filter",
+		} {
+			if strings.Contains(typeLower, marker) {
+				return true
+			}
+		}
+	}
+	code := openAIErrorCodeString(openAIError.Code)
+	message := strings.ToLower(strings.Join(strings.Fields(openAIError.Message), " "))
+	return isContentPolicyRefusalMessage(message, code)
 }
 
 func isUpstreamTransportInterruptedRelayError(openaiErr *types.NewAPIError) bool {

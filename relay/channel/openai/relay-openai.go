@@ -186,9 +186,13 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	// error 帧是最后一帧，后面没有 [DONE]，必然命中 HandlerStop）。
 	if streamFrameError != nil {
 		statusCode := frameErrorStatusCode(streamFrameError)
-		// 不在这里钉死 skip-retry：带内配额(402)/限流(429)帧是数据源级的暂时性
-		// 故障，应交给控制器的 shouldRetry 按配置的重试状态码判断是否换渠道重放。
-		// 首帧之前的 prelude 提交标记已经挡住"内容已下发"的危险重放场景。
+		// 不在这里钉死 skip-retry：带内配额(402)/限流(429)/普通上游错误帧是渠道级
+		// 暂时条件，应交给控制器的 shouldRetry 按配置的重试状态码判断是否换渠道
+		// 重放。首帧之前的 prelude 提交标记已经挡住"内容已下发"的危险重放场景。
+		//
+		// 唯一例外是内容策略/安全拒绝，由请求内容本身决定，换渠道必然同样被拒；
+		// 该判定放 controller.isDeterministicContentPolicyRefusalError，对所有协议
+		// 统一生效（非流式与 Responses 事件路径同样需要它），不在本 handler 里重复。
 		return nil, types.WithOpenAIError(*streamFrameError, statusCode)
 	}
 
