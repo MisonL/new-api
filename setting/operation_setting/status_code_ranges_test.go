@@ -3,6 +3,7 @@ package operation_setting
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,26 +63,30 @@ func TestShouldRetryByStatusCode(t *testing.T) {
 
 	require.True(t, ShouldRetryByStatusCode(429))
 	require.True(t, ShouldRetryByStatusCode(500))
-	require.False(t, ShouldRetryByStatusCode(504))
-	require.False(t, ShouldRetryByStatusCode(524))
+	// 规则范围内没有代码级禁区：504/524 落入 500-599 后按配置重试。
+	require.True(t, ShouldRetryByStatusCode(504))
+	require.True(t, ShouldRetryByStatusCode(524))
 	require.False(t, ShouldRetryByStatusCode(400))
 	require.False(t, ShouldRetryByStatusCode(200))
 }
 
-func TestShouldRetryByStatusCode_DefaultMatchesLegacyBehavior(t *testing.T) {
-	require.False(t, ShouldRetryByStatusCode(200))
-	require.True(t, ShouldRetryByStatusCode(400))
-	require.True(t, ShouldRetryByStatusCode(401))
-	require.False(t, ShouldRetryByStatusCode(408))
-	require.True(t, ShouldRetryByStatusCode(429))
-	require.True(t, ShouldRetryByStatusCode(500))
-	require.False(t, ShouldRetryByStatusCode(504))
-	require.False(t, ShouldRetryByStatusCode(524))
-	require.True(t, ShouldRetryByStatusCode(599))
+// 出厂规则覆盖除 2xx 外的全部状态码，任何状态码都不再有代码级重试禁区；
+// 是否重试完全由 AutomaticRetryStatusCodes 表达。
+func TestShouldRetryByStatusCode_DefaultCoversEveryNonSuccessCode(t *testing.T) {
+	for _, code := range []int{100, 199, 300, 399, 400, 401, 402, 408, 429, 500, 502, 504, 524, 599} {
+		require.Truef(t, ShouldRetryByStatusCode(code), "状态码 %d 出厂应可重试", code)
+	}
+	for _, code := range []int{200, 201, 204, 299} {
+		require.Falsef(t, ShouldRetryByStatusCode(code), "状态码 %d 出厂不应重试", code)
+	}
+	require.False(t, ShouldRetryByStatusCode(99))
+	require.False(t, ShouldRetryByStatusCode(600))
 }
 
-func TestIsAlwaysSkipRetryStatusCode(t *testing.T) {
-	require.True(t, IsAlwaysSkipRetryStatusCode(504))
-	require.True(t, IsAlwaysSkipRetryStatusCode(524))
-	require.False(t, IsAlwaysSkipRetryStatusCode(500))
+// 只剩"响应体无法解析"这一个错误码级规则；它按错误码而非状态码生效，
+// 与状态码规则分开，避免响应体已开始下发时重放。
+func TestIsAlwaysSkipRetryCodeOnlyCoversBadResponseBody(t *testing.T) {
+	require.True(t, IsAlwaysSkipRetryCode(types.ErrorCodeBadResponseBody))
+	require.False(t, IsAlwaysSkipRetryCode(types.ErrorCodeBadResponseStatusCode))
+	require.False(t, IsAlwaysSkipRetryCode(types.ErrorCodeUpstreamTransportInterrupted))
 }

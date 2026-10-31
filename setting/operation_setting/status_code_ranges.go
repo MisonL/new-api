@@ -26,15 +26,20 @@ type StatusCodeRange struct {
 // default* 两份是出厂规则，只在包初始化时构造、之后不再改写，供尚未发布过
 // 任何规则时兜底；显式发布空规则会存成空切片而不是留在 nil，因此空切片不会被
 // 误当成"未配置"而回退到出厂规则。
+//
+// 出厂重试范围覆盖除 2xx 之外的全部状态码。上游任何非成功响应都可能只是这一条
+// 线路或这一个 key 的问题，换一个渠道就能成功；把它钉死在单渠道上只会让一次
+// 可恢复的失败变成终态错误。超时类（408/504/524）尤其如此：它们大多由链路或
+// 代理在固定超时点切断连接造成，换渠道往往立刻恢复。
+//
+// 这里不再为超时状态码保留任何代码级硬挡。曾经 504/524 是不可配置的重试禁区
+// （理由是上游可能已受理并计费，重放会有双重计费），但那等于把"是否重放"这一
+// 运营取舍写死在代码里，管理员既看不到也改不了。现在取舍完全由
+// AutomaticRetryStatusCodes 表达，管理员可随时收窄。
 var (
 	defaultAutomaticRetryStatusCodeRanges = []StatusCodeRange{
 		{Start: 100, End: 199},
-		{Start: 300, End: 399},
-		{Start: 400, End: 407},
-		{Start: 409, End: 499},
-		{Start: 500, End: 503},
-		{Start: 505, End: 523},
-		{Start: 525, End: 599},
+		{Start: 300, End: 599},
 	}
 	defaultAutomaticDisableStatusCodeRanges = []StatusCodeRange{{Start: 401, End: 401}}
 
@@ -54,11 +59,6 @@ func loadStatusCodeRanges(source *atomic.Pointer[[]StatusCodeRange], fallback []
 		return *published
 	}
 	return fallback
-}
-
-var alwaysSkipRetryStatusCodes = map[int]struct{}{
-	504: {},
-	524: {},
 }
 
 var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
@@ -118,20 +118,12 @@ func AutomaticRetryStatusCodesFromString(s string) error {
 	return nil
 }
 
-func IsAlwaysSkipRetryStatusCode(code int) bool {
-	_, exists := alwaysSkipRetryStatusCodes[code]
-	return exists
-}
-
 func IsAlwaysSkipRetryCode(errorCode types.ErrorCode) bool {
 	_, exists := alwaysSkipRetryCodes[errorCode]
 	return exists
 }
 
 func ShouldRetryByStatusCode(code int) bool {
-	if IsAlwaysSkipRetryStatusCode(code) {
-		return false
-	}
 	return shouldMatchStatusCodeRanges(AutomaticRetryStatusCodeRanges(), code)
 }
 

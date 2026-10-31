@@ -36,7 +36,9 @@ func requireResponsesRoutingChannelSkips(t *testing.T, ctx *gin.Context, want []
 	require.Equal(t, want, got)
 }
 
-func TestShouldRetryGatewayTimeoutHonorsAlwaysSkipBeforeResponsesPayload(t *testing.T) {
+// 504/524 与其它非 2xx 状态码一样可以换渠道重试：它们通常由链路或代理在固定
+// 超时点切断连接造成，换一个渠道往往立刻恢复。只要还没有向下游写出内容，就应重试。
+func TestShouldRetryGatewayTimeoutBeforeResponsesPayload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	testCases := []struct {
@@ -62,7 +64,8 @@ func TestShouldRetryGatewayTimeoutHonorsAlwaysSkipBeforeResponsesPayload(t *test
 			common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
 			err := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, tc.statusCode)
 
-			require.False(t, shouldRetry(c, err, 1))
+			require.True(t, shouldRetry(c, err, 1))
+			require.False(t, shouldRetry(c, err, 0))
 		})
 	}
 }
@@ -86,7 +89,8 @@ func TestShouldRetryGatewayTimeoutDoesNotReplayAfterResponsesPayload(t *testing.
 	}
 }
 
-func TestShouldRetryGatewayTimeoutHonorsAlwaysSkipDespiteChannelAffinitySkip(t *testing.T) {
+// 渠道亲和性锁定重试时，超时类错误仍然换渠道：超时由线路或代理决定，不随会话失效。
+func TestShouldRetryGatewayTimeoutDespiteChannelAffinitySkip(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	testCases := []struct {
@@ -94,11 +98,11 @@ func TestShouldRetryGatewayTimeoutHonorsAlwaysSkipDespiteChannelAffinitySkip(t *
 		statusCode int
 	}{
 		{
-			name:       "gateway timeout cannot switch channel",
+			name:       "gateway timeout can switch channel",
 			statusCode: http.StatusGatewayTimeout,
 		},
 		{
-			name:       "cloudflare timeout cannot switch channel",
+			name:       "cloudflare timeout can switch channel",
 			statusCode: 524,
 		},
 	}
@@ -110,10 +114,26 @@ func TestShouldRetryGatewayTimeoutHonorsAlwaysSkipDespiteChannelAffinitySkip(t *
 			c.Set("channel_affinity_skip_retry_on_failure", true)
 			err := types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, tc.statusCode)
 
-			require.False(t, shouldRetry(c, err, 1))
+			require.True(t, shouldRetry(c, err, 1))
 			require.False(t, shouldRetry(c, err, 0))
 		})
 	}
+}
+
+// 传输超时只让渠道冷却，不再阻断跨渠道重试。渠道之所以不会被本请求再次选中，
+// 靠的是 use_channel 记录的上游尝试历史，而不是把整个请求钉死。
+func TestShouldRetryTransportTimeoutDespiteChannelHealthExclusion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	err := types.NewOpenAIError(
+		errors.New("context deadline exceeded (Client.Timeout exceeded while awaiting headers)"),
+		types.ErrorCodeDoRequestFailed,
+		http.StatusBadGateway,
+	)
+
+	require.False(t, service.ShouldExcludeChannelForRetry(err))
+	require.True(t, shouldRetry(c, err, 1))
+	require.False(t, shouldRetry(c, err, 0))
 }
 
 func TestShouldRetryResponsesCompactUpstream413DespiteChannelAffinitySkip(t *testing.T) {
@@ -309,8 +329,10 @@ func TestShouldRetryTaskRelayAllowsModelCapacityMessage(t *testing.T) {
 
 	require.True(t, shouldRetryTaskRelay(ctx, 150, taskErr, 1))
 
+	// 400 不再是任务重试禁区：与主中继路径一致，单条渠道的 4xx 允许换渠道。
 	taskErr.Message = "token cache capacity exceeded"
-	require.False(t, shouldRetryTaskRelay(ctx, 150, taskErr, 1))
+	require.True(t, shouldRetryTaskRelay(ctx, 150, taskErr, 1))
+	require.False(t, shouldRetryTaskRelay(ctx, 150, taskErr, 0))
 
 	taskErr.StatusCode = http.StatusOK
 	taskErr.Message = "Selected model is at capacity. Please try a different model."

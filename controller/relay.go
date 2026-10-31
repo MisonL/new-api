@@ -2111,17 +2111,6 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if types.IsSkipRetryError(openaiErr) {
 		return false
 	}
-	// Health classification may mark transport timeout/refusal or credential
-	// failures as unsafe for replay in the current request. The channel is
-	// cooled for subsequent requests independently.
-	// Excluding the failed channel is an instruction for the selector, not a
-	// ban on retrying the request through another eligible channel. Credential
-	// failures are deliberately retryable when affinity can be bypassed; keep
-	// the hard stop only for errors that are not safe to replay elsewhere.
-	if service.ShouldExcludeChannelForRetry(openaiErr) &&
-		!service.ShouldRetryAfterChannelHealthAuthenticationFailure(openaiErr) {
-		return false
-	}
 	if retryTimes <= 0 {
 		return false
 	}
@@ -2134,9 +2123,6 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	}
 	if code < 100 || code > 599 {
 		return true
-	}
-	if operation_setting.IsAlwaysSkipRetryStatusCode(code) {
-		return false
 	}
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
 		return false
@@ -4097,21 +4083,12 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 		return true
 	}
 	if taskErr.StatusCode/100 == 5 {
-		// 超时不重试
-		if operation_setting.IsAlwaysSkipRetryStatusCode(taskErr.StatusCode) {
-			return false
-		}
 		return true
-	}
-	if taskErr.StatusCode == http.StatusBadRequest {
-		return false
-	}
-	if taskErr.StatusCode == 408 {
-		// azure处理超时不重试
-		return false
 	}
 	if taskErr.StatusCode/100 == 2 {
 		return false
 	}
+	// 其余非 2xx（含 400、408、4xx）统一允许换渠道重试：与主中继路径一致，
+	// 单条渠道的 4xx 往往只是这条线路或这个 key 的问题。
 	return true
 }

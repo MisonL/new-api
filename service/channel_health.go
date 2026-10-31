@@ -1204,10 +1204,14 @@ func ClassifyChannelHealthFailure(c *gin.Context, info *relaycommon.RelayInfo, e
 		decision.Immediate = true
 		return decision
 	}
+	// 超时类失败会让本请求内的渠道选择器跳过这条失败线路（HealthAction/cooldown
+	// 不变），但 RequestRetry 保持 retry：超时通常由链路或代理在固定超时点切断
+	// 连接造成，换一条线路或一个渠道往往立刻恢复，因此必须允许跨渠道重试。曾经
+	// 把超时标成"exclude"会连带把 504/524 变成不可重试，与本仓库把"是否重试"交给
+	// AutomaticRetryStatusCodes 表达的设计冲突。
 	if statusCode == http.StatusGatewayTimeout || statusCode == 524 {
 		decision.Class = ChannelHealthFailureClassTimeout
 		decision.HealthAction = "cooldown"
-		decision.RequestRetry = "exclude"
 		decision.AutoBanAction = "suppress"
 		decision.Scope = "gateway_timeout"
 		decision.Immediate = true
@@ -1241,7 +1245,8 @@ func ClassifyChannelHealthFailure(c *gin.Context, info *relaycommon.RelayInfo, e
 	if isUpstreamConnectionTimeout(err) {
 		decision.Class = ChannelHealthFailureClassTimeout
 		decision.HealthAction = "cooldown"
-		decision.RequestRetry = "exclude"
+		// 与上方 504/524 同理：传输超时只让渠道选择器本请求内跳过这条线路，
+		// 不阻断跨渠道重试。
 		decision.AutoBanAction = "suppress"
 		decision.Scope = "transport_timeout"
 		decision.Immediate = true

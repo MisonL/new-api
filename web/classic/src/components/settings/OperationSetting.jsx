@@ -85,8 +85,7 @@ const OperationSetting = () => {
     AutomaticEnableChannelEnabled: false,
     AutomaticDisableKeywords: '',
     AutomaticDisableStatusCodes: '401',
-    AutomaticRetryStatusCodes:
-      '100-199,300-399,400-407,409-499,500-503,505-523,525-599',
+    AutomaticRetryStatusCodes: '100-199,300-599',
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
     RequestHeaderPolicyAuxiliaryRequestsEnabled: true,

@@ -462,6 +462,55 @@ func TestClassifyChannelHealthFailureDistinguishesDialErrors(t *testing.T) {
 	require.Equal(t, ChannelHealthFailureClassGateway, dnsDecision.Class)
 }
 
+// 超时类失败只冷却渠道，不再阻止跨渠道重试：网关在固定超时点切断连接时，
+// 换一条线路通常立刻恢复。冷却（HealthAction=cooldown）与响应体未下发的
+// 4xx/5xx 一样保留，自动禁用仍然被抑制。
+func TestClassifyChannelHealthFailureKeepsTimeoutsRetryable(t *testing.T) {
+	testCases := []struct {
+		name string
+		err  *types.NewAPIError
+		want string
+	}{
+		{
+			name: "gateway timeout 504",
+			err:  types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusGatewayTimeout),
+			want: "gateway_timeout",
+		},
+		{
+			name: "cloudflare timeout 524",
+			err:  types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, 524),
+			want: "gateway_timeout",
+		},
+		{
+			name: "transport timeout",
+			err:  types.NewOpenAIError(errors.New("net/http: timeout awaiting response headers"), types.ErrorCodeDoRequestFailed, http.StatusBadGateway),
+			want: "transport_timeout",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			decision := ClassifyChannelHealthFailure(nil, nil, tc.err)
+			require.Equal(t, ChannelHealthFailureClassTimeout, decision.Class)
+			require.Equal(t, tc.want, decision.Scope)
+			require.Equal(t, "cooldown", decision.HealthAction)
+			require.Equal(t, "retry", decision.RequestRetry)
+			require.Equal(t, "suppress", decision.AutoBanAction)
+			require.False(t, ShouldExcludeChannelForRetry(tc.err))
+		})
+	}
+}
+
+// 凭据失效仍标记为 exclude：本请求内不再选这条线路，但重试门放行其它渠道/凭据。
+func TestClassifyChannelHealthFailureKeepsCredentialFailuresExcluded(t *testing.T) {
+	err := types.NewOpenAIError(errors.New("auth_not_found: no auth available (providers=codex)"), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable)
+	decision := ClassifyChannelHealthFailure(nil, nil, err)
+	require.Equal(t, ChannelHealthFailureClassAuth, decision.Class)
+	require.Equal(t, "exclude", decision.RequestRetry)
+	require.True(t, ShouldExcludeChannelForRetry(err))
+}
+
 func TestChannelHealthAdminTestDoesNotWriteOnlineState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	useChannelHealthRedisForTest(t)
