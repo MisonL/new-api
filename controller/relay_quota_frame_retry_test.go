@@ -96,7 +96,7 @@ func TestRelayRetriesInBandQuotaFrameThroughAnotherChannel(t *testing.T) {
 	previousCountToken := constant.CountToken
 	previousFetchSetting := *system_setting.GetFetchSetting()
 	previousRateLimitRetry := operation_setting.GetUpstreamRateLimitRetryLimit()
-	previousRetryRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	previousRetryRanges := operation_setting.AutomaticRetryStatusCodeRanges()
 	common.RetryTimes = 3
 	constant.ErrorLogEnabled = false
 	constant.CountToken = false
@@ -105,7 +105,7 @@ func TestRelayRetriesInBandQuotaFrameThroughAnotherChannel(t *testing.T) {
 	t.Cleanup(func() {
 		common.RetryTimes = previousRetryTimes
 		operation_setting.SetUpstreamRateLimitRetryLimit(previousRateLimitRetry)
-		operation_setting.AutomaticRetryStatusCodeRanges = previousRetryRanges
+		operation_setting.SetAutomaticRetryStatusCodeRanges(previousRetryRanges)
 		constant.ErrorLogEnabled = previousErrorLogEnabled
 		constant.CountToken = previousCountToken
 		*system_setting.GetFetchSetting() = previousFetchSetting

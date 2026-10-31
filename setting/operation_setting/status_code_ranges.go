@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/types"
 )
@@ -14,21 +15,45 @@ type StatusCodeRange struct {
 	End   int
 }
 
-var AutomaticDisableStatusCodeRanges = []StatusCodeRange{{Start: 401, End: 401}}
+// 这两个规则切片在中继热路径上被 ShouldRetryByStatusCode /
+// ShouldDisableByStatusCode 无锁读取，而管理端保存设置会通过
+// Automatic*StatusCodesFromString 整体替换。切片头是三字（指针/长度/容量），
+// 直接赋值与并发读取构成数据竞争，撕裂读可能把新指针和旧长度拼在一起。
+//
+// 写方解析出一份新切片后原子发布，读者只 Load 当前指针，旧切片在替换后不再
+// 被改写，因此读取端无需加锁。这与 tool_price_setting 的索引发布方式一致。
+//
+// default* 两份是出厂规则，只在包初始化时构造、之后不再改写，供尚未发布过
+// 任何规则时兜底；显式发布空规则会存成空切片而不是留在 nil，因此空切片不会被
+// 误当成"未配置"而回退到出厂规则。
+var (
+	defaultAutomaticRetryStatusCodeRanges = []StatusCodeRange{
+		{Start: 100, End: 199},
+		{Start: 300, End: 399},
+		{Start: 400, End: 407},
+		{Start: 409, End: 499},
+		{Start: 500, End: 503},
+		{Start: 505, End: 523},
+		{Start: 525, End: 599},
+	}
+	defaultAutomaticDisableStatusCodeRanges = []StatusCodeRange{{Start: 401, End: 401}}
 
-// Default behavior matches legacy hardcoded retry rules in controller/relay.go shouldRetry:
-// retry for 1xx, 3xx, 4xx(except 408), 5xx(except 504/524), and no retry for 2xx.
-// 400/402 are included: a 400 invalid_request or 402 insufficient_quota from one
-// upstream is usually a channel-level condition, so a different channel can satisfy
-// the request. The stream-prelude commit marker keeps replay safe before content.
-var AutomaticRetryStatusCodeRanges = []StatusCodeRange{
-	{Start: 100, End: 199},
-	{Start: 300, End: 399},
-	{Start: 400, End: 407},
-	{Start: 409, End: 499},
-	{Start: 500, End: 503},
-	{Start: 505, End: 523},
-	{Start: 525, End: 599},
+	automaticRetryStatusCodeRanges   atomic.Pointer[[]StatusCodeRange]
+	automaticDisableStatusCodeRanges atomic.Pointer[[]StatusCodeRange]
+)
+
+func storeStatusCodeRanges(target *atomic.Pointer[[]StatusCodeRange], ranges []StatusCodeRange) {
+	if ranges == nil {
+		ranges = []StatusCodeRange{}
+	}
+	target.Store(&ranges)
+}
+
+func loadStatusCodeRanges(source *atomic.Pointer[[]StatusCodeRange], fallback []StatusCodeRange) []StatusCodeRange {
+	if published := source.Load(); published != nil {
+		return *published
+	}
+	return fallback
 }
 
 var alwaysSkipRetryStatusCodes = map[int]struct{}{
@@ -40,8 +65,31 @@ var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
 	types.ErrorCodeBadResponseBody: {},
 }
 
+// AutomaticRetryStatusCodeRanges 返回当前生效的重试状态码规则。返回值是已发布
+// 切片本身，读者只能读取，不能改写。
+func AutomaticRetryStatusCodeRanges() []StatusCodeRange {
+	return loadStatusCodeRanges(&automaticRetryStatusCodeRanges, defaultAutomaticRetryStatusCodeRanges)
+}
+
+// SetAutomaticRetryStatusCodeRanges 原子发布一份新的重试状态码规则。
+// 生产写入走 AutomaticRetryStatusCodesFromString；此函数供需要直接播种规则的
+// 调用方使用（例如渠道自愈相关用例）。
+func SetAutomaticRetryStatusCodeRanges(ranges []StatusCodeRange) {
+	storeStatusCodeRanges(&automaticRetryStatusCodeRanges, append([]StatusCodeRange(nil), ranges...))
+}
+
+// AutomaticDisableStatusCodeRanges 返回当前生效的自动禁用状态码规则。
+func AutomaticDisableStatusCodeRanges() []StatusCodeRange {
+	return loadStatusCodeRanges(&automaticDisableStatusCodeRanges, defaultAutomaticDisableStatusCodeRanges)
+}
+
+// SetAutomaticDisableStatusCodeRanges 原子发布一份新的自动禁用状态码规则。
+func SetAutomaticDisableStatusCodeRanges(ranges []StatusCodeRange) {
+	storeStatusCodeRanges(&automaticDisableStatusCodeRanges, append([]StatusCodeRange(nil), ranges...))
+}
+
 func AutomaticDisableStatusCodesToString() string {
-	return statusCodeRangesToString(AutomaticDisableStatusCodeRanges)
+	return statusCodeRangesToString(AutomaticDisableStatusCodeRanges())
 }
 
 func AutomaticDisableStatusCodesFromString(s string) error {
@@ -49,16 +97,16 @@ func AutomaticDisableStatusCodesFromString(s string) error {
 	if err != nil {
 		return err
 	}
-	AutomaticDisableStatusCodeRanges = ranges
+	SetAutomaticDisableStatusCodeRanges(ranges)
 	return nil
 }
 
 func ShouldDisableByStatusCode(code int) bool {
-	return shouldMatchStatusCodeRanges(AutomaticDisableStatusCodeRanges, code)
+	return shouldMatchStatusCodeRanges(AutomaticDisableStatusCodeRanges(), code)
 }
 
 func AutomaticRetryStatusCodesToString() string {
-	return statusCodeRangesToString(AutomaticRetryStatusCodeRanges)
+	return statusCodeRangesToString(AutomaticRetryStatusCodeRanges())
 }
 
 func AutomaticRetryStatusCodesFromString(s string) error {
@@ -66,7 +114,7 @@ func AutomaticRetryStatusCodesFromString(s string) error {
 	if err != nil {
 		return err
 	}
-	AutomaticRetryStatusCodeRanges = ranges
+	SetAutomaticRetryStatusCodeRanges(ranges)
 	return nil
 }
 
@@ -84,7 +132,7 @@ func ShouldRetryByStatusCode(code int) bool {
 	if IsAlwaysSkipRetryStatusCode(code) {
 		return false
 	}
-	return shouldMatchStatusCodeRanges(AutomaticRetryStatusCodeRanges, code)
+	return shouldMatchStatusCodeRanges(AutomaticRetryStatusCodeRanges(), code)
 }
 
 func statusCodeRangesToString(ranges []StatusCodeRange) string {

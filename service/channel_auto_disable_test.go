@@ -13,12 +13,12 @@ import (
 
 func TestShouldDisableChannelDoesNotAutoDisableTransientTransportInterruption(t *testing.T) {
 	originalEnabled := common.AutomaticDisableChannelEnabled
-	originalRanges := operation_setting.AutomaticDisableStatusCodeRanges
+	originalRanges := operation_setting.AutomaticDisableStatusCodeRanges()
 	common.AutomaticDisableChannelEnabled = true
-	operation_setting.AutomaticDisableStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: 500, End: 599}}
+	operation_setting.SetAutomaticDisableStatusCodeRanges([]operation_setting.StatusCodeRange{{Start: 500, End: 599}})
 	t.Cleanup(func() {
 		common.AutomaticDisableChannelEnabled = originalEnabled
-		operation_setting.AutomaticDisableStatusCodeRanges = originalRanges
+		operation_setting.SetAutomaticDisableStatusCodeRanges(originalRanges)
 	})
 
 	transportInterruption := types.NewOpenAIError(
