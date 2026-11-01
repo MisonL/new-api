@@ -655,14 +655,48 @@ func TestShouldRetryModelCapacityHonorsRetryBudget(t *testing.T) {
 	require.False(t, shouldRetry(c, err, 0))
 }
 
-func TestShouldRetryHonorsAlwaysSkipCodeBeforeTemporaryRetry(t *testing.T) {
+// 上游返回了无法解析的响应体，但网关还没向下游写出任何字节：换渠道重放是安全的，
+// 不再按 bad_response_body 错误码一刀切禁止重试。
+func TestShouldRetryBadResponseBodyBeforeAnyDownstreamWrite(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(nil)
-	err := types.WithOpenAIError(types.OpenAIError{
-		Message: "Upstream service temporarily unavailable",
-		Type:    "server_error",
-		Code:    string(types.ErrorCodeBadResponseBody),
-	}, http.StatusBadGateway)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	err := types.NewOpenAIError(
+		errors.New("invalid character 'x' looking for beginning of value"),
+		types.ErrorCodeBadResponseBody,
+		http.StatusInternalServerError,
+	)
+
+	require.True(t, shouldRetry(c, err, 1))
+	require.False(t, shouldRetry(c, err, 0))
+}
+
+// 已经向下游写出内容后再失败，重放会让客户端收到两份响应：这一保护来自
+// Writer.Written() 门，而不是错误码。
+func TestShouldRetryBadResponseBodyStopsAfterDownstreamWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	_, writeErr := c.Writer.Write([]byte(`{"id":"partial"}`))
+	require.NoError(t, writeErr)
+	err := types.NewOpenAIError(
+		errors.New("write response failed"),
+		types.ErrorCodeBadResponseBody,
+		http.StatusBadGateway,
+	)
+
+	require.False(t, shouldRetry(c, err, 1))
+}
+
+// 流式 handler 在内容已下发后失败时会显式打上 skip-retry 标记，这条仍然生效。
+func TestShouldRetryBadResponseBodyHonorsExplicitSkipRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	err := types.NewOpenAIError(
+		errors.New("stream ended after content was committed"),
+		types.ErrorCodeBadResponseBody,
+		http.StatusBadGateway,
+		types.ErrOptionWithSkipRetry(),
+	)
 
 	require.False(t, shouldRetry(c, err, 1))
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/glebarez/sqlite"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -478,6 +479,9 @@ func migrateDB() error {
 	if err := migrateChannelPinOrder(); err != nil {
 		return err
 	}
+	if err := migrateRetryStatusCodesLegacyDefault(); err != nil {
+		return err
+	}
 	if err := migratePrefillGroupTable(); err != nil {
 		return err
 	}
@@ -552,6 +556,63 @@ func migrateChannelPinOrder() error {
 			"channel pin order migration finished: updated_channels=%d",
 			result.RowsAffected,
 		))
+		return nil
+	})
+}
+
+const retryStatusCodesLegacyDefaultMigrationOptionKey = "migration.automatic_retry_status_codes.20261101"
+
+// retryStatusCodesLegacyDefaults 是历史出厂默认值的全部写法。这些值在数据库里
+// 与"管理员显式自定义"无法区分，但都恰好等于旧版代码的出厂规则，可以安全升级。
+// 启动时 loadOptionsFromDatabase 会用数据库行覆盖代码默认值，所以只改代码常量
+// 对已经保存过设置的实例（包括只是点过一次保存的管理员）不生效，必须在启动
+// 迁移里把原样的旧出厂值升到新出厂规则。
+var retryStatusCodesLegacyDefaults = []string{
+	"100-199,300-399,401-407,409-499,500-503,505-523,525-599",
+	"100-199,300-399,400-407,409-499,500-503,505-523,525-599",
+	"100-199,300-503,505-523,525-599",
+}
+
+// migrateRetryStatusCodesLegacyDefault 把仍保存着旧出厂重试范围的行一次性
+// 升级为新出厂规则（除 2xx 外全部可重试）。标记行保证只执行一次：迁移之后
+// 管理员再手动填写旧范围（或其他自定义值）都会被视为运营决定，不再改写。
+func migrateRetryStatusCodesLegacyDefault() error {
+	var marker Option
+	if err := DB.First(&marker, KeyColumn()+" = ?", retryStatusCodesLegacyDefaultMigrationOptionKey).Error; err == nil {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		updated := 0
+		var option Option
+		err := tx.Where(KeyColumn()+" = ?", "AutomaticRetryStatusCodes").Limit(1).Find(&option).Error
+		if err != nil {
+			return err
+		}
+		if option.Key != "" {
+			for _, legacy := range retryStatusCodesLegacyDefaults {
+				if option.Value != legacy {
+					continue
+				}
+				if err := tx.Model(&Option{}).Where(KeyColumn()+" = ?", "AutomaticRetryStatusCodes").
+					Update("value", operation_setting.DefaultAutomaticRetryStatusCodes()).Error; err != nil {
+					return err
+				}
+				updated = 1
+				break
+			}
+		}
+
+		marker = Option{
+			Key:   retryStatusCodesLegacyDefaultMigrationOptionKey,
+			Value: "done",
+		}
+		if err := tx.Save(&marker).Error; err != nil {
+			return err
+		}
+		common.SysLog(fmt.Sprintf("automatic retry status codes migration finished: updated_options=%d", updated))
 		return nil
 	})
 }

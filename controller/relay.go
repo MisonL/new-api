@@ -2124,9 +2124,6 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if code < 100 || code > 599 {
 		return true
 	}
-	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
-		return false
-	}
 	if shouldRetryUpstreamRequestTooLargeForResponsesCompact(c, openaiErr) {
 		return true
 	}

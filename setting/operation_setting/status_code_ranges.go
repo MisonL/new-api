@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
-
-	"github.com/QuantumNous/new-api/types"
 )
 
 type StatusCodeRange struct {
@@ -59,10 +57,6 @@ func loadStatusCodeRanges(source *atomic.Pointer[[]StatusCodeRange], fallback []
 		return *published
 	}
 	return fallback
-}
-
-var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
-	types.ErrorCodeBadResponseBody: {},
 }
 
 // AutomaticRetryStatusCodeRanges 返回当前生效的重试状态码规则。返回值是已发布
@@ -118,9 +112,10 @@ func AutomaticRetryStatusCodesFromString(s string) error {
 	return nil
 }
 
-func IsAlwaysSkipRetryCode(errorCode types.ErrorCode) bool {
-	_, exists := alwaysSkipRetryCodes[errorCode]
-	return exists
+// DefaultAutomaticRetryStatusCodes 返回出厂重试规则的规范化字符串，与设置页
+// 保存时的格式一致，供迁移判断与升级数据库中的旧出厂值。
+func DefaultAutomaticRetryStatusCodes() string {
+	return statusCodeRangesToString(defaultAutomaticRetryStatusCodeRanges)
 }
 
 func ShouldRetryByStatusCode(code int) bool {

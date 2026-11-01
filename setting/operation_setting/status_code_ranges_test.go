@@ -3,7 +3,6 @@ package operation_setting
 import (
 	"testing"
 
-	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,10 +82,7 @@ func TestShouldRetryByStatusCode_DefaultCoversEveryNonSuccessCode(t *testing.T) 
 	require.False(t, ShouldRetryByStatusCode(600))
 }
 
-// 只剩"响应体无法解析"这一个错误码级规则；它按错误码而非状态码生效，
-// 与状态码规则分开，避免响应体已开始下发时重放。
-func TestIsAlwaysSkipRetryCodeOnlyCoversBadResponseBody(t *testing.T) {
-	require.True(t, IsAlwaysSkipRetryCode(types.ErrorCodeBadResponseBody))
-	require.False(t, IsAlwaysSkipRetryCode(types.ErrorCodeBadResponseStatusCode))
-	require.False(t, IsAlwaysSkipRetryCode(types.ErrorCodeUpstreamTransportInterrupted))
+// 迁移用这个字符串与数据库中的历史出厂值比对，格式必须与设置页保存的规范化格式一致。
+func TestDefaultAutomaticRetryStatusCodesCanonicalForm(t *testing.T) {
+	require.Equal(t, "100-199,300-599", DefaultAutomaticRetryStatusCodes())
 }
