@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -138,4 +140,40 @@ func TestQuotaDataUpsertOnMySQL(t *testing.T) {
 	require.Equal(t, 2, row.Count)
 	require.Equal(t, 20, row.Quota)
 	require.Equal(t, 2, row.TokenUsed)
+}
+
+// 启动迁移的真实入口是 migrateDB：大 AutoMigrate 在各专用迁移之前执行。
+// QuotaData 若留在大列表里，gorm 会按结构体标签先建 uk_qdt_bucket，存量
+// 重复桶让建索引直接失败，专用迁移里的合并步骤根本没有机会执行，进程
+// 无法启动。只调用 migrateQuotaDataUniqueIndex 的用例覆盖不到这个顺序。
+func TestMigrateDBMergesQuotaDataDuplicatesBeforeUniqueIndex(t *testing.T) {
+	db := openTestDB(t, &QuotaData{})
+	previousDB, previousLogDB := DB, LOG_DB
+	previousUsingSQLite, previousUsingMySQL, previousUsingPostgreSQL := common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL
+	DB, LOG_DB = db, db
+	common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL = true, false, false
+	initCol()
+	t.Cleanup(func() {
+		DB, LOG_DB = previousDB, previousLogDB
+		common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL = previousUsingSQLite, previousUsingMySQL, previousUsingPostgreSQL
+		initCol()
+	})
+
+	require.NoError(t, db.Migrator().DropIndex(&QuotaData{}, quotaDataBucketIndex))
+	for i := 0; i < 2; i++ {
+		require.NoError(t, db.Exec(
+			"INSERT INTO quota_data (user_id, username, model_name, created_at, count, quota, token_used) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			3, "dup-user", "dup-model", int64(10800), 1, 10, 4,
+		).Error)
+	}
+
+	require.NoError(t, migrateDB())
+
+	var rows []QuotaData
+	require.NoError(t, db.Where("user_id = ? AND created_at = ?", 3, int64(10800)).Find(&rows).Error)
+	require.Len(t, rows, 1, "重复桶必须被合并成一行")
+	require.Equal(t, 2, rows[0].Count)
+	require.Equal(t, 20, rows[0].Quota)
+	require.Equal(t, 8, rows[0].TokenUsed)
+	require.True(t, db.Migrator().HasIndex(&QuotaData{}, quotaDataBucketIndex))
 }

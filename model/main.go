@@ -458,7 +458,6 @@ func migrateDB() error {
 		&Log{},
 		&Midjourney{},
 		&TopUp{},
-		&QuotaData{},
 		&Task{},
 		&Model{},
 		&Vendor{},
@@ -491,6 +490,8 @@ func migrateDB() error {
 	if err := migrateVendorMetaUniqueIndex(); err != nil {
 		return err
 	}
+	// QuotaData 不进上面的大 AutoMigrate：标签声明的唯一索引必须在合并存量
+	// 重复桶之后才能建，表的创建与列同步都由这个专用迁移负责。
 	if err := migrateQuotaDataUniqueIndex(); err != nil {
 		return err
 	}

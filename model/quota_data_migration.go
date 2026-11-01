@@ -31,7 +31,7 @@ func migrateQuotaDataUniqueIndexWithExecutor(executor prefillGroupMigrationExecu
 		return executor.AutoMigrate(&QuotaData{})
 	}
 	if executor.HasIndex(&QuotaData{}, quotaDataBucketIndex) {
-		return nil
+		return executor.AutoMigrate(&QuotaData{})
 	}
 
 	var duplicates []struct {
