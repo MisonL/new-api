@@ -576,7 +576,6 @@ const retryStatusCodesLegacyDefaultMigrationOptionKey = "migration.automatic_ret
 var retryStatusCodesLegacyDefaults = []string{
 	"100-199,300-399,401-407,409-499,500-503,505-523,525-599",
 	"100-199,300-399,400-407,409-499,500-503,505-523,525-599",
-
 }
 
 // migrateRetryStatusCodesLegacyDefault 把仍保存着旧出厂重试范围的行一次性
