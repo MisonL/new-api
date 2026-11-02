@@ -17,6 +17,9 @@ type prefillGroupMigrationExecutor interface {
 	TableHasColumn(table, column string) (bool, error)
 	// IndexCoversColumn reports whether indexName on table includes column.
 	IndexCoversColumn(table, indexName, column string) (bool, error)
+	// DB returns the handle the executor wraps, for migrations that need DML
+	// (scan/merge/transaction) on the same connection as their DDL.
+	DB() *gorm.DB
 	Exec(sql string) error
 }
 
@@ -42,6 +45,11 @@ func (e gormPrefillGroupMigrationExecutor) AddColumn(dst interface{}, field stri
 
 func (e gormPrefillGroupMigrationExecutor) HasIndex(dst interface{}, name string) bool {
 	return e.db.Migrator().HasIndex(dst, name)
+}
+
+// DB 暴露执行器包装的库句柄，供需要在同一条连接上做 DML 的迁移使用。
+func (e gormPrefillGroupMigrationExecutor) DB() *gorm.DB {
+	return e.db
 }
 
 func (e gormPrefillGroupMigrationExecutor) TableHasColumn(table, column string) (bool, error) {

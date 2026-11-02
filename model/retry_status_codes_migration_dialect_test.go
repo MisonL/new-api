@@ -86,6 +86,17 @@ func assertRetryStatusCodesMigrationOnRealDB(t *testing.T) {
 	value, ok = retryStatusCodesOptionValue(t)
 	require.True(t, ok)
 	require.Equal(t, legacy, value)
+
+	// 两个 master 同时启动的竞争窗口：双方都在标记检查之后才写标记。
+	// MySQL 的 UPDATE 在值未变化时 RowsAffected=0，gorm Save 会回退成 Create，
+	// 第二次写入因此以主键冲突（1062）报错；SQLite 的 RowsAffected 语义掩盖
+	// 这一点，只能在真实 MySQL/PostgreSQL 上验证。
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return applyRetryStatusCodesLegacyDefault(tx)
+	}))
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return applyRetryStatusCodesLegacyDefault(tx)
+	}), "标记已存在时重复写入必须幂等，不能以主键冲突中断启动")
 }
 
 func TestMigrateRetryStatusCodesOnMySQL(t *testing.T) {

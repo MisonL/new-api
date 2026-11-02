@@ -23,6 +23,8 @@ const (
 
 // modelMetaColumns lists the table's ordinary columns in creation order so a
 // pre-existing table can be brought up to date without a second AutoMigrate.
+// 新增列必须同步加到这里：MySQL 分支不会调用 AutoMigrate，缺列的既有表
+// 只能靠这份清单补齐。modelMetaColumnsIsCurrent 用例把它与 Model 对齐。
 var modelMetaColumns = []string{
 	"model_name",
 	"description",
@@ -35,6 +37,7 @@ var modelMetaColumns = []string{
 	"created_time",
 	"updated_time",
 	"deleted_at",
+	"name_rule",
 }
 
 var vendorMetaColumns = []string{

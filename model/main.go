@@ -426,6 +426,42 @@ func runDBMigration(name string, db *gorm.DB, migrate func() error) error {
 	return nil
 }
 
+// autoMigrateModels 是启动时统一迁移的模型列表。
+//
+// 有一类表不能放进这里：表上带唯一索引、且索引之前必须先归并或改写存量行，
+// 否则统一迁移会按标签抢先把索引建出来，存量数据让建索引失败并打断启动。
+// Model/Vendor（MySQL 上 where:deleted_at IS NULL 被静默丢弃）、QuotaData
+// （重复小时桶）、PrefillGroup 都由各自的专用迁移负责建表、同步列与建索引。
+var autoMigrateModels = []interface{}{
+	&Channel{},
+	&Token{},
+	&User{},
+	&PasskeyCredential{},
+	&Option{},
+	&TagRequestHeaderPolicy{},
+	&RequestHeaderStrategyState{},
+	&SyntheticCompactStateRecord{},
+	&UserHeaderTemplate{},
+	&Redemption{},
+	&GiftCode{},
+	&InvitationRecord{},
+	&Ability{},
+	&Log{},
+	&Midjourney{},
+	&TopUp{},
+	&Task{},
+	&Setup{},
+	&TwoFA{},
+	&TwoFABackupCode{},
+	&Checkin{},
+	&SubscriptionOrder{},
+	&UserSubscription{},
+	&SubscriptionPreConsumeRecord{},
+	&CustomOAuthProvider{},
+	&UserOAuthBinding{},
+	&PerfMetric{},
+}
+
 func migrateDB() error {
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
@@ -441,38 +477,7 @@ func migrateDB() error {
 		return err
 	}
 
-	err := DB.AutoMigrate(
-		&Channel{},
-		&Token{},
-		&User{},
-		&PasskeyCredential{},
-		&Option{},
-		&TagRequestHeaderPolicy{},
-		&RequestHeaderStrategyState{},
-		&SyntheticCompactStateRecord{},
-		&UserHeaderTemplate{},
-		&Redemption{},
-		&GiftCode{},
-		&InvitationRecord{},
-		&Ability{},
-		&Log{},
-		&Midjourney{},
-		&TopUp{},
-		&Task{},
-		&Model{},
-		&Vendor{},
-		&Setup{},
-		&TwoFA{},
-		&TwoFABackupCode{},
-		&Checkin{},
-		&SubscriptionOrder{},
-		&UserSubscription{},
-		&SubscriptionPreConsumeRecord{},
-		&CustomOAuthProvider{},
-		&UserOAuthBinding{},
-		&PerfMetric{},
-	)
-	if err != nil {
+	if err := DB.AutoMigrate(autoMigrateModels...); err != nil {
 		return err
 	}
 	if err := migrateChannelPinOrder(); err != nil {
@@ -571,12 +576,16 @@ const retryStatusCodesLegacyDefaultMigrationOptionKey = "migration.automatic_ret
 var retryStatusCodesLegacyDefaults = []string{
 	"100-199,300-399,401-407,409-499,500-503,505-523,525-599",
 	"100-199,300-399,400-407,409-499,500-503,505-523,525-599",
-	"100-199,300-503,505-523,525-599",
+
 }
 
 // migrateRetryStatusCodesLegacyDefault 把仍保存着旧出厂重试范围的行一次性
 // 升级为新出厂规则（除 2xx 外全部可重试）。标记行保证只执行一次：迁移之后
 // 管理员再手动填写旧范围（或其他自定义值）都会被视为运营决定，不再改写。
+//
+// 标记写入用 ON CONFLICT DO NOTHING 做成幂等：两个 master 同时启动时都可能
+// 先读到"无标记"再进事务，后写入者若以主键冲突报错，runDBMigration 会阻断
+// 整个进程启动。
 func migrateRetryStatusCodesLegacyDefault() error {
 	var marker Option
 	if err := DB.First(&marker, KeyColumn()+" = ?", retryStatusCodesLegacyDefaultMigrationOptionKey).Error; err == nil {
@@ -586,36 +595,42 @@ func migrateRetryStatusCodesLegacyDefault() error {
 	}
 
 	return DB.Transaction(func(tx *gorm.DB) error {
-		updated := 0
-		var option Option
-		err := tx.Where(KeyColumn()+" = ?", "AutomaticRetryStatusCodes").Limit(1).Find(&option).Error
-		if err != nil {
-			return err
-		}
-		if option.Key != "" {
-			for _, legacy := range retryStatusCodesLegacyDefaults {
-				if option.Value != legacy {
-					continue
-				}
-				if err := tx.Model(&Option{}).Where(KeyColumn()+" = ?", "AutomaticRetryStatusCodes").
-					Update("value", operation_setting.DefaultAutomaticRetryStatusCodes()).Error; err != nil {
-					return err
-				}
-				updated = 1
-				break
-			}
-		}
-
-		marker = Option{
-			Key:   retryStatusCodesLegacyDefaultMigrationOptionKey,
-			Value: "done",
-		}
-		if err := tx.Save(&marker).Error; err != nil {
-			return err
-		}
-		common.SysLog(fmt.Sprintf("automatic retry status codes migration finished: updated_options=%d", updated))
-		return nil
+		return applyRetryStatusCodesLegacyDefault(tx)
 	})
+}
+
+// applyRetryStatusCodesLegacyDefault 是迁移的事务主体。标记检查在事务外，
+// 这里不再重复检查，只保证自身幂等：并发重复执行时选项升级与标记写入都不报错。
+func applyRetryStatusCodesLegacyDefault(tx *gorm.DB) error {
+	updated := 0
+	var option Option
+	err := tx.Where(KeyColumn()+" = ?", "AutomaticRetryStatusCodes").Limit(1).Find(&option).Error
+	if err != nil {
+		return err
+	}
+	if option.Key != "" {
+		for _, legacy := range retryStatusCodesLegacyDefaults {
+			if option.Value != legacy {
+				continue
+			}
+			if err := tx.Model(&Option{}).Where(KeyColumn()+" = ?", "AutomaticRetryStatusCodes").
+				Update("value", operation_setting.DefaultAutomaticRetryStatusCodes()).Error; err != nil {
+				return err
+			}
+			updated = 1
+			break
+		}
+	}
+
+	marker := Option{
+		Key:   retryStatusCodesLegacyDefaultMigrationOptionKey,
+		Value: "done",
+	}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&marker).Error; err != nil {
+		return err
+	}
+	common.SysLog(fmt.Sprintf("automatic retry status codes migration finished: updated_options=%d", updated))
+	return nil
 }
 
 const (

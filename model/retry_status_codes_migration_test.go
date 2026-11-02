@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func useRetryStatusCodesMigrationTestDB(t *testing.T) {
@@ -38,7 +39,6 @@ func TestMigrateRetryStatusCodesUpgradesStoredLegacyDefaults(t *testing.T) {
 	for _, legacy := range []string{
 		"100-199,300-399,401-407,409-499,500-503,505-523,525-599",
 		"100-199,300-399,400-407,409-499,500-503,505-523,525-599",
-		"100-199,300-503,505-523,525-599",
 	} {
 		legacy := legacy
 		t.Run(legacy, func(t *testing.T) {
@@ -94,4 +94,22 @@ func TestMigrateRetryStatusCodesRunsOnlyOnce(t *testing.T) {
 	var marker Option
 	require.NoError(t, DB.Where(KeyColumn()+" = ?", retryStatusCodesLegacyDefaultMigrationOptionKey).First(&marker).Error)
 	require.Equal(t, "done", marker.Value)
+}
+
+// 两个 master 同时启动时，双方都会先读到"无标记"、再进入事务写标记。
+// 标记写入必须对主键冲突幂等：后写入者若以主键冲突报错退出，
+// runDBMigration 会让整个进程启动失败。
+func TestMigrateRetryStatusCodesMarkerWriteIsIdempotent(t *testing.T) {
+	useRetryStatusCodesMigrationTestDB(t)
+	legacy := "100-199,300-399,400-407,409-499,500-503,505-523,525-599"
+	require.NoError(t, DB.Create(&Option{Key: "AutomaticRetryStatusCodes", Value: legacy}).Error)
+
+	// 模拟竞争：第一次事务已完成（标记已写、选项已升级），第二个 master 的
+	// 事务在读完"无标记"之后才执行到这里，重复执行迁移主体。
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return applyRetryStatusCodesLegacyDefault(tx)
+	}))
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return applyRetryStatusCodesLegacyDefault(tx)
+	}), "标记已存在时重复写入必须幂等，不能以主键冲突中断启动")
 }

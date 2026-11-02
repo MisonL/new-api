@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Markdown } from '@/components/ui/markdown'
 
 interface StatusCodeRiskDialogProps {
   open: boolean
@@ -21,6 +22,9 @@ interface StatusCodeRiskDialogProps {
   onConfirm: () => void
 }
 
+// 风险确认强度与 classic（StatusCodeRiskGuardModal）保持一致：完整风险告知、
+// 四条逐项确认、以及需要逐字输入且禁止粘贴的确认文本。只勾选不带输入，
+// 或者允许直接粘贴，都等于把这道闸门降级成一次普通点击。
 const CHECKLIST_KEYS = [
   'High-risk status code retry risk check 1',
   'High-risk status code retry risk check 2',
@@ -28,12 +32,7 @@ const CHECKLIST_KEYS = [
   'High-risk status code retry risk check 4',
 ] as const
 
-export function StatusCodeRiskDialog({
-  open,
-  onOpenChange,
-  detailItems,
-  onConfirm,
-}: StatusCodeRiskDialogProps) {
+export function StatusCodeRiskDialog(props: StatusCodeRiskDialogProps) {
   const { t } = useTranslation()
   const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set())
   const [confirmText, setConfirmText] = useState('')
@@ -43,17 +42,20 @@ export function StatusCodeRiskDialog({
   const textMatches = confirmText.trim() === requiredText.trim()
   const canConfirm = allChecked && textMatches
 
-  const handleConfirm = () => {
-    if (!canConfirm) return
+  const resetInputs = () => {
     setCheckedItems(new Set())
     setConfirmText('')
-    onConfirm()
   }
 
-  const handleCancel = () => {
-    setCheckedItems(new Set())
-    setConfirmText('')
-    onOpenChange(false)
+  const handleConfirm = () => {
+    if (!canConfirm) return
+    resetInputs()
+    props.onConfirm()
+  }
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) resetInputs()
+    props.onOpenChange(nextOpen)
   }
 
   const toggleCheck = (idx: number) => {
@@ -66,8 +68,8 @@ export function StatusCodeRiskDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-w-lg'>
+    <Dialog open={props.open} onOpenChange={handleOpenChange}>
+      <DialogContent className='max-w-3xl'>
         <DialogHeader>
           <DialogTitle className='text-destructive flex items-center gap-2'>
             <AlertTriangle className='h-5 w-5' />
@@ -78,14 +80,20 @@ export function StatusCodeRiskDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className='space-y-4'>
-          {detailItems.length > 0 && (
+        <div className='max-h-[70vh] space-y-4 overflow-y-auto pr-1'>
+          <div className='border-destructive/30 bg-destructive/5 rounded-lg border p-3'>
+            <Markdown>
+              {t('High-risk status code retry risk notice markdown')}
+            </Markdown>
+          </div>
+
+          {props.detailItems.length > 0 && (
             <div className='border-destructive/30 bg-destructive/5 rounded-lg border p-3'>
               <p className='mb-2 text-sm font-medium'>
                 {t('Detected high-risk status code redirect rules')}
               </p>
               <ul className='list-inside list-disc text-sm'>
-                {detailItems.map((item) => (
+                {props.detailItems.map((item) => (
                   <li key={item} className='font-mono text-xs'>
                     {item}
                   </li>
@@ -94,7 +102,7 @@ export function StatusCodeRiskDialog({
             </div>
           )}
 
-          <div className='space-y-2'>
+          <div className='space-y-2 rounded-lg border p-3'>
             {CHECKLIST_KEYS.map((key, idx) => (
               <div key={key} className='flex items-start gap-2'>
                 <Checkbox
@@ -112,7 +120,7 @@ export function StatusCodeRiskDialog({
             ))}
           </div>
 
-          <div className='space-y-1.5'>
+          <div className='border-destructive/40 bg-destructive/5 space-y-1.5 rounded-lg border p-3'>
             <Label className='text-sm'>
               {t('Action confirmation')}:{' '}
               <code className='bg-muted rounded px-1 text-xs'>
@@ -123,6 +131,10 @@ export function StatusCodeRiskDialog({
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               placeholder={t('High-risk status code retry input placeholder')}
+              onCopy={(e) => e.preventDefault()}
+              onCut={(e) => e.preventDefault()}
+              onPaste={(e) => e.preventDefault()}
+              onDrop={(e) => e.preventDefault()}
             />
             {confirmText && !textMatches && (
               <p className='text-destructive text-xs'>
@@ -133,7 +145,7 @@ export function StatusCodeRiskDialog({
         </div>
 
         <DialogFooter>
-          <Button variant='outline' onClick={handleCancel}>
+          <Button variant='outline' onClick={() => handleOpenChange(false)}>
             {t('Cancel')}
           </Button>
           <Button

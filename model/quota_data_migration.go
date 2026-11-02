@@ -19,14 +19,14 @@ const quotaDataBucketIndex = "uk_qdt_bucket"
 // fail and abort startup, so the duplicates are summed into the oldest row
 // first.
 func migrateQuotaDataUniqueIndex() error {
-	dialect := ""
-	if DB != nil && DB.Dialector != nil {
-		dialect = DB.Dialector.Name()
-	}
-	return migrateQuotaDataUniqueIndexWithExecutor(gormPrefillGroupMigrationExecutor{db: DB}, dialect)
+	return migrateQuotaDataUniqueIndexWithExecutor(gormPrefillGroupMigrationExecutor{db: DB})
 }
 
-func migrateQuotaDataUniqueIndexWithExecutor(executor prefillGroupMigrationExecutor, dialect string) error {
+// migrateQuotaDataUniqueIndexWithExecutor 在传入执行器指向的库上完成"先合并
+// 重复桶、再建唯一索引"。所有读写都必须走 executor.DB()：写死全局 DB 时，
+// 传入替身或另一个库就会改错库——目标库的重复桶没被合并，随后的建索引必然
+// 失败，而全局库里无关的行反而被改写。
+func migrateQuotaDataUniqueIndexWithExecutor(executor prefillGroupMigrationExecutor) error {
 	if !executor.HasTable(&QuotaData{}) {
 		return executor.AutoMigrate(&QuotaData{})
 	}
@@ -34,13 +34,15 @@ func migrateQuotaDataUniqueIndexWithExecutor(executor prefillGroupMigrationExecu
 		return executor.AutoMigrate(&QuotaData{})
 	}
 
+	db := executor.DB()
+
 	var duplicates []struct {
 		UserID    int
 		Username  string
 		ModelName string
 		CreatedAt int64
 	}
-	query := DB.Table("quota_data").
+	query := db.Table("quota_data").
 		Select("user_id, username, model_name, created_at").
 		Group("user_id, username, model_name, created_at").
 		Having("COUNT(*) > 1")
@@ -48,7 +50,7 @@ func migrateQuotaDataUniqueIndexWithExecutor(executor prefillGroupMigrationExecu
 		return fmt.Errorf("failed to scan duplicate quota_data buckets: %w", err)
 	}
 	for _, bucket := range duplicates {
-		if err := mergeQuotaDataBucket(bucket.UserID, bucket.Username, bucket.ModelName, bucket.CreatedAt); err != nil {
+		if err := mergeQuotaDataBucket(db, bucket.UserID, bucket.Username, bucket.ModelName, bucket.CreatedAt); err != nil {
 			return fmt.Errorf("failed to merge duplicate quota_data bucket (%d,%s,%s,%d): %w",
 				bucket.UserID, bucket.Username, bucket.ModelName, bucket.CreatedAt, err)
 		}
@@ -61,8 +63,8 @@ func migrateQuotaDataUniqueIndexWithExecutor(executor prefillGroupMigrationExecu
 
 // mergeQuotaDataBucket sums every duplicate row of one bucket into the row with
 // the smallest id, then deletes the rest.
-func mergeQuotaDataBucket(userId int, username, modelName string, createdAt int64) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+func mergeQuotaDataBucket(db *gorm.DB, userId int, username, modelName string, createdAt int64) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		var rows []QuotaData
 		if err := tx.Where("user_id = ? AND username = ? AND model_name = ? AND created_at = ?",
 			userId, username, modelName, createdAt).

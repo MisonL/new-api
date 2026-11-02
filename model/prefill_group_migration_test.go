@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type fakePrefillGroupMigrationExecutor struct {
@@ -40,6 +41,11 @@ func (f *fakePrefillGroupMigrationExecutor) AddColumn(dst interface{}, field str
 
 func (f *fakePrefillGroupMigrationExecutor) HasIndex(dst interface{}, name string) bool {
 	return f.hasIndexes[name]
+}
+
+// DB 返回 nil：替身只为 DDL 判定服务，不承载 DML；需要 DML 的迁移用例用真实库。
+func (f *fakePrefillGroupMigrationExecutor) DB() *gorm.DB {
+	return nil
 }
 
 func (f *fakePrefillGroupMigrationExecutor) TableHasColumn(table, column string) (bool, error) {

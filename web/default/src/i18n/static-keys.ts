@@ -423,6 +423,7 @@ export const STATIC_I18N_KEYS = [
   'High-risk status code retry risk check 2',
   'High-risk status code retry risk check 3',
   'High-risk status code retry risk check 4',
+  'High-risk status code retry risk notice markdown',
   'High-risk operation confirmation',
   'High-risk status code retry risk disclaimer',
   'Detected high-risk status code redirect rules',
