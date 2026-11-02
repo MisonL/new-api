@@ -17,12 +17,12 @@
 - 重试链路本身：未发现 P0/P1。闸门顺序、状态码映射、渠道亲和 bypass 与渠道健康
   分类、skip-retry 生产点四处均已逐行复核，无逻辑空洞。
 - 启动迁移：`quota_data` 的启动顺序缺陷已在本批次修复（`50dce9191`）并三库实测。
-  但同类隐患未清理干净：`Model` / `Vendor` 仍在启动大 AutoMigrate 列表里，
-  见第 3 节 F1。
-- 生产环境升级路径：PostgreSQL 15 上不会因 F1 阻断启动（已实测），但生产二进制
-  仍是 2026-09-08 版本，本批次全部改动尚未生效。
-- 隔离开发环境：容器健康、迁移已落库，但 `RetryTimes = 0` 使该实例的重试链路
-  实际空转，见第 4 节 F3。
+  审查另发现 `Model` / `Vendor` 同型隐患（见第 3 节 F1），已由 `afd76c02e` 移出
+  大 AutoMigrate 列表并补 MySQL 回归用例。
+- 生产环境升级路径：生产二进制 `4527d7666`（构建于 2026-09-08）尚未包含本批次
+  全部改动；F1 的阻断路径已实测，MySQL 部署升级前需带 `afd76c02e`。
+- 隔离开发环境：容器健康、迁移已落库；审查当日 `RetryTimes = 0` 使重试链路空转
+  （第 3 节 F3），已改回 3，2026-11-02 复核为 `RetryTimes = 3`。
 
 ## 2. 已核查且未发现问题的项
 
@@ -85,9 +85,12 @@
   挂载分别指向 `.dev-docker/runtime/isolated/{data,logs,postgres}`；端口仅
   3001/5433/6381 且均绑 `127.0.0.1`。
 
-## 3. 未修复发现
+## 3. 发现与处置
 
-### F1（P1，非本批次引入）Model / Vendor 仍在启动大 AutoMigrate 列表中
+本节记录审查当日列出的 F1-F7。前七条在当日审查后由 `afd76c02e` 修复，F3 属数据面，
+已在隔离环境改回；逐条状态见各小节标题后的「已修复」标注。
+
+### F1（P1，非本批次引入，已修复）Model / Vendor 曾在启动大 AutoMigrate 列表中
 
 - 位置：`model/main.go:462-463`（`&Model{}`、`&Vendor{}`）与 `:487`、`:490`
   （专用迁移）。
@@ -117,7 +120,7 @@
   `UserOAuthBinding` 等其余带唯一索引的模型，其索引随建表或列添加一并引入，
   没有"先建索引、后处理数据"的重叠，不属同型隐患。
 
-### F2（P2，本批次引入）第三个 legacy 串无出厂出处
+### F2（P2，本批次引入，已修复）第三个 legacy 串无出厂出处
 
 - 位置：`model/main.go:574`（`100-199,300-503,505-523,525-599`）与
   `model/retry_status_codes_migration_test.go:41`。
@@ -128,7 +131,7 @@
   `9a7fa9d13` 的 `100-199,300-399,401-407,...` 与 `a5deb1bcf` 起的
   `100-199,300-399,400-407,...`）。风险概率低，但匹配一条无出处的字符串没有依据。
 
-### F3（P2，数据面）隔离开发环境 `RetryTimes = 0`
+### F3（P2，数据面，已处置）隔离开发环境 `RetryTimes = 0`
 
 - 位置：dev 库 `options.RetryTimes = 0`（`docker exec ... psql` 只读查询）。
 - 机制：`updateOptionMap`（`model/option.go:550-551`）用库值覆盖代码默认 3 下的
@@ -139,7 +142,7 @@
 - 处置：把该选项改回 >= 1（设置页保存，或 `PUT /api/option/`）。本轮为只读审查，
   未改动。
 
-### F4（P2，本批次引入）迁移标记检查在事务之外
+### F4（P2，本批次引入，已加固）迁移标记检查在事务之外
 
 - 位置：`model/main.go:581-586`（先读标记）与 `:588`（事务内写标记）。
 - 机制：两个 master 同时启动时会双双通过检查，后者 `Save` 主键冲突导致
@@ -147,14 +150,14 @@
   `migrateResponsesCompactModeAuto`）为同一模式，属既有惯例而非新问题类别。
 - 处置建议：可改为在事务内 `First` 再写，或对主键冲突做幂等忽略。
 
-### F5（P2，非本批次引入）`migrateQuotaDataUniqueIndexWithExecutor` 参数与执行器不一致
+### F5（P2，非本批次引入，已修复）`migrateQuotaDataUniqueIndexWithExecutor` 参数与执行器不一致
 
 - 位置：`model/quota_data_migration.go:29`（`dialect` 形参未被使用）、`:43`
   （用全局 `DB` 而非 `executor`）。
 - 机制：生产路径传 `DB`，行为正确；但测试替身路径会查到错误的库。属可读性/
   可测性缺陷，无生产影响。
 
-### F6（P2，非本批次引入）default 前端风险弹窗未与 classic 同步
+### F6（P2，非本批次引入，已修复）default 前端风险弹窗未与 classic 同步
 
 - 位置：`web/default/src/features/channels/components/dialogs/status-code-risk-dialog.tsx`
   对 `web/classic/src/components/table/channels/modals/StatusCodeRiskGuardModal.jsx`。
@@ -162,10 +165,11 @@
   一句短 disclaimer + 4 条通用勾选。两侧机制（`NON_REDIRECTABLE = {504,524}`
   守卫渠道状态码重定向）功能等价，仅确认强度不同。非事实性错误。
 
-### F7（P2，非本批次引入）classic `i18n:lint` 门为红
+### F7（P2，非本批次引入，已修复）classic `i18n:lint` 门为红
 
-- 命令：`cd web/classic && bun run i18n:lint`，退出码 1。
+- 命令：`cd web/classic && bun run i18n:lint`，审查当日退出码 1。
   输出：`i18n lint 当前共 62 条，基线 307 条，新增 6 条，已解决 251 条`。
+- 现状（2026-11-02 复跑）：基线已由 `afd76c02e` 重置为 62 条，退出码 0。
 - 新增 6 条均为硬编码字符串：`CardTable.jsx:643`、`NotificationSettings.jsx:690,693`、
   `EditTagModal.jsx:809`、`TokensColumnDefs.jsx:154,183`。
 - 与本次改动无关：这 4 个文件的最近提交分别为 `8427a98ae`、`7497b8e4c`、
@@ -186,7 +190,7 @@
 | `cd web/classic && bun run build` | 0 | 通过 |
 | `cd web/default && bun run lint` | 0 | 0 errors / 22 warnings（与本批次无关） |
 | `cd web/default && bun run typecheck` | 0 | 通过（`tsc -b`，约 81s） |
-| `cd web/classic && bun run i18n:lint` | 1 | 6 条新增硬编码，见 F7 |
+| `cd web/classic && bun run i18n:lint` | 1（当日）/ 0（2026-11-02 复跑） | 当日 6 条新增硬编码；`afd76c02e` 重置基线后转绿，见 F7 |
 
 反向验证（本轮复核）：
 
@@ -210,3 +214,32 @@
 - 生产容器始终只读：本轮对生产库仅执行 SELECT，未重启、未改配置。
 - 隔离开发环境的一次性测试库（MySQL `newapi_test_*`）与临时 schema 已全部删除；
   `na-audit-mysql2` 容器已 `stop` 回原状态；构建过程产生的临时目录已清理。
+
+## 6. 复审（2026-11-02）
+
+逐条对照代码与实跑结果复核 F1-F7 与验证表，结论如下。
+
+| 项 | 复核方法 | 结果 |
+| --- | --- | --- |
+| F1 | `awk` 提取 `autoMigrateModels` 列表 | `&Model{}`、`&Vendor{}`、`&QuotaData{}`、`&PrefillGroup{}` 均不在列表内，由专用迁移独占 |
+| F2 | `grep retryStatusCodesLegacyDefaults` | 仅剩两条有出厂出处的串，第三个串已删除 |
+| F3 | 隔离库 `SELECT key,value FROM options` | `RetryTimes = 3` |
+| F4 | 读 `migrateRetryStatusCodesLegacyDefault` | 标记写入已改为 `ON CONFLICT DO NOTHING`，重复执行不报错 |
+| F5 | 读 `quota_data_migration.go` | 形参改为 `executor`，扫描与合并都走 `executor.DB()` |
+| F6 | 读 `status-code-risk-dialog.tsx` | 已渲染 Markdown 风险告知 |
+| F7 | `cd web/classic && bun run i18n:lint` | 退出码 0，`当前共 62 条，基线 62 条，新增 0 条` |
+
+复跑命令与结果：
+
+| 命令 | 退出码 | 结果 |
+| --- | --- | --- |
+| `go test ./controller ./model ./relay/common ./relay/helper ./service` | 0 | 五个包全部 ok |
+| `gofmt -l model/` | 0 | 无输出 |
+
+本轮另发现 `afd76c02e` 遗留两处格式问题（`model/main.go` 数组末尾多余空行、
+`model/meta_unique_mysql_f1_test.go` 缺少文件末尾换行），已由 `15a314da0`
+修正，无行为变化。
+
+边界：生产容器本轮仍只读，未重启、未改配置；上述结论只覆盖源码与隔离环境，
+不表示生产已运行这些修复。生产二进制 `4527d7666` 构建于 2026-09-08，落后于
+本地 `dev` 676 个提交。
