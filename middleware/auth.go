@@ -233,10 +233,17 @@ func authHelper(c *gin.Context, minRole int) {
 
 func TryUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		// 与 TokenOrUserAuth 同理：会话里的身份只是登录时的快照，禁用必须即时
+		// 生效。这里挂的接口本身是公开的（/api/pricing 等），所以身份无效时不
+		// 中断请求，只是不再把 id 交给后续 handler，按未登录处理。
 		session := sessions.Default(c)
-		id := session.Get("id")
-		if id != nil {
-			c.Set("id", id)
+		if id := session.Get("id"); id != nil {
+			if userID, ok := id.(int); ok && userID > 0 {
+				user, err := loadSessionUserIdentity(session)
+				if err == nil && user != nil && user.Status == common.UserStatusEnabled {
+					c.Set("id", userID)
+				}
+			}
 		}
 		c.Next()
 	}
