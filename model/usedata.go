@@ -200,9 +200,9 @@ func upsertQuotaData(quotaData *QuotaData) error {
 			{Name: "created_at"},
 		},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"count":      gorm.Expr("count + ?", quotaData.Count),
-			"quota":      gorm.Expr("quota + ?", quotaData.Quota),
-			"token_used": gorm.Expr("token_used + ?", quotaData.TokenUsed),
+			"count":      gorm.Expr("quota_data.count + ?", quotaData.Count),
+			"quota":      gorm.Expr("quota_data.quota + ?", quotaData.Quota),
+			"token_used": gorm.Expr("quota_data.token_used + ?", quotaData.TokenUsed),
 		}),
 	}).Table("quota_data").Create(quotaData).Error
 }
