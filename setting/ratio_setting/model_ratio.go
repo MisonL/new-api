@@ -190,19 +190,19 @@ var defaultModelRatio = map[string]float64{
 	"deepseek-v4-pro":                          0.2175, // $0.435 / 1M tokens
 	"deepseek-ai/deepseek-v4-pro":              0.2175,
 	// MiMo V2.5 overseas price: $0.14 / 1M input tokens.
-	"mimo-v2.5":              0.07,
+	"mimo-v2.5":                0.07,
 	"mimo-v2.6-flash":          0.07,      // $0.14 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
 	"mimo-v2.6-pro":            0.2175,    // $0.435 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
 	"mimo-v2.6-pro-ultraspeed": 2.175,     // $4.35 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
-	"mimo-v2.5-pro":          0.435 / 2, // $0.435 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
-	"minimax-m3":             0.15,      // $0.30 / 1M current permanent price; official page marks it Permanent 50% off $0.60 list price
-	"minimaxai/minimax-m3":   0.15,
-	"minimax-m2":             0.15, // $0.30 / 1M tokens
-	"minimax-m2.1":           0.15, // $0.30 / 1M tokens
-	"minimax-m2.7":           0.15, // $0.30 / 1M tokens
-	"minimax-m2.1-highspeed": 0.3,  // $0.60 / 1M tokens
-	"minimax-m2p5-highspeed": 0.3,  // $0.60 / 1M tokens
-	"minimax-m2.7-highspeed": 0.3,  // $0.60 / 1M tokens
+	"mimo-v2.5-pro":            0.435 / 2, // $0.435 / 1M tokens; https://mimo.mi.com/static/docs/price/pay-as-you-go.md
+	"minimax-m3":               0.15,      // $0.30 / 1M current permanent price; official page marks it Permanent 50% off $0.60 list price
+	"minimaxai/minimax-m3":     0.15,
+	"minimax-m2":               0.15, // $0.30 / 1M tokens
+	"minimax-m2.1":             0.15, // $0.30 / 1M tokens
+	"minimax-m2.7":             0.15, // $0.30 / 1M tokens
+	"minimax-m2.1-highspeed":   0.3,  // $0.60 / 1M tokens
+	"minimax-m2p5-highspeed":   0.3,  // $0.60 / 1M tokens
+	"minimax-m2.7-highspeed":   0.3,  // $0.60 / 1M tokens
 	// LongCat-2.0 Chat API standard price: ¥5 / 1M input tokens.
 	// The official page also lists a limited-time discounted price; this
 	// project keeps the standard price and does not use that discount.
@@ -516,33 +516,33 @@ var defaultModelRatio = map[string]float64{
 
 	// SiliconFlow official serverless prices (USD per 1M tokens).
 	// Qualified keys stay separate from other providers' prices.
-	"deepseek-ai/DeepSeek-V3":              0.25 / 2,
-	"deepseek-ai/DeepSeek-V3.1-Terminus":   0.27 / 2,
-	"deepseek-ai/DeepSeek-V3.2":            0.27 / 2,
-	"Qwen/Qwen3.6-35B-A3B":                 0.20 / 2,
-	"Qwen/Qwen3.5-397B-A17B":               0.39 / 2,
-	"Qwen/Qwen3.5-122B-A10B":               0.26 / 2,
-	"Qwen/Qwen3.5-35B-A3B":                 0.24 / 2,
-	"Qwen/Qwen3.5-27B":                     0.25 / 2,
-	"Qwen/Qwen3.5-9B":                      0.10 / 2,
-	"Qwen/Qwen3-VL-32B-Instruct":           0.20 / 2,
-	"Qwen/Qwen3-VL-32B-Thinking":           0.20 / 2,
-	"Qwen/Qwen3-VL-8B-Instruct":            0.18 / 2,
-	"Qwen/Qwen3-VL-30B-A3B-Instruct":       0.29 / 2,
-	"Qwen/Qwen3-VL-30B-A3B-Thinking":       0.29 / 2,
-	"Qwen/Qwen3-Coder-30B-A3B-Instruct":    0.07 / 2,
-	"Qwen/Qwen3-Coder-480B-A35B-Instruct":  0.25 / 2,
-	"Qwen/Qwen3-30B-A3B-Instruct-2507":     0.09 / 2,
-	"Qwen/Qwen3-30B-A3B-Thinking-2507":     0.09 / 2,
-	"Qwen/Qwen3-32B":                       0.14 / 2,
-	"Qwen/Qwen3-14B":                       0.07 / 2,
-	"Qwen/Qwen3-8B":                        0.06 / 2,
-	"Qwen/Qwen2.5-72B-Instruct":            0.59 / 2,
-	"Qwen/Qwen2.5-72B-Instruct-128K":       0.59 / 2,
-	"Qwen/Qwen2.5-7B-Instruct":             0.05 / 2,
-	"Qwen/Qwen3-Embedding-8B":              0.04 / 2,
-	"Qwen/Qwen3-Embedding-4B":              0.02 / 2,
-	"Qwen/Qwen3-Embedding-0.6B":            0.01 / 2,
+	"deepseek-ai/DeepSeek-V3":             0.25 / 2,
+	"deepseek-ai/DeepSeek-V3.1-Terminus":  0.27 / 2,
+	"deepseek-ai/DeepSeek-V3.2":           0.27 / 2,
+	"Qwen/Qwen3.6-35B-A3B":                0.20 / 2,
+	"Qwen/Qwen3.5-397B-A17B":              0.39 / 2,
+	"Qwen/Qwen3.5-122B-A10B":              0.26 / 2,
+	"Qwen/Qwen3.5-35B-A3B":                0.24 / 2,
+	"Qwen/Qwen3.5-27B":                    0.25 / 2,
+	"Qwen/Qwen3.5-9B":                     0.10 / 2,
+	"Qwen/Qwen3-VL-32B-Instruct":          0.20 / 2,
+	"Qwen/Qwen3-VL-32B-Thinking":          0.20 / 2,
+	"Qwen/Qwen3-VL-8B-Instruct":           0.18 / 2,
+	"Qwen/Qwen3-VL-30B-A3B-Instruct":      0.29 / 2,
+	"Qwen/Qwen3-VL-30B-A3B-Thinking":      0.29 / 2,
+	"Qwen/Qwen3-Coder-30B-A3B-Instruct":   0.07 / 2,
+	"Qwen/Qwen3-Coder-480B-A35B-Instruct": 0.25 / 2,
+	"Qwen/Qwen3-30B-A3B-Instruct-2507":    0.09 / 2,
+	"Qwen/Qwen3-30B-A3B-Thinking-2507":    0.09 / 2,
+	"Qwen/Qwen3-32B":                      0.14 / 2,
+	"Qwen/Qwen3-14B":                      0.07 / 2,
+	"Qwen/Qwen3-8B":                       0.06 / 2,
+	"Qwen/Qwen2.5-72B-Instruct":           0.59 / 2,
+	"Qwen/Qwen2.5-72B-Instruct-128K":      0.59 / 2,
+	"Qwen/Qwen2.5-7B-Instruct":            0.05 / 2,
+	"Qwen/Qwen3-Embedding-8B":             0.04 / 2,
+	"Qwen/Qwen3-Embedding-4B":             0.02 / 2,
+	"Qwen/Qwen3-Embedding-0.6B":           0.01 / 2,
 	// Unprefixed spellings are what upstreams and logs actually use; the
 	// normalizer maps them here, so they must carry the same price.
 	"qwen3-embedding-8b":                   0.04 / 2,

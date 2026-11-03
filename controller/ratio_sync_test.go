@@ -99,7 +99,6 @@ func TestSanitizeType1RatioDataIsSerializable(t *testing.T) {
 	require.NoError(t, err, "sanitized data must be JSON-serializable")
 }
 
-
 // 上游 envelope 的 success 翻译规则。此前 Success 是 bool 零值 false：不带
 // success 字段的裸静态载荷会被判成失败，且 success=false + 空 message 会以
 // 空错误串进入结果、收集侧按 Err=="" 判成成功——两头都是伪状态。
@@ -128,7 +127,6 @@ func TestUpstreamEnvelopeError(t *testing.T) {
 		})
 	}
 }
-
 
 // 端到端：本地 HTTP 上游返回不带 success 字段的静态 ratio_config，/fetch 必须
 // 把它当成功解析；success=false 且无 message 的上游必须报错而不是伪成功。

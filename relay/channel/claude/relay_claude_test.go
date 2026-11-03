@@ -810,9 +810,9 @@ func TestHandleStreamFinalResponseKeepsExplicitZeroUsage(t *testing.T) {
 		info.SetEstimatePromptTokens(1234)
 		claudeInfo := &ClaudeResponseInfo{
 			Usage: &dto.Usage{
-				PromptTokens:               0,
-				CompletionTokens:           0,
-				PromptTokensDetails:        dto.InputTokenDetails{CachedTokens: 5000},
+				PromptTokens:                0,
+				CompletionTokens:            0,
+				PromptTokensDetails:         dto.InputTokenDetails{CachedTokens: 5000},
 				ClaudeCacheCreation5mTokens: 200,
 			},
 			Done: true,
