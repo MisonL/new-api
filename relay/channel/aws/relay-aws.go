@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
@@ -391,10 +392,22 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 		Usage:        &dto.Usage{},
 	}
 
+	// 与 ClaudeStreamHandler 一致：入口先认为「尚未提交内容」。客户端此时
+	// 最多只收到 ping，上游在首个数据帧前断流仍可安全换渠道。首个
+	// message_start / 内容帧到达后由 HandleStreamResponseData 细化。
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
+	// ReceivedResponseCount 是 attempt 级计数（StreamScannerHandler 在每次
+	// 扫描结束时按本轮计数赋值）。重试复用同一个 RelayInfo，这里必须先从零
+	// 开始，否则上一轮的帧数会累积到本轮。
+	info.ReceivedResponseCount = 0
+
 	for event := range stream.Events() {
 		switch v := event.(type) {
 		case *bedrockruntimeTypes.ResponseStreamMemberChunk:
 			info.SetFirstResponseTime()
+			// 自管扫描器不经过 StreamScannerHandler，需自行累计，供
+			// RetryableUpstreamStreamInterruptedError 判断下游是否已收到内容。
+			info.ReceivedResponseCount++
 			respErr := claude.HandleStreamResponseData(c, info, claudeInfo, string(v.Value.Bytes))
 			if respErr != nil {
 				return respErr, nil
@@ -408,8 +421,29 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 		}
 	}
 
+	if newAPIError := finishAwsStream(c, info, claudeInfo, stream.Err()); newAPIError != nil {
+		return newAPIError, claudeInfo.Usage
+	}
 	claude.HandleStreamFinalResponse(c, info, claudeInfo)
 	return nil, claudeInfo.Usage
+}
+
+// finishAwsStream 收尾 AKSK InvokeModelWithResponseStream 的自管扫描循环。
+// 与 converse 的 finishConverseStream 同理：handler 本体需要真实的
+// *bedrockruntime.Client，无法在单测里构造，终止判定提取出来直接驱动。
+//
+// 判据跟随 ClaudeStreamHandler：见过 message_stop 即正常结束；未见终止标记
+// 则按上游中断处理，只有在客户端尚未收到内容帧（prelude 阶段）时才转成可
+// 重试错误，内容帧已下发则退回部分成功，避免重放产生重复内容。
+func finishAwsStream(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *claude.ClaudeResponseInfo, streamErr error) *types.NewAPIError {
+	if info != nil && info.StreamStatus != nil && streamErr != nil && !claudeInfo.SawMessageStop {
+		// 保留 SDK 事件流的真实错误，RecordStreamEnd 只在 EndReason 为空时
+		// 写入通用错误，这里先写可以保住根因。
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonUpstreamInterrupted,
+			errors.Wrap(streamErr, "AWS InvokeModelWithResponseStream"))
+	}
+	helper.RecordStreamEnd(c, info, claudeInfo.SawMessageStop)
+	return relaycommon.RetryableUpstreamStreamInterruptedError(c, info)
 }
 
 // Nova模型处理函数
