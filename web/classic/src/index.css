@@ -9,7 +9,13 @@
 
 @layer theme, base, semi, components, utilities;
 
-@theme {
+/* semi-color-* 令牌必须用 inline：Tailwind 4 默认把 @theme 变量声明在 :root，
+   而 Semi 的 --semi-color-* 定义在 body（body / body[theme-mode=dark]）。
+   :root 是 body 的祖先，祖先解析不到后代元素上的自定义属性，于是
+   --color-semi-color-*: var(--semi-color-*) 在 :root 上求值失败，
+   所有 bg/text/border-semi-color-* 工具类变成无效值。inline 让工具类直接输出
+   var(--semi-color-*)，在真正使用它的元素上解析，恢复 Tailwind 3 的行为。 */
+@theme inline {
   --color-*: initial;
   --radius-*: initial;
 
@@ -150,6 +156,19 @@
   --radius-large: var(--semi-border-radius-large);
   --radius-circle: var(--semi-border-radius-circle);
   --radius-full: var(--semi-border-radius-full);
+
+  /* 标准圆角刻度：Tailwind 3 时代由 theme.extend.borderRadius 保留默认值，
+     rounded-md/lg/xl/2xl/3xl 一直可用。Tailwind 4 的 --radius-*: initial 把它们
+     一并清掉后必须显式补回，否则源码里 400+ 处 rounded-* 生成不出 CSS。 */
+  --radius-xs: 0.125rem;
+  --radius-sm: 0.25rem;
+  --radius: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+  --radius-4xl: 2rem;
 }
 
 /* ==================== 全局基础样式 ==================== */
