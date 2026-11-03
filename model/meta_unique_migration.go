@@ -113,7 +113,10 @@ func migrateSoftDeleteUniqueIndexWithExecutor(
 	if dialect != "mysql" {
 		// 非 MySQL：确保表结构里有模型声明的部分唯一索引。AutoMigrate 会
 		// 按 gorm tag 的 where 条件重建索引。
-		return executor.AutoMigrate(model)
+		if err := executor.AutoMigrate(model); err != nil {
+			return err
+		}
+		return dropLegacySoftDeleteUniqueIndex(executor, dialect, model, table, indexName+"_delete_at")
 	}
 
 	// 不能在这里再调一次 AutoMigrate：表已存在时 gorm 会进入
@@ -144,16 +147,34 @@ func migrateSoftDeleteUniqueIndexWithExecutor(
 	if err != nil {
 		return fmt.Errorf("failed to inspect %s index %s: %w", table, indexName, err)
 	}
-	if covers {
-		return nil
-	}
-	if executor.HasIndex(model, indexName) {
-		if err := executor.Exec("ALTER TABLE `" + table + "` DROP INDEX `" + indexName + "`"); err != nil {
-			return fmt.Errorf("failed to drop degraded %s index %s: %w", table, indexName, err)
+	if !covers {
+		if executor.HasIndex(model, indexName) {
+			if err := executor.Exec("ALTER TABLE `" + table + "` DROP INDEX `" + indexName + "`"); err != nil {
+				return fmt.Errorf("failed to drop degraded %s index %s: %w", table, indexName, err)
+			}
+		}
+		if err := executor.Exec("CREATE UNIQUE INDEX `" + indexName + "` ON `" + table + "` (`" + activeColumn + "`)"); err != nil {
+			return fmt.Errorf("failed to create %s unique index on %s: %w", table, activeColumn, err)
 		}
 	}
-	if err := executor.Exec("CREATE UNIQUE INDEX `" + indexName + "` ON `" + table + "` (`" + activeColumn + "`)"); err != nil {
-		return fmt.Errorf("failed to create %s unique index on %s: %w", table, activeColumn, err)
+	return dropLegacySoftDeleteUniqueIndex(executor, dialect, model, table, indexName+"_delete_at")
+}
+
+// dropLegacySoftDeleteUniqueIndex 删除软删除表上旧的复合唯一索引
+// (name, deleted_at)。该索引对未删除行没有约束力：SQL 里 NULL 互不相等，
+// 两行同名、deleted_at 均为 NULL 时不冲突；它只白白增加每次写入的维护开销，
+// 并在两行软删除时间戳相同时错误地阻止同名重建。改为部分唯一索引后就该清掉，
+// 否则旧库升级后它会一直留着。索引不存在时是空操作。
+func dropLegacySoftDeleteUniqueIndex(executor prefillGroupMigrationExecutor, dialect string, model interface{}, table, indexName string) error {
+	if !executor.HasIndex(model, indexName) {
+		return nil
+	}
+	stmt := fmt.Sprintf("DROP INDEX IF EXISTS \"%s\"", indexName)
+	if dialect == "mysql" {
+		stmt = fmt.Sprintf("ALTER TABLE `%s` DROP INDEX `%s`", table, indexName)
+	}
+	if err := executor.Exec(stmt); err != nil {
+		return fmt.Errorf("failed to drop legacy %s index %s: %w", table, indexName, err)
 	}
 	return nil
 }
