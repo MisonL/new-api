@@ -1375,6 +1375,20 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			return nil
 		}
 
+		// 与 RelayFormatClaude 分支同样的 prelude 判定：Claude 渠道也会服务
+		// OpenAI 格式客户端，缺了这段，上游只发 message_start 后断流会被当成
+		// 「内容已提交」，既不换渠道重试，又按 prompt token 计费，客户端拿到空回复。
+		if claudeResponse.Type == "message_start" {
+			if common.GetContextKeyBool(c, constant.ContextKeyClaudeStreamPreludeSent) {
+				// 重试尝试：角色帧已下发过，不重复转发；usage 解析已在上面完成。
+				return nil
+			}
+			common.SetContextKey(c, constant.ContextKeyClaudeStreamPreludeSent, true)
+			common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
+		} else if claudeResponse.Type == "content_block_start" || claudeResponse.Type == "content_block_delta" {
+			common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, false)
+		}
+
 		if response != nil {
 			err = helper.ObjectData(c, response)
 			if err != nil {
@@ -1434,6 +1448,11 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		Usage:        &dto.Usage{},
 	}
 	var err *types.NewAPIError
+	// 与其它渠道一致，入口先认为「尚未提交内容」：客户端此时最多只收到 ping，
+	// 上游在首个数据帧前断流仍可安全换渠道。首个 message_start / 内容帧到达后
+	// 由 HandleStreamResponseData 细化。缺了这行，ping 先写出会让 Written() 为真
+	// 而标记为假，一次本可重试的中断会被挡成 502。
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
 		if err != nil {
