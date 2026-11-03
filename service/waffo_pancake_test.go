@@ -17,6 +17,13 @@ import (
 func setupWaffoPancakeTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	previousUsingSQLite := common.UsingSQLite
+	previousUsingMySQL := common.UsingMySQL
+	previousUsingPostgreSQL := common.UsingPostgreSQL
+	previousRedisEnabled := common.RedisEnabled
+	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+
 	common.UsingSQLite = true
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
@@ -31,7 +38,16 @@ func setupWaffoPancakeTestDB(t *testing.T) *gorm.DB {
 
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}))
 
+	// 必须恢复共享的 model.DB/LOG_DB：TestMain 里的库是全包共用的，本函数
+	// 换掉的句柄只活到本用例结束。若只关自己的库而不恢复指针，-shuffle 让
+	// 本用例先跑时后续用例会拿到已关闭的句柄，批量报 sql: database is closed。
 	t.Cleanup(func() {
+		common.UsingSQLite = previousUsingSQLite
+		common.UsingMySQL = previousUsingMySQL
+		common.UsingPostgreSQL = previousUsingPostgreSQL
+		common.RedisEnabled = previousRedisEnabled
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
 		sqlDB, err := db.DB()
 		if err == nil {
 			_ = sqlDB.Close()
