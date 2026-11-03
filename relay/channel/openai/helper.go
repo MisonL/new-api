@@ -38,6 +38,7 @@ func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string
 type streamPreludeDelta struct {
 	Content          *string          `json:"content"`
 	ReasoningContent *string          `json:"reasoning_content"`
+	ThinkingContent  *string          `json:"thinking_content"`
 	Reasoning        *string          `json:"reasoning"`
 	Refusal          *string          `json:"refusal"`
 	ToolCalls        []map[string]any `json:"tool_calls"`
@@ -54,7 +55,10 @@ func hasStreamPreludeContent(delta streamPreludeDelta) bool {
 	if len(delta.ToolCalls) > 0 {
 		return true
 	}
-	for _, field := range []*string{delta.Content, delta.ReasoningContent, delta.Reasoning, delta.Refusal} {
+	// thinking_content 与 reasoning_content/reasoning 同类：都是推理内容，一旦
+	// 下发就不能再换渠道重放，否则客户端会看到重复的推理片段。漏掉它会让只带
+	// thinking_content 的帧被当成空 prelude，中断后错误地重试。
+	for _, field := range []*string{delta.Content, delta.ReasoningContent, delta.ThinkingContent, delta.Reasoning, delta.Refusal} {
 		if field != nil && *field != "" {
 			return true
 		}
