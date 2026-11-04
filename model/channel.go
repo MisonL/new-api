@@ -1100,16 +1100,18 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 		defer channelStatusLock.Unlock()
 	}
 
-	shouldUpdateAbilities := false
+	// 读-改-写必须在同一把 per-channel 锁内：加锁前读出的快照会让并发更新
+	// 互相覆盖（多密钥渠道不同 key 并发禁用时，后写者抹掉先写者的禁用状态）。
+	pollingLock := GetChannelPollingLock(channelId)
+	pollingLock.Lock()
+	defer pollingLock.Unlock()
+
 	channel, err := GetChannelById(channelId, true)
 	if err != nil {
 		return false
 	}
+	shouldUpdateAbilities := false
 	if channel.ChannelInfo.IsMultiKey {
-		pollingLock := GetChannelPollingLock(channelId)
-		pollingLock.Lock()
-		defer pollingLock.Unlock()
-
 		beforeStatus := channel.Status
 		changed := handlerMultiKeyUpdate(channel, usingKey, status, reason)
 		if !changed {
@@ -1130,10 +1132,14 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 		shouldUpdateAbilities = true
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		// channel 是改状态前读出的快照：读与保存之间可能已有计费落库，
-		// 整行 Save 会把 used_quota / balance 写回快照值。这两列只由运行时
-		// 累加，任何保存路径都必须排除；key 则是永远不写回的敏感列。
-		if err := tx.Omit("key", "used_quota", "balance").Save(channel).Error; err != nil {
+		// 只写本函数负责的列。整行 Save 会把读取后、保存前由管理端或其他
+		// 写路径修改的 models/group/settings 等列回滚成旧快照。
+		updates := map[string]interface{}{
+			"status":       channel.Status,
+			"channel_info": channel.ChannelInfo,
+			"other_info":   channel.OtherInfo,
+		}
+		if err := tx.Model(&Channel{}).Where("id = ?", channelId).Updates(updates).Error; err != nil {
 			return err
 		}
 		if shouldUpdateAbilities {
