@@ -65,6 +65,14 @@ func beginResponsesStreamRelayAttempt(c *gin.Context, info *relaycommon.RelayInf
 	// interruption or completion state, so every streaming attempt gets a
 	// fresh one -- not only the Responses formats.
 	info.StreamStatus = relaycommon.NewStreamStatus()
+	// 帧计数与 prelude 标记同样是 attempt 级状态：重试复用同一个 gin context，
+	// 上一轮的内容帧不能带进本轮。标记先置为“不安全”，只有本轮渠道在入口
+	// 显式声明“只发过前导帧”时才允许换渠道重试；不参与置位的自管渠道因此
+	// 不会在写出内容后仍被判定可重试。
+	info.ReceivedResponseCount = 0
+	if c != nil {
+		common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, false)
+	}
 	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
 		return
 	}
