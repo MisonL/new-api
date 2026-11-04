@@ -85,6 +85,17 @@ func TestF1ModelMetaMySQLBackwardCompat(t *testing.T) {
 	require.Equal(t, modelActiveNameColumn, indexColumns,
 		"唯一索引必须落在活动行生成列上，而不是 model_name 列")
 
+	// Step 4b: 旧的复合唯一索引必须被删除。它对未删除行没有约束力（deleted_at
+	// 为 NULL 时互不相等），只增加写入开销，并会在两行软删除时间戳相同时错误
+	// 地阻止同名重建。AutoMigrate 只补建新索引、不删旧索引，必须由迁移显式 DROP。
+	var legacyIndexCount int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'models' AND index_name = ?",
+		modelMetaNameIndex+"_delete_at",
+	).Scan(&legacyIndexCount).Error)
+	require.Zero(t, legacyIndexCount,
+		"升级后旧复合唯一索引 uk_model_name_delete_at 必须被删除")
+
 	// Step 5: 拒绝新的同名活动行
 	insertNow := now + 1
 	require.NoError(t, db.Exec(
@@ -169,4 +180,13 @@ func TestF1VendorMetaMySQLBackwardCompat(t *testing.T) {
 	).Scan(&indexColumns).Error)
 	require.Equal(t, vendorActiveNameColumn, indexColumns,
 		"唯一索引必须落在活动行生成列上，而不是 name 列")
+
+	// 旧复合唯一索引同样必须被删除，理由见 Model 用例 Step 4b。
+	var legacyIndexCount int64
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'vendors' AND index_name = ?",
+		vendorMetaNameIndex+"_delete_at",
+	).Scan(&legacyIndexCount).Error)
+	require.Zero(t, legacyIndexCount,
+		"升级后旧复合唯一索引 uk_vendor_name_delete_at 必须被删除")
 }
