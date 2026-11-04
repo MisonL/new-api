@@ -960,6 +960,13 @@ func ManageUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	// Where(&User{Id: 0}) 不产生任何条件，Unscoped().First 会返回最低 ID 的
+	// 用户（通常是 root），后面的 `user.Id == 0` 检查永远不会命中。必须先
+	// 拦下无效 ID，避免 add_quota 等操作落到错误目标上。
+	if req.Id <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
 	user := model.User{
 		Id: req.Id,
 	}
