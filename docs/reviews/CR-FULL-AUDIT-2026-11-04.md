@@ -39,7 +39,7 @@
 - 机理：`newUser := *user` 后 `DB.First(&user, user.Id)` 的返回值被丢弃。对软删除行该查询返回 not found 且不清空目标结构体（GORM 语义），随后 `Updates` 命中 0 行且 `Error == nil`，最后 `updateUserCache(*user)` 把调用方快照整哈希写入 Redis。
 - 确定性触发：`ManageUser` 用 `DB.Unscoped()` 载入目标用户，管理员可对已软删用户执行 `action=enable`；`enable` 分支不失效缓存（只有 disable/promote/demote 失效）。
 - 后果：Redis 启用时，该用户既有令牌在缓存 TTL（默认 60s）内重新通过 `TokenAuth`。
-- 附带同源问题：`DB.First` 成功后 `*user` 被替换成更新前的数据库快照，而 `Updates` 不修改结构体，因此每次成功 `Update/Edit` 写进缓存的都是更新前的值；`Enable`、OAuth 绑定、`UpdateUserSetting` 等路径在 TTL 内读到旧值。安全相关动作（disable/promote/demote）由控制器显式失效缓存兜底。
+- 附带说明（已用探针修正）：GORM 在 `Updates` 成功后会把赋值写回模型结构体，因此成功更新时缓存内容与数据库一致，"缓存写旧值"不成立；真实缺陷只有软删行/0 行更新后仍回写快照这一条。
 - 证据：上述代码；仓库内 `controller/user_manage_delete_cache_test.go` 的注释已描述 delete 分支的同类机理，模型层入口仍敞开。
 
 ### P1-4 `UpdateChannelStatus` 在锁外读取、锁内整行 `Save`，并发下丢失更新 ★

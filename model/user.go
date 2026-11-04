@@ -578,6 +578,9 @@ var billingColumns = []string{
 }
 
 func (user *User) Update(updatePassword bool) error {
+	if user.Id == 0 {
+		return errors.New("user id is empty")
+	}
 	var err error
 	if updatePassword {
 		user.Password, err = common.Password2Hash(user.Password)
@@ -586,8 +589,17 @@ func (user *User) Update(updatePassword bool) error {
 		}
 	}
 	newUser := *user
-	DB.First(&user, user.Id)
+	// First 的错误不能丢弃：软删除行返回 not found，Updates 会命中 0 行且
+	// 不报错，随后 updateUserCache 仍会把调用方快照（例如 ManageUser 的
+	// enable）写进 Redis，让已删除用户在缓存 TTL 内重新通过鉴权。
+	if err = DB.First(user, user.Id).Error; err != nil {
+		return err
+	}
 	if err = DB.Omit(billingColumns...).Model(user).Updates(newUser).Error; err != nil {
+		return err
+	}
+	// Updates 后再读一次，缓存写的是更新后的整行状态，而不是更新前快照。
+	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
 	}
 
@@ -596,6 +608,9 @@ func (user *User) Update(updatePassword bool) error {
 }
 
 func (user *User) Edit(updatePassword bool) error {
+	if user.Id == 0 {
+		return errors.New("user id is empty")
+	}
 	var err error
 	if updatePassword {
 		user.Password, err = common.Password2Hash(user.Password)
@@ -615,8 +630,13 @@ func (user *User) Edit(updatePassword bool) error {
 		updates["password"] = newUser.Password
 	}
 
-	DB.First(&user, user.Id)
+	if err = DB.First(user, user.Id).Error; err != nil {
+		return err
+	}
 	if err = DB.Model(user).Updates(updates).Error; err != nil {
+		return err
+	}
+	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
 	}
 
