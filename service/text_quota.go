@@ -355,6 +355,11 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			}
 		}
 		summary.PromptTokens -= summary.CacheCreationTokens
+		// 上游 usage 可能自相矛盾（cached/cache_creation 大于 prompt）。
+		// 负的 prompt 会把整单配额压低甚至触发“≤0 置 1”的下限；按 0 计算。
+		if summary.PromptTokens < 0 {
+			summary.PromptTokens = 0
+		}
 	}
 
 	dPromptTokens := decimal.NewFromInt(int64(summary.PromptTokens))
