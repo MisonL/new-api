@@ -1248,16 +1248,13 @@ func DeleteUserLogByID(userID int, logID int) error {
 	return nil
 }
 
+// logDeleteBatchSize 是 DeleteLogsByFilter 每次删除的行数上限。单条无界
+// DELETE 在大表上会长时间持锁，且不走 WithContext，请求取消无法中止。
+const logDeleteBatchSize = 100
+
 func DeleteLogsByFilter(ctx context.Context, filter LogFilter) (int64, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	tx, err := applyLogFilters(LOG_DB, filter)
-	if err != nil {
-		return 0, err
-	}
-	result := tx.Delete(&Log{})
-	return result.RowsAffected, result.Error
+	// maxBatches<0 表示一直删到没有匹配行为止，语义与原来的单条 DELETE 等价。
+	return DeleteLogsByFilterBatches(ctx, filter, logDeleteBatchSize, -1)
 }
 
 func CountLogsByFilter(filter LogFilter) (int64, error) {
