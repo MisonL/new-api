@@ -70,6 +70,13 @@ func RedisDelKey(key string) error {
 }
 
 func RedisHSetObj(key string, obj interface{}, expiration time.Duration) error {
+	return RedisHSetObjSkippingFields(key, obj, expiration, nil)
+}
+
+// RedisHSetObjSkippingFields 与 RedisHSetObj 相同，但跳过 skip 中的字段。
+// 用于把“只能增量维护”的字段（例如用户额度）从整对象回写里排除，
+// 避免旧快照覆盖并发 HINCRBY 的结果。
+func RedisHSetObjSkippingFields(key string, obj interface{}, expiration time.Duration, skip map[string]struct{}) error {
 	if DebugEnabled {
 		// 缓存对象里可能有凭据（UserBase.Setting 的 webhook_secret/gotify_token
 		// 等），DEBUG 日志不能原样落盘。
@@ -85,6 +92,9 @@ func RedisHSetObj(key string, obj interface{}, expiration time.Duration) error {
 	for i := 0; i < v.NumField(); i++ {
 		field := t.Field(i)
 		value := v.Field(i)
+		if _, skipped := skip[field.Name]; skipped {
+			continue
+		}
 
 		// Skip DeletedAt field
 		if field.Type.String() == "gorm.DeletedAt" {
@@ -123,6 +133,53 @@ func RedisHSetObj(key string, obj interface{}, expiration time.Duration) error {
 		return fmt.Errorf("failed to execute transaction: %w", err)
 	}
 	return nil
+}
+
+var hSetFieldIfAbsentScript = redis.NewScript(`
+if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1 then
+  return 0
+end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+if tonumber(ARGV[3]) > 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[3])
+end
+return 1
+`)
+
+var hIncrByIfPresentScript = redis.NewScript(`
+if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 0 then
+  return 0
+end
+redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2])
+return 1
+`)
+
+// RedisHSetFieldIfAbsent 只在字段不存在时写入，返回是否真的写入。
+// 用户额度这类字段由增量扣减维护：用读库得到的旧快照整值回写会覆盖
+// 并发 HINCRBY 的结果，把已扣掉的额度在缓存里复活。
+func RedisHSetFieldIfAbsent(key, field string, value interface{}, expiration time.Duration) (bool, error) {
+	ttlSeconds := int64(0)
+	if expiration > 0 {
+		ttlSeconds = int64(expiration / time.Second)
+	}
+	res, err := hSetFieldIfAbsentScript.Run(context.Background(), RDB,
+		[]string{key}, field, fmt.Sprintf("%v", value), ttlSeconds).Int()
+	if err != nil {
+		return false, err
+	}
+	return res == 1, nil
+}
+
+// RedisHIncrByIfPresent 只在字段已存在时增量更新，返回是否更新。
+// HINCRBY 在空哈希上会写出一个只有增量、没有基数的值（例如 -100），
+// 那与真实余额无关；宁可跳过，让下一次读取回源数据库重新建立基数。
+func RedisHIncrByIfPresent(key, field string, delta int64) (bool, error) {
+	res, err := hIncrByIfPresentScript.Run(context.Background(), RDB,
+		[]string{key}, field, delta).Int()
+	if err != nil {
+		return false, err
+	}
+	return res == 1, nil
 }
 
 func RedisHGetObj(key string, obj interface{}) error {

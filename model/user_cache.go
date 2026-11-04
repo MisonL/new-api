@@ -65,17 +65,30 @@ func InvalidateUserCache(userId int) error {
 	return invalidateUserCache(userId)
 }
 
-// updateUserCache updates all user cache fields using hash
+// updateUserCache updates all user cache fields using hash.
+//
+// Quota 不在整对象回写里：它由 HINCRBY 增量维护，用读库快照覆盖会把
+// 已扣减的额度在缓存里复活（最长一个 TTL）。额度只在字段缺失时用
+// HSETNX 建立基数，已有值一律保留。
 func updateUserCache(user User) error {
 	if !common.RedisEnabled {
 		return nil
 	}
 
-	return common.RedisHSetObj(
+	base := user.ToBaseUser()
+	ttl := time.Duration(common.RedisKeyCacheSeconds()) * time.Second
+	if err := common.RedisHSetObjSkippingFields(
 		getUserCacheKey(user.Id),
-		user.ToBaseUser(),
-		time.Duration(common.RedisKeyCacheSeconds())*time.Second,
-	)
+		base,
+		ttl,
+		map[string]struct{}{"Quota": {}},
+	); err != nil {
+		return err
+	}
+	if _, err := common.RedisHSetFieldIfAbsent(getUserCacheKey(user.Id), "Quota", base.Quota, ttl); err != nil {
+		return err
+	}
+	return nil
 }
 
 // GetUserCache gets complete user cache from hash
@@ -147,12 +160,17 @@ func cacheGetUserBase(userId int) (*UserBase, error) {
 	return &userCache, nil
 }
 
-// Add atomic quota operations using hash fields
+// Add atomic quota operations using hash fields.
+//
+// 字段缺失时跳过而不是 HINCRBY：空哈希上的 HINCRBY 会创建只有增量的值
+// （例如 -100），与真实余额无关。跳过之后下一次 GetUserQuota 回源数据库，
+// 由 updateUserQuotaCache 用 HSETNX 建立正确基数。
 func cacheIncrUserQuota(userId int, delta int64) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHIncrBy(getUserCacheKey(userId), "Quota", delta)
+	_, err := common.RedisHIncrByIfPresent(getUserCacheKey(userId), "Quota", delta)
+	return err
 }
 
 func cacheDecrUserQuota(userId int, delta int64) error {
@@ -212,11 +230,15 @@ func updateUserStatusCache(userId int, status bool) error {
 	return common.RedisHSetField(getUserCacheKey(userId), "Status", fmt.Sprintf("%d", statusInt))
 }
 
+// updateUserQuotaCache 用读库快照建立额度基数，但只在字段缺失时写：
+// 已有值可能已被并发 HINCRBY 调整，覆盖会把已扣额度复活。
 func updateUserQuotaCache(userId int, quota int) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Quota", fmt.Sprintf("%d", quota))
+	ttl := time.Duration(common.RedisKeyCacheSeconds()) * time.Second
+	_, err := common.RedisHSetFieldIfAbsent(getUserCacheKey(userId), "Quota", fmt.Sprintf("%d", quota), ttl)
+	return err
 }
 
 func updateUserGroupCache(userId int, group string) error {
