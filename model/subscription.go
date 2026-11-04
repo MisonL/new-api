@@ -983,6 +983,14 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 		return nil
 	}
 	if NormalizeResetPeriod(plan.QuotaResetPeriod) == SubscriptionResetNever {
+		// 计划已改为 never（或自定义周期非法）：该订阅不会再重置。必须把
+		// next_reset_time 清零，否则到期行永远留在重置任务的批次里，
+		// `for { n := ResetDueSubscriptions(batch); if n < batch break }`
+		// 会变成无 sleep 的紧循环。
+		if sub.NextResetTime != 0 {
+			sub.NextResetTime = 0
+			return tx.Save(sub).Error
+		}
 		return nil
 	}
 	baseUnix := sub.LastResetTime
@@ -1001,6 +1009,12 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 		if sub.NextResetTime == 0 && next > 0 {
 			sub.NextResetTime = next
 			sub.LastResetTime = base.Unix()
+			return tx.Save(sub).Error
+		}
+		if next == 0 && sub.NextResetTime != 0 {
+			// 下一次重置已经晚于 end_time（或周期参数无效）：本次之后不会
+			// 再有重置。清掉到期标记，避免同一行被反复捞出来。
+			sub.NextResetTime = 0
 			return tx.Save(sub).Error
 		}
 		return nil
