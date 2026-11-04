@@ -37,6 +37,12 @@ const (
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
+	// ErrNoActiveSubscription 表示用户当前没有任何可用订阅。调用方必须用
+	// errors.Is 区分“确实没有订阅”和真正的数据库错误：把查询失败也当成
+	// “无订阅”会让有订阅的用户被静默改走钱包，或误报额度不足。
+	ErrNoActiveSubscription = errors.New("no active subscription")
+	// ErrSubscriptionQuotaInsufficient 表示有活跃订阅但剩余可用额度不足。
+	ErrSubscriptionQuotaInsufficient = errors.New("subscription quota insufficient")
 )
 
 const (
@@ -1045,10 +1051,10 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
 			Order("end_time asc, id asc").
 			Find(&subs).Error; err != nil {
-			return errors.New("no active subscription")
+			return fmt.Errorf("query active subscriptions: %w", err)
 		}
 		if len(subs) == 0 {
-			return errors.New("no active subscription")
+			return ErrNoActiveSubscription
 		}
 		for _, candidate := range subs {
 			sub := candidate
@@ -1126,7 +1132,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			returnValue.AmountUsedAfter = sub.AmountUsed
 			return nil
 		}
-		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
+		return fmt.Errorf("%w, need=%d", ErrSubscriptionQuotaInsufficient, amount)
 	})
 	if err != nil {
 		return nil, err
