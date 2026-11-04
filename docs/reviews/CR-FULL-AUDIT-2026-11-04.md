@@ -1,0 +1,191 @@
+# 全维度审查记录（源码 + 隔离开发服务，2026-11-04）
+
+审查对象：`dev` 分支当前工作区（HEAD `349186420`，工作区含其它会话的未提交改动，未触碰），以及隔离开发栈 `new-api-dev-isolated`（new-api 127.0.0.1:3001、postgres 5433、redis 6380）。
+
+审查方式：8 个只读审查代理分域审查（部署/运行时、controller 与路由、认证与安全、模型层与数据库迁移、channel 数据访问与缓存、计费与额度、relay 流式链路、两套前端），主会话对 P1 级结论逐条回到代码复核，并推翻了 1 条代理误报。全程只读：未修改源码，未重启容器，未写数据库；唯一的状态变更是在 `web/classic` 跑了一次 `bun run build` 以核对构建产物（`dist/` 被 gitignore）。
+
+标注约定：`已验证` 指代码/构建产物/驱动源码层面的直接证据；`★` 表示主会话亲自复验过；`推断` 指机理已确认但端到端触发未实测；`未覆盖` 指需要真实环境才能下结论。
+
+---
+
+## 结论摘要
+
+- P0：无。
+- P1：9 条（计费正确性 3、用户状态一致性 2、V2 路由 1、流式重试 1、渠道状态并发 1、classic 前端主题 1）。
+- P2：约 20 条。
+- P3：若干，按域汇总。
+- 被推翻的代理结论 1 条（ability 播种的 `SELECT *` 覆盖）。
+
+---
+
+## 一、P1
+
+### P1-1 订阅预扣把数据库错误改写成"没有活跃订阅"，请求静默改走钱包或误报 403 ★
+- 位置：`model/subscription.go:1043-1049`、`service/billing_session.go:225-227`、`service/billing_session.go:422-441`。
+- 机理：`forUpdate(tx).Where(...).Find(&subs).Error` 的任何错误都被替换成 `errors.New("no active subscription")`；`billing_session` 用字符串包含匹配把它映射成 `ErrorCodeInsufficientUserQuota`；`subscription_first` 分支看到"额度不足"就回退 `tryWallet()`，`subscription_only` 用户直接收到"订阅额度不足或未配置订阅"的 403。
+- 触发：查询出现瞬时连接错误、锁等待超时或 context 取消。
+- 后果：有有效订阅的用户被改从钱包扣费；真实错误被吞，日志无 DB 错误记录。
+- 证据：上述三处代码；模型层没有哨兵错误，只有字符串匹配。
+
+### P1-2 链式升级订阅过期只回退一档，用户永久保留中间分组 ★
+- 位置：`model/subscription.go:884-914`（同型 `:409-441`）。
+- 机理：过期处理在"无活跃升级订阅"时取 `end_time desc` 的最后一条已过期记录，直接把用户分组设为其 `PrevUserGroup`，不校验该分组对应的旧订阅是否仍有效。
+- 触发：先买 VIP（prev=default），VIP 有效期内再买 SVIP（prev=VIP）。SVIP 到期（或管理员取消）时用户被设回 VIP，此时 VIP 订阅早已过期。
+- 后果：所有订阅失效后用户仍持有 VIP 分组倍率与权益，直到下一次购买或人工修改。
+- 证据：代码路径；`AdminInvalidateUserSubscription`/`AdminDeleteUserSubscription` 走同一逻辑。
+
+### P1-3 `User.Update`/`Edit` 忽略 `First` 错误并无条件回写缓存，软删用户可被写回"启用" ★
+- 位置：`model/user.go:588-595`、`:611-624`；`controller/user.go:967`、`:984-985`、`:1091-1106`；`middleware/auth.go` 的 `GetUserCache` 路径。
+- 机理：`newUser := *user` 后 `DB.First(&user, user.Id)` 的返回值被丢弃。对软删除行该查询返回 not found 且不清空目标结构体（GORM 语义），随后 `Updates` 命中 0 行且 `Error == nil`，最后 `updateUserCache(*user)` 把调用方快照整哈希写入 Redis。
+- 确定性触发：`ManageUser` 用 `DB.Unscoped()` 载入目标用户，管理员可对已软删用户执行 `action=enable`；`enable` 分支不失效缓存（只有 disable/promote/demote 失效）。
+- 后果：Redis 启用时，该用户既有令牌在缓存 TTL（默认 60s）内重新通过 `TokenAuth`。
+- 附带同源问题：`DB.First` 成功后 `*user` 被替换成更新前的数据库快照，而 `Updates` 不修改结构体，因此每次成功 `Update/Edit` 写进缓存的都是更新前的值；`Enable`、OAuth 绑定、`UpdateUserSetting` 等路径在 TTL 内读到旧值。安全相关动作（disable/promote/demote）由控制器显式失效缓存兜底。
+- 证据：上述代码；仓库内 `controller/user_manage_delete_cache_test.go` 的注释已描述 delete 分支的同类机理，模型层入口仍敞开。
+
+### P1-4 `UpdateChannelStatus` 在锁外读取、锁内整行 `Save`，并发下丢失更新 ★
+- 位置：`model/channel.go:1104`（读）→ `:1108-1111`（加锁）→ `:1114` → `:1136`（`Omit("key","used_quota","balance").Save(channel)`）。
+- 机理：多密钥渠道的 `MultiKeyStatusList` 修改基于加锁前读出的整行快照；两个 key 并发被自动禁用时，后写者用旧快照覆盖先写者。`channel_info` 的整块 JSON 另有一个写者：`model/channel.go:418-427`、`:452-454` 在未启用内存缓存时用请求选择渠道时的快照写回。`Save` 只排除 3 列，`models`/`group`/`model_mapping`/`settings`/`status` 等全部来自旧快照。
+- 触发：`controller/relay.go:3298-3301` 对每个失败请求 `gopool.Go(service.DisableChannel)`；同一多密钥渠道不同 key 并发失败，或自动禁用与管理员编辑并发。
+- 后果：已自动禁用的 key 复活继续接流量；"全部 key 禁用→渠道禁用"状态丢失；管理员刚保存的模型列表/映射被静默回滚；手动禁用（2）可能被写成自动禁用（3）。
+- 补充：`MemoryCacheEnabled` 时全局锁只覆盖"改+写"，不覆盖读；且锁内同步执行全量 `InitChannelCache()`，重建失败仍返回成功。
+
+### P1-5 V2 路由播种可产生合计 20000 bps 的 scope，运行期静默归一化且阻塞迁移
+- 位置：`model/ability.go:730-735`、`:833-846`；`model/channel_route_selector.go:109-116`；`model/channel_route_scope.go:1295-1328`、`:1154-1156`。
+- 机理：判断"scope 已存在"只统计 `abilities.enabled = true AND channels.status = enabled` 的行；同 scope 现有渠道全部禁用期间新增渠道，或并发创建两个渠道时，各自拿到 `RouteWeightTotalBPS`（10000）。运行期发现合计≠10000 就静默按比例归一化，持久值仍是 20000。
+- 后果：scope 列表显示 20000，实际流量被静默改成 50/50；迁移 apply 遇到合计≠10000 的 scope 计 `SkippedScopes` 并整体回滚，V2 迁移无法完成。
+- 边界：仅在 `CHANNEL_ROUTING_V2_ENABLED=true` 生效；生产为 false，隔离环境默认 true。
+
+### P1-6 prelude 重试标记跨 attempt 残留，可在"内容已下发"后重试并重复结算
+- 位置：标记置 true 于 `relay-openai.go:136`、`relay_responses.go:1245`、`chat_via_responses.go:350`、`relay-claude.go`、`relay-gemini.go:1593`、`aws/relay-aws.go:398`；判定 `controller/relay.go:2079-2082`、`relay/responses_handler.go:547`、`relay/common/stream_interrupt.go:27-29`。
+- 机理：该标记存于 gin context，`beginResponsesStreamRelayAttempt` 每次 attempt 只重置 `StreamStatus` 与序列号，不重置标记。attempt 1 在首个内容帧前失败时标记保持 true；attempt 2 命中从不参与置位/清除的渠道（dify、cohere、zhipu、tencent、xunfei、ollama、cloudflare、coze、palm、`aws/converse.go`、`codex/folded_sse.go`、`openai/responses_via_chat.go`），先写出内容再返回可重试的 502，`shouldRetry` 的 `Written() && !preludeSafe` 被残留的 true 短路，进入 attempt 3，同一 HTTP 响应追加第二份内容。
+- 后果：客户端收到重复内容，按两次结算。
+- 边界：需要"attempt 1 参与渠道早失败 + attempt 2 非参与渠道写内容后失败"的渠道组合；出现频率未实测。
+
+### P1-7 Cloudflare 渠道 `/v1/completions` 返回 nil usage 并在调用方 panic ★
+- 位置：`relay/channel/cloudflare/adaptor.go:104-126`（`DoResponse` 无 `RelayModeCompletions` 分支）、`relay/compatible_handler.go:194`（`usage.(*dto.Usage)` 无 nil 判断）。
+- 机理：请求侧 `ConvertOpenAIRequest` 明确支持 Completions（`adaptor.go:58-62`），响应侧 switch 缺分支，裸 `return` 后 usage 为 nil 接口；`TextHelper` 在 `newApiErr == nil` 时直接断言。
+- 后果：gin Recovery 返回 500；panic 路径下预扣费退款不执行（退款依赖 error 返回）。
+- 边界：需对 Cloudflare 渠道发起 `/v1/completions`（含 stream）。
+
+### P1-8 classic 前端默认调色板整体失效（Tailwind 4 `--color-*: initial` 后未回填）★
+- 位置：`web/classic/src/index.css:19`（`--color-*: initial;`），`@theme inline` 只回填了 `semi-color-*` 与圆角。
+- 证据（本轮实跑）：`web/classic` 执行 `bun run build`，退出码 0（5m55s），产物 `dist/assets/index-DDHHSVTI.css` 中 `.bg-white`、`.text-white`、`.text-gray-500`、`.bg-red-500` 选择器计数均为 0，而 `text-semi-color-*` 正常生成。源码中默认调色板工具类约 794 处（`text-gray-500` 97、`text-gray-600` 59、`bg-gray-50` 41、`bg-white` 32 等）。
+- 影响：`bg-white`、`text-white`、`gray/slate/blue/red/green` 系列类全部不产出 CSS，颜色回落为继承/透明。典型可见点：`DashboardHeader.jsx:47,54` 的绿/蓝图标按钮背景、`headerbar/index.jsx:69` 的顶栏背景、`ChatArea.jsx:68-75` 深色渐变上的白字。
+- 附带：`dark:` 变体未声明 `@custom-variant`，编译为 `prefers-color-scheme` 媒体查询，与应用内 `html.dark` 主题开关不一致；当前只有 3 处 semi 色 `dark:` 变体生成，同样挂在媒体查询上。
+- 边界：该缺陷早于 v4 迁移（v3 用 `theme.colors` 整体替换默认调色板），但当前源码与构建产物确实如此；生产使用 classic 主题，属大面积视觉退化而不是功能/安全失效。
+
+### P1-9 生产/运行时安全基线（只读观察，均为已验证）
+1. 生产 PostgreSQL 与 Redis 共用同一最低强度口令 `123456`（对 `new-api` 容器 `SQL_DSN`/`REDIS_CONN_STRING` 取哈希比对，与 `123456` 的 SHA-256 一致）。两个服务未发布宿主端口，属纵深防御缺口。
+2. 生产 `new-api` 直接发布在 `0.0.0.0:13000`，与 `deploy/env/macos-docker-tun.env.example:51` 要求的 `127.0.0.1:13000:3000` 不一致；LAN 上存在绕过 Caddy 的第二个入口。
+3. 生产运行镜像（`4527d7666-litefix2`，2026-09-08）早于非 root 化提交 `a6a0d5cf5`，`docker top` 显示 `USER=root`，Entrypoint 为 `["/new-api"]` 而非 `/entrypoint.sh`。
+4. npm CLI 版本刷新对 `@openai/codex` 永久失败：`service/npm_cli_version.go:27` 上限 4 MiB，registry 返回 5,366,933 字节（accept 简版）/18,473,104 字节（完整版），日志每 10 分钟一条 `metadata exceeds maximum size`，`last_errors` 已记录 `npm_registry_decode_failed`。
+5. 隔离开发镜像 build-info 为 `349186420-dirty`：工作区未提交的 `EditChannelModal.jsx` 内容被编译进二进制（`grep` 命中 3 次），"commit 与 HEAD 一致"不等于"镜像内容与 HEAD 一致"。
+
+---
+
+## 二、P2
+
+### 计费与额度
+- **Redis 全量回写覆盖增量扣减** `model/user.go:909-934`（`GetUserQuota` 回源后 defer 异步 HSET）+ `model/user_cache.go:215-220` vs `:152-160`（`HINCRBY`）。缓存缺失瞬间与扣减并发时，快照 HSET 可晚于增量落地，把已扣额度"复活"到缓存，最长一个 TTL（默认 60s）。`DecreaseUserQuotaGuarded` 保证预扣阶段不会把 DB 扣成负数；但终态差额走无守卫的 `DecreaseUserQuota`，理论上仍可能按虚高缓存放行后把余额推成负数。同类全量回写还有 `model/token.go:245-277`。★（机制）
+- **令牌额度准入是先读后改，无 SQL 守卫** `service/quota.go:408-429`、`model/token.go:442-470`。并发请求可同时通过检查并各自相对扣减，`remain_quota` 可被扣成负数；`BATCH_UPDATE_ENABLED` 下扣减延迟 5s，窗口更大。属令牌预算超用，非资金损失。★
+- **订阅重置任务在"到期但不可重置"的行满批时紧循环** `service/subscription_reset_task.go:79-92`、`model/subscription.go:1164-1205`。计划改为 `never` 或下次重置超出 `end_time` 时函数直接返回且不写 `next_reset_time`，批次永远满 300，`for` 循环无 sleep 反复开事务。推断（需真实数据触发）。
+- **任务提交后结算失败只进 stderr** `controller/relay.go:3857-3859`、`:3897-3899`。文本/音频/realtime 有 `MarkSettleFailure` 写消费日志 `other`，任务路径没有，无法对账。★
+- **钱包退款失败无重试、无对账记录** `service/funding_source.go:59-66`、`service/billing_session.go:107-123`。仅 `SysLog` 一行，用户损失预扣额度时无日志行可查。
+- **OpenRouter Claude 计费做无下限减法** `service/text_quota.go:346-357`（`PromptTokens -= CacheTokens` 再 `-= CacheCreationTokens`）。上游 usage 自相矛盾（cached > prompt）时可为负且无 0 下限保护，最终配额可能被压低（仅当总额≤0 才置 1）。推断（依赖上游数据形态）。
+
+### 认证与安全
+- **Telegram 绑定缺 OAuth state** `router/api-router.go:67`、`controller/telegram.go:86-146`（同类的 login/WeChat 路径都校验 state）。会话 cookie `SameSite=Strict` 是当前主要缓解；同站攻击源（父域下其他子域）或放宽 SameSite 后可直接利用，绑定后攻击者可用 Telegram 登录进入受害者账户。★（代码事实；利用面推断）
+- **`TRUSTED_PROXIES=auto` 信任整个容器子网** `common/trusted_proxies.go:91-107`、`:135-173`。同网段容器可伪造 `X-Forwarded-For`，绕过 IP 白名单与 IP 级限流。仅在显式启用 auto 的部署存在；生产当前为空，不受影响。★
+- **搜索/建议限流把 0 当关闭时行为不一致** `middleware/rate-limit.go:316-344`（`userRateLimitFactory` 缺 `maxRequestNum <= 0` 出口，`rateLimitFactory:159-178` 有）。Redis 路径 `LIndex(-1)` 空串 → `time.Parse` 失败 → 全站 500；内存路径恒 429。★
+
+### controller / 路由
+- **`ManageUser` 的 `id=0` 落到第一行用户** `controller/user.go:961-968`。`Where(&User{Id: 0})` 不产生条件，`Unscoped().First` 返回最低 ID 行（通常是 root），`if user.Id == 0` 永不命中。角色检查使非 root 无法利用，实际是 root 的误操作/构造请求风险。★（GORM 语义）
+- **`SetupContextForSelectedChannel` 失败在 distributor 直接 500，绕过 relay 重试** `middleware/distributor.go:308-319`、`:376-392`；relay 侧对同一 `ErrorCodeChannelNoAvailableKey` 是排除渠道后继续（`controller/relay.go:1018-1025`）。多密钥渠道所有 key 不可用时返回 500 而不故障转移。★
+- **批量删除日志无上限、不用 WithContext** `controller/log.go:271-327` → `model/log.go:1251-1261`。`hasScopedLogFilter` 允许仅按 `log_type` 或 `start_timestamp=1` 限定，管理员可一条语句清空 logs；请求取消不传播。★
+- **`GetLogsSelfStat` 按 Username 过滤** `controller/log.go:150-194`。改名或用户名复用会把他人历史日志计入聚合（行级权限仍是 user_id）。推断。
+
+### 模型层与数据库迁移
+- **`TwoFA.Update` 用部分结构体 `Save` 写零值** `model/twofa.go:84-89`、`controller/twofa.go:95-100`。控制器只填 `{Id, UserId, Secret, IsEnabled:false}`，`Save` 写全部字段：`created_at` 变成零值时间（MySQL 严格模式推断 1292 失败；PG/SQLite 写成公元 1 年），`failed_attempts`/`locked_until`/`last_used_step` 被重置，绕过锁定策略。★（代码与 GORM Save 语义）
+- **quota_data 迁移先做 DML、后补列** `model/quota_data_migration.go:33-61`、`:66-74`。索引缺失时先 `mergeQuotaDataBucket`（读取全部模型列含 `token_used`），补列的 `AutoMigrate` 排在所有 merge 之后；从缺 `token_used` 的旧 schema 升级且存在重复桶时，merge 报列不存在，`InitDB` 失败。★（代码；旧 schema 场景推断）
+- **prefill_groups 旧唯一索引在 PG 上不会被清掉** `model/prefill_group_migration.go:126`。`ALTER TABLE ... DROP CONSTRAINT IF EXISTS "idx_prefill_groups_name"` 对普通唯一索引是 no-op（GORM PG 驱动建的是 `CREATE UNIQUE INDEX`）；MySQL 分支只处理 `uk_prefill_name`。从 2025-08-04..05 版本升级的库上，软删组名仍被旧索引占用。★
+- **V2 标签批量更新无法把权重改成 0** `model/ability.go:1063-1080`。`Updates(ability)` 用结构体，`Weight=0` 被当零值跳过。★（GORM 语义；仅兼容模式可见）
+- **邀请额度转余额不同步缓存** `model/user.go:433-445`。事务内直写 `quota`，不调用 `cacheIncrUserQuota` 也不失效缓存，转移成功后最长 60s 内仍被判"额度不足"。★
+- **多实例无渠道缓存失效通道** `model/channel_cache.go:305-316`、`main.go:103`。只有本进程周期全量重建，仓库无 Redis Pub/Sub；实例 A 禁用/改 key 后，实例 B 最长 `SYNC_FREQUENCY`（默认 60s）继续按旧配置转发。
+- **周期重置后到达的退款抹掉重置后用量** `model/subscription.go:1288-1307`。`newUsed` 负值被静默夹到 0，退款接口仍返回成功，平台少计费。推断。
+
+### relay 流式
+- **自管扫描器渠道在客户端断开路径漏写 StreamStatus** `relay/channel/xunfei/relay-xunfei.go:187-188`（直接 return，不调 `RecordStreamEnd`）、`relay-cohere.go:147-207`、`relay-tencent.go:161-189`。断开被判成 `error`/`upstream_transport_interrupted`，健康探针与计费分类失真。
+- **上游请求未绑定客户端 context，且 `RELAY_TIMEOUT` 默认 0 无超时兜底** `relay/channel/api_request.go:692/738/1081` 用 `http.NewRequest`；`service/http_client.go:380-384`、`common/init.go:122`。客户端断开后上游请求继续，挂死时连接/计费会话/并发租约长期占用。
+- **错误被吞成成功**：`relay/channel/cloudflare/relay_cloudflare.go:109-125`（`scanner.Err()` 只记日志，照常 `[DONE]` 并按估算计费 ★）、`coze/relay-coze.go:222-231`（带内 error 只 SysLog，`return nil`）、`palm/relay-palm.go:148-212`（读/解析失败都只 SysLog 并发 `[DONE]`）。
+- **xunfei 从不检查上游 `header.code`** `relay/channel/xunfei/dto.go:37-42`、`relay-xunfei.go`（全包无读取）。鉴权/限流类错误帧被包装成 200 空流 ★。
+- **`writeRelayErrorResponse` 对 Claude/Gemini 流中错误写裸 JSON** `controller/relay.go:515-522`、`:551`。已写过帧时 Content-Type 仍是 `text/event-stream`，追加的 `{"type":"error",...}` 无 `data:` 前缀，合规 SSE 客户端会忽略。★
+- **Baidu `is_end` 未映射为终止** `relay/channel/baidu/relay-baidu.go:96-113`、`:138-158`。共享扫描器只认字面 `[DONE]`，若上游不发 `[DONE]`，所有健康流被判 `UpstreamInterrupted`，渠道健康探针永远无法标记成功。推断（上游行为）。
+- **Nova 流式请求被静默降级为非流式** `relay/channel/aws/adaptor.go:213-217`（`IsNova` 判定先于 `IsStream`）。
+
+### 前端
+- **read-only 守卫覆盖不到 XHR（sse.js）** `web/default/src/lib/readonly-guard.ts:211-247`、`web/classic/src/helpers/apiCore.js:74-99` 只 patch `fetch`；`sse.js` 用 `new XMLHttpRequest()`。代理层（nginx 405）仍是第二层防护，缺口在前端这一层。
+- **classic GET 去重不豁免 AbortSignal** `web/classic/src/helpers/apiCore.js:103-127`（default 已在 `lib/api.ts:51-66` 豁免）。现有带 signal 的调用点都同时传了 `disableDuplicate`，属机制缺口。
+- **固定像素宽度 modal 在移动端溢出** `PayloadContentModal.jsx:151`（960）、`MultiKeyManageModal.jsx:479`（900）等；Semi `Modal` 宽度为像素值且无 `max-width`。
+
+---
+
+## 三、P3（摘要）
+
+- classic 多语言缺键（en 基准下 zh-CN 缺 10 个、zh-TW 缺 9 个，已在 i18n 基线登记）；default 两处中文串作 i18n key 无对应条目。
+- classic `getUserIdFromLocalStorage` 对损坏的 localStorage 无 try/catch，模块顶层抛异常可白屏。
+- classic 退出登录不重建 axios 实例，`New-API-User` 头短暂保留旧 ID。
+- classic 直接 `import DOMPurify` 但 `dompurify` 不在 dependencies（靠 mermaid 传递依赖提升）。
+- `DocumentRenderer` 把管理员 HTML 中的 `<style>` 在净化前注入 `document.head`（CSS 注入，非 XSS）。
+- 请求层无统一超时（两个 axios 实例 `timeout` 均未设置）。
+- `GetAllChannels` tag 模式、`SearchChannels` tag 分支无分页；`FetchModels` 无响应体大小上限。
+- `Register` 邮箱 check-then-insert，无唯一约束/锁（并发同邮箱注册可同时通过）。
+- OAuth 绑定路径不复读用户状态，被禁用用户的旧会话仍可完成第三方绑定。
+- 桌面端 OAuth 回调可被持有 state 的一方置为失败（DoS + 文案反射）。
+- 会话 cookie 30 天、无服务端撤销；Turnstile 通过标记随会话长期复用；TOTP 无账户级锁定。
+- JWT-direct/ticket 交换错误回显上游响应体。
+- 进程内邮箱验证码存储在多实例下不一致。
+- `DeleteLogsByFilter` 单条无界 DELETE；`GetLogsSelfStat` 按用户名聚合。
+- `DeleteDisabledChannel` 先 Pluck 后删除，不重判 status 且 `IN ?` 不分块。
+- 自管流普遍不维护 `ReceivedResponseCount`、缺 `SetFirstResponseTime`，`partial` 分类永不命中。
+- `responses_via_chat` 从不初始化 prelude 标记，截断流被判失败且不可重试。
+- 扫描器 panic 时 `writeMutex` 不释放，ping 写协程可致 `wg.Wait()` 挂起（需 `PingIntervalEnabled`）。
+- 截断的最后一个 SSE 帧被当完整帧下发。
+- `BATCH_UPDATE_ENABLED` 进程崩溃窗口会丢失已换出的增量（设计取舍，需按"应扣/已扣"对账时注意）。
+- `PreWssConsumeQuota` 的 `Billing==nil` 兜底分支口径不一致（当前主流程不可达）。
+- `quota_data` 唯一索引迁移无并发保护；多 master 同时启动时可能报 duplicate index。
+- MySQL ci 排序规则下 `GPT-4o` 与 `gpt-4o` 会进同一 quota_data 桶（未覆盖真实 MySQL）。
+- V2 路由写事务与渠道写事务锁序相反（MySQL/PG ABBA 死锁，推断）。
+- `ApplyRouteFieldsBackfill` 单事务全表读 + 逐行 COUNT+UPDATE，任一冲突整体回滚。
+- 同一 scope 的 legacy 权重公式在列表与迁移两处不一致（列表 `Σweight+10`，迁移按 ability 累加 `Σ(weight+10)`）。
+- 开启请求体限制策略后，V2 每请求全量加载启用渠道（含 key 列）。
+- legacy 预扣/返还函数已无调用方，若被重新接线会绕过 BillingSession。
+
+---
+
+## 四、被推翻/修正的代理结论
+
+1. **ability 播种的 `SELECT *` 覆盖（推翻）**：有代理报告 `model/ability.go:730-735` 的 `Model(&Ability{}).Joins(...).Find(...)` 生成 `SELECT *`，join 后同名 `group/priority/weight/tag` 列会让渠道值覆盖 ability 字段，导致 scope 键错误。复核结论：**不成立**。GORM v1.31.2 `callbacks/query.go:113-121` 在存在 Joins 且未显式 Select/Omit 时，会按 `Schema.DBNames` 生成带表名限定的显式列（`abilities.group, abilities.model, ...`），不会走 `SELECT *`；同名冲突不存在。该代理把 `SELECT *` 的语义当作事实，但没有验证 GORM 实际生成的 SQL。
+2. **"生产 TRUSTED_PROXIES 为空是缺陷"（早前结论，已按用户决策修正）**：Caddy 暂未投入正式流量，保持为空是明确决策，不计为缺陷；本文只记录 `auto` 模式本身的信任面。
+3. **"ManageUser id=0 可越权改他人账户"（降级）**：非 root 调用会被角色检查拦截，实际只有 root 自己受影响，从 P2 高危降为操作风险。
+
+---
+
+## 五、检查过且确认无问题的区域（摘录）
+
+- 认证：`UserAuth`/`AdminAuth`/`RootAuth`/`TokenAuth`/`TokenOrUserAuth`/`TryUserAuth` 均回读状态；`New-Api-User` 头校验；会话 cookie HttpOnly+SameSite=Strict；`SESSION_SECRET`/`CRYPTO_SECRET` 缺失或占位即 fatal；OAuth state 校验与 nonce 消费；桌面端 handoff 的服务端 state + 确认码；CAS ticket 一次性占用；SSRF 验证覆盖用户可控 URL；日志脱敏与 CR/LF 折叠。
+- 计费：`BillingSession` 的 `settled`/`fundingSettled`/`refunded` 幂等；钱包预扣走 `DecreaseUserQuotaGuarded`；预扣失败回滚顺序正确；realtime 逐 turn 与终态结算不双扣（有既有回归测试）；零用量返还预扣；配额换算饱和不溢出。
+- 迁移：quota_data `ON CONFLICT` 三方言累加语义；PG `FOR UPDATE` 方言门控；保留字按方言引号；软删除部分唯一索引（PG/SQLite `WHERE deleted_at IS NULL`，MySQL 生成列）设计正确；本轮为 models/vendors 旧复合索引清理写的 PG 用例已在隔离 PG 验证。
+- 流式：共享 `StreamScannerHandler` 的退出路径、单写者互斥、写截止时间与 `wg.Wait()`；`StreamStatus` 的 sync.Once 与分类契约；参与渠道的 prelude 对称性（openai chat/responses、chat_via_responses、claude、gemini、aws invoke）；Claude/Gemini/Responses 的 usage 兜底与终端帧时序；SSE 帧格式；非流式读取均走 `ReadAllWithLimit`。
+- 渠道缓存：`CacheReloadChannel` 的 epoch/版本令牌；批量标签/状态路径提交后触发全量重建；三方言分页与 `DISTINCT` 查询。
+- 前端：default 主题机制（`@custom-variant dark`）与构建；两套前端的 XSS 净化链路（DOMPurify / hast-util-sanitize）；read-only 守卫的路径规范化与副作用端点清单；default lint 0 error、typecheck 退出码 0；classic `i18n:lint` 无新增。
+- 部署（只读）：隔离栈三容器健康、运行时 uid 1000、`/api/status` 200、迁移 2.682s、部分唯一索引就位；日志驱动轮转与 healthcheck 配置正确。
+
+---
+
+## 六、验证边界
+
+- 本轮未运行 Go 测试、未连真实数据库或 Redis 做并发复现；计费/并发类结论均为代码语义级证据，端到端后果标注为推断。
+- 运行时审查仅覆盖隔离开发栈与生产容器的只读观察（`docker logs`/`docker inspect`/`psql SELECT`），未做压测。
+- 前端审查未启动浏览器，调色板与暗色主题以源码和本轮构建产物为依据，未截图比对渲染效果。
+- 迁移类问题的触发依赖旧版本 schema 或多 master 同时启动，需对应环境才能定量确认。
+- 代理结论中标注为推断的条目未经主会话逐条复现；引用时以本文的标注为准。
