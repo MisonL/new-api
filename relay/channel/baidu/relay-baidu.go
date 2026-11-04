@@ -154,6 +154,13 @@ func baiduStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 			common.SysLog("error sending stream response: " + err.Error())
 			sr.Error(err)
 		}
+		// 文心协议以 is_end=true 收尾，从不发送 [DONE]。不显式记录正常结束，
+		// 共享扫描器会把每条健康流判成 upstream_interrupted，渠道健康探针
+		// 永远无法标记成功。用 MarkDone 而不是 Done：终止分片之后仍可能
+		// 跟随一条仅带 usage 的分片，提前停止会漏计用量。
+		if baiduResponse.IsEnd {
+			sr.MarkDone()
+		}
 	})
 	service.CloseResponseBodyGracefully(resp)
 	return nil, usage
