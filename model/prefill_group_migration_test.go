@@ -101,7 +101,10 @@ func TestMigratePrefillGroupTableWithExecutorAutoMigratesOnSQLite(t *testing.T) 
 	require.NoError(t, migratePrefillGroupTableWithExecutor(executor, "sqlite"))
 	require.Equal(t, 1, executor.autoMigrateCalls)
 	require.Empty(t, executor.addedColumns)
-	require.Empty(t, executor.executedSQL)
+	require.Equal(t, []string{
+		`DROP INDEX IF EXISTS "idx_prefill_groups_name"`,
+		`DROP INDEX IF EXISTS "uni_prefill_groups_name"`,
+	}, executor.executedSQL)
 }
 
 func TestMigratePrefillGroupTableWithExecutorRepairsPostgresSchemaIdempotently(t *testing.T) {
@@ -128,6 +131,8 @@ func TestMigratePrefillGroupTableWithExecutorRepairsPostgresSchemaIdempotently(t
 		[]string{
 			`ALTER TABLE "prefill_groups" DROP CONSTRAINT IF EXISTS "idx_prefill_groups_name"`,
 			`ALTER TABLE "prefill_groups" DROP CONSTRAINT IF EXISTS "uni_prefill_groups_name"`,
+			`DROP INDEX IF EXISTS "idx_prefill_groups_name"`,
+			`DROP INDEX IF EXISTS "uni_prefill_groups_name"`,
 			`CREATE INDEX IF NOT EXISTS "idx_prefill_groups_type" ON "prefill_groups" ("type")`,
 			`CREATE INDEX IF NOT EXISTS "idx_prefill_groups_deleted_at" ON "prefill_groups" ("deleted_at")`,
 			`CREATE INDEX IF NOT EXISTS "idx_prefill_groups_type_deleted_updated" ON "prefill_groups" ("type","deleted_at","updated_time" DESC)`,

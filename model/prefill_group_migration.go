@@ -109,6 +109,14 @@ func migratePrefillGroupTableWithExecutor(
 	case "mysql":
 		return migratePrefillGroupMySQL(executor)
 	default:
+		// SQLite 同样可能残留旧的普通唯一索引（一个名字只能对应一个对象，
+		// 约束版本由 AutoMigrate 之外的历史版本建立）。
+		if err := executor.Exec(`DROP INDEX IF EXISTS "idx_prefill_groups_name"`); err != nil {
+			return fmt.Errorf("failed to drop legacy prefill_groups name index: %w", err)
+		}
+		if err := executor.Exec(`DROP INDEX IF EXISTS "uni_prefill_groups_name"`); err != nil {
+			return fmt.Errorf("failed to drop implicit prefill_groups unique index: %w", err)
+		}
 		return executor.AutoMigrate(&PrefillGroup{})
 	}
 }
@@ -128,6 +136,15 @@ func migratePrefillGroupPostgres(executor prefillGroupMigrationExecutor) error {
 	}
 	if err := executor.Exec(`ALTER TABLE "prefill_groups" DROP CONSTRAINT IF EXISTS "uni_prefill_groups_name"`); err != nil {
 		return fmt.Errorf("failed to drop implicit prefill_groups unique constraint: %w", err)
+	}
+	// 旧版本模型用 gorm uniqueIndex 生成的是普通唯一索引而非约束，
+	// DROP CONSTRAINT 对它是 no-op，软删组名会被旧索引永久占用。必须再按
+	// 索引删一次；对象不存在时 IF EXISTS 是 no-op，可重复执行。
+	if err := executor.Exec(`DROP INDEX IF EXISTS "idx_prefill_groups_name"`); err != nil {
+		return fmt.Errorf("failed to drop legacy prefill_groups name index: %w", err)
+	}
+	if err := executor.Exec(`DROP INDEX IF EXISTS "uni_prefill_groups_name"`); err != nil {
+		return fmt.Errorf("failed to drop implicit prefill_groups unique index: %w", err)
 	}
 	if err := executor.Exec(`CREATE INDEX IF NOT EXISTS "idx_prefill_groups_type" ON "prefill_groups" ("type")`); err != nil {
 		return fmt.Errorf("failed to ensure prefill_groups type index: %w", err)
