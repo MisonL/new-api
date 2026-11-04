@@ -314,6 +314,12 @@ func buildRateLimitKey(mark string, c *gin.Context, keyFunc func(c *gin.Context)
 // instead of client IP, making it resistant to proxy rotation attacks.
 // Must be used AFTER authentication middleware (UserAuth).
 func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gin.Context) {
+	// 与 rateLimitFactory 保持一致：0（及负数）表示不限制。缺了这个出口时
+	// Redis 路径在空列表上 LIndex(-1) 得到空串、time.Parse 失败直接 500，
+	// 内存路径会 panic 或从第二个请求起恒 429。
+	if maxRequestNum <= 0 {
+		return defNext
+	}
 	if common.RedisEnabled {
 		return func(c *gin.Context) {
 			userId := c.GetInt("id")
