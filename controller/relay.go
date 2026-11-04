@@ -524,6 +524,15 @@ func writeRelayErrorResponse(c *gin.Context, relayFormat types.RelayFormat, rela
 	case types.RelayFormatOpenAIRealtime:
 		helper.WssError(c, ws, newAPIError.ToOpenAIError())
 	case types.RelayFormatClaude:
+		// 流已经开始后必须用 SSE 错误帧收尾：Content-Type 已是
+		// text/event-stream，直接写裸 JSON 会被合规客户端当成未知字段行忽略。
+		if relayInfo != nil && relayInfo.IsStream && c.Writer.Written() {
+			helper.SetEventStreamHeaders(c)
+			if err := helper.ClaudeErrorEvent(c, newAPIError.ToClaudeError()); err != nil {
+				logger.LogError(c, fmt.Sprintf("write claude stream error failed: %s", err.Error()))
+			}
+			return
+		}
 		c.JSON(newAPIError.StatusCode, gin.H{
 			"type":  "error",
 			"error": newAPIError.ToClaudeError(),
@@ -553,6 +562,21 @@ func writeRelayErrorResponse(c *gin.Context, relayFormat types.RelayFormat, rela
 			service.MarkResponsesBootstrapHeadersSent(c)
 			if err := helper.OpenAIErrorEvent(c, newAPIError.ToOpenAIError()); err != nil {
 				logger.LogError(c, fmt.Sprintf("write bootstrap stream error failed: %s", err.Error()))
+			}
+			return
+		}
+		// Gemini 原生流（以及其它落到 default 的流式格式）同样不能追加裸
+		// JSON；以 SSE data 帧下发，保持传输层合法。
+		if relayInfo != nil && relayInfo.IsStream && c.Writer.Written() {
+			helper.SetEventStreamHeaders(c)
+			payload := gin.H{"error": newAPIError.ToOpenAIError()}
+			jsonData, marshalErr := common.Marshal(payload)
+			if marshalErr != nil {
+				logger.LogError(c, fmt.Sprintf("write stream error failed: %s", marshalErr.Error()))
+				return
+			}
+			if err := helper.StringData(c, string(jsonData)); err != nil {
+				logger.LogError(c, fmt.Sprintf("write stream error failed: %s", err.Error()))
 			}
 			return
 		}

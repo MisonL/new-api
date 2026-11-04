@@ -231,6 +231,23 @@ func OpenAIChatErrorEvent(c *gin.Context, openAIError types.OpenAIError) error {
 	return StringData(c, string(jsonData))
 }
 
+// ClaudeErrorEvent writes an Anthropic-compatible SSE error frame. Claude
+// clients only understand errors delivered as an `event: error` SSE frame once
+// the stream has started; a bare JSON body under text/event-stream is ignored.
+func ClaudeErrorEvent(c *gin.Context, claudeError types.ClaudeError) error {
+	payload := map[string]any{
+		"type":  "error",
+		"error": claudeError,
+	}
+	jsonData, err := common.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("error marshalling claude error event: %w", err)
+	}
+	c.Render(-1, &common.CustomEvent{Data: "event: error\n"})
+	c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonData)})
+	return FlushWriter(c)
+}
+
 // Done writes the terminal [DONE] SSE marker.
 func Done(c *gin.Context) {
 	_ = StringData(c, "[DONE]")
