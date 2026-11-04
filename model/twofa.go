@@ -85,7 +85,14 @@ func (t *TwoFA) Update() error {
 	if t.Id == 0 {
 		return errors.New("2FA记录ID不能为空")
 	}
-	return DB.Save(t).Error
+	// 只写本方法负责的两列。整行 Save 会把 created_at 写成零值（MySQL 严格
+	// 模式下超出 DATETIME 下界直接报错，PG/SQLite 留下公元 1 年），并清空
+	// failed_attempts / locked_until / last_used_step，绕过锁定与重放保护。
+	return DB.Model(&TwoFA{}).Where("id = ?", t.Id).
+		Updates(map[string]interface{}{
+			"secret":     t.Secret,
+			"is_enabled": t.IsEnabled,
+		}).Error
 }
 
 // Delete 删除2FA设置
