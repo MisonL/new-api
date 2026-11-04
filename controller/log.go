@@ -148,7 +148,6 @@ func GetLogsStat(c *gin.Context) {
 }
 
 func GetLogsSelfStat(c *gin.Context) {
-	username := c.GetString("username")
 	logType, _ := strconv.Atoi(c.Query("type"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
@@ -158,12 +157,14 @@ func GetLogsSelfStat(c *gin.Context) {
 	group := c.Query("group")
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
+	// 会话里的 username 是登录时的快照：改名或用户名被复用后，同名用户的
+	// 历史日志会被混入统计。当前用户 id 已由鉴权写入，必须用它作归属过滤。
 	quotaNum, err := model.SumUsedQuotaByFilterContext(c.Request.Context(), model.LogFilter{
+		UserId:            c.GetInt("id"),
 		LogType:           logType,
 		StartTimestamp:    startTimestamp,
 		EndTimestamp:      endTimestamp,
 		ModelName:         modelName,
-		Username:          username,
 		TokenName:         tokenName,
 		Channel:           channel,
 		Group:             group,
