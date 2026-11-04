@@ -549,6 +549,7 @@ const PersonalSetting = () => {
                 handleSystemTokenClick={handleSystemTokenClick}
                 setShowChangePasswordModal={setShowChangePasswordModal}
                 setShowAccountDeleteModal={setShowAccountDeleteModal}
+                onTelegramBindSuccess={getUserData}
                 passkeyStatus={passkeyStatus}
                 passkeySupported={passkeySupported}
                 passkeyRegisterLoading={passkeyRegisterLoading}

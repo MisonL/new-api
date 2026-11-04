@@ -91,6 +91,17 @@ func TelegramBind(c *gin.Context) {
 		})
 		return
 	}
+	// 与 TelegramLogin 同理：签名 payload 只能证明它由 bot 签发，不能证明
+	// 绑定动作来自本浏览器。缺少会话内 state 时，攻击者把自己的签名 payload
+	// 拼成绑定链接送进受害者浏览器，受害者账号就会被绑到攻击者的 Telegram，
+	// 之后攻击者可用 Telegram 登录进入受害者账户（登录 CSRF）。
+	if !validateOAuthState(c, c.Query("state")) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "OAuth state 校验失败，请刷新页面后重试",
+		})
+		return
+	}
 	params := c.Request.URL.Query()
 	if !checkTelegramAuthorization(params, common.TelegramBotToken) {
 		c.JSON(200, gin.H{
@@ -131,6 +142,9 @@ func TelegramBind(c *gin.Context) {
 		})
 		return
 	}
+	// 绑定成功即消费 state：nonce 只为这一次绑定服务，留存在会话里
+	// 等于可重放。失败路径不消费，用户换一个 payload 重试仍然可行。
+	consumeOAuthState(c)
 
 	// XHR 调用（axios 跟随 302 拿到 HTML 无法解析）返回 JSON；浏览器整页
 	// 跳转保持 302 到个人资料页。

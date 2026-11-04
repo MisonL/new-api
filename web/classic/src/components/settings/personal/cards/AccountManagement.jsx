@@ -44,6 +44,7 @@ import {
   API,
   showError,
   showSuccess,
+  getOAuthState,
   onGitHubOAuthClicked,
   onOIDCClicked,
   onLinuxDOOAuthClicked,
@@ -64,6 +65,7 @@ const AccountManagement = ({
   handleSystemTokenClick,
   setShowChangePasswordModal,
   setShowAccountDeleteModal,
+  onTelegramBindSuccess,
   passkeyStatus,
   passkeySupported,
   passkeyRegisterLoading,
@@ -88,6 +90,53 @@ const AccountManagement = ({
   const isBound = (accountId) => Boolean(accountId);
   const [showTelegramBindModal, setShowTelegramBindModal] =
     React.useState(false);
+  const [telegramBinding, setTelegramBinding] = React.useState(false);
+
+  // Telegram widget 的签名 payload 只能证明它由 bot 签发，不能证明绑定动作
+  // 来自本浏览器。后端要求会话内 state（与登录一致），因此这里改成回调 +
+  // XHR：整页重定向无法在跳转前拿到 state。
+  const onTelegramBindClicked = async (response) => {
+    const fields = [
+      'id',
+      'first_name',
+      'last_name',
+      'username',
+      'photo_url',
+      'auth_date',
+      'hash',
+      'lang',
+    ];
+    const params = {};
+    fields.forEach((field) => {
+      if (response[field] !== undefined && response[field] !== null) {
+        params[field] = response[field];
+      }
+    });
+    setTelegramBinding(true);
+    try {
+      const state = await getOAuthState();
+      if (!state) {
+        showError(t('无法发起 Telegram 绑定，请刷新页面重试'));
+        return;
+      }
+      params.state = state;
+      const res = await API.get(`/api/oauth/telegram/bind`, { params });
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('绑定成功'));
+        setShowTelegramBindModal(false);
+        if (onTelegramBindSuccess) {
+          await onTelegramBindSuccess();
+        }
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      showError(t('绑定失败，请重试'));
+    } finally {
+      setTelegramBinding(false);
+    }
+  };
   const [customOAuthBindings, setCustomOAuthBindings] = React.useState([]);
   const [customOAuthLoading, setCustomOAuthLoading] = React.useState({});
 
@@ -480,8 +529,9 @@ const AccountManagement = ({
                   <div className='flex justify-center'>
                     <div className='scale-90'>
                       <TelegramLoginButton
-                        dataAuthUrl='/api/oauth/telegram/bind'
+                        dataOnauth={onTelegramBindClicked}
                         botName={status.telegram_bot_name}
+                        className={telegramBinding ? 'pointer-events-none opacity-60' : ''}
                       />
                     </div>
                   </div>

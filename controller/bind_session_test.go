@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"sort"
@@ -28,6 +29,15 @@ func newBindSessionTestRouter(t *testing.T) *gin.Engine {
 	router.GET("/api/oauth/email/bind", EmailBind)
 	router.GET("/api/oauth/wechat/bind", WeChatBind)
 	router.GET("/api/oauth/telegram/bind", TelegramBind)
+	router.GET("/test/set-oauth-state", func(c *gin.Context) {
+		session := sessions.Default(c)
+		session.Set("oauth_state", c.Query("state"))
+		if err := session.Save(); err != nil {
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		c.Status(http.StatusNoContent)
+	})
 	return router
 }
 
@@ -133,12 +143,30 @@ func TestTelegramBindRequiresLoggedInSession(t *testing.T) {
 	common.TelegramOAuthEnabled = true
 	common.TelegramBotToken = "test-telegram-bot-token"
 
+	// 绑定要求会话内 state（防登录 CSRF），先给这个浏览器会话注入 state，
+	// 否则请求会停在 state 校验而不是"未登录"检查。
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("failed to create cookie jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+	seed, err := client.Get(server.URL + "/test/set-oauth-state?state=bind-session-state")
+	if err != nil {
+		t.Fatalf("failed to seed oauth state: %v", err)
+	}
+	seed.Body.Close()
+
 	params := buildTelegramAuthParams(common.TelegramBotToken, "123456789")
-	response := performBindSessionTestRequest(
-		t,
-		server.URL,
-		"/api/oauth/telegram/bind?"+params.Encode(),
-	)
+	params.Set("state", "bind-session-state")
+	res, err := client.Get(server.URL + "/api/oauth/telegram/bind?" + params.Encode())
+	if err != nil {
+		t.Fatalf("failed to perform request: %v", err)
+	}
+	defer res.Body.Close()
+	var response oauthJWTAPIResponse
+	if err := common.DecodeJson(res.Body, &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 
 	if response.Success {
 		t.Fatalf("expected telegram bind without session to fail")

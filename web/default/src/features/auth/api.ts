@@ -103,13 +103,20 @@ export async function telegramLoginByParams(
   return res.data
 }
 
-// Telegram bind with widget-signed parameters. Requests JSON so the
-// backend returns a parseable response instead of a 302 redirect.
+// Telegram bind with widget-signed parameters. Like login, binding must prove
+// it comes from this browser: without a matching OAuth state nonce an attacker
+// could bind the victim's account to the attacker's Telegram and then log in
+// as the victim. Requests JSON so the backend returns a parseable response
+// instead of a 302 redirect.
 export async function telegramBindByParams(
   params: Record<string, string>
 ): Promise<ApiResponse> {
+  const state = await getOAuthState()
+  if (!state) {
+    throw new Error(i18next.t('无法发起 Telegram 绑定，请刷新页面重试'))
+  }
   const res = await api.get('/api/oauth/telegram/bind', {
-    params,
+    params: { ...params, state },
     headers: { Accept: 'application/json' },
   })
   return res.data
