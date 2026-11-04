@@ -442,7 +442,14 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	// 事务里直接写 quota 列，不经过 IncreaseUserQuota 的缓存增量。不失效
+	// 缓存时，转移成功后最长一个 TTL（默认 60s）内 GetUserQuota 仍读旧余额，
+	// 请求会被判"额度不足"，而读库的接口已经显示新余额。
+	InvalidateUserQuotaAfterRecharge(user.Id)
+	return nil
 }
 
 func (user *User) Insert(inviterId int) error {
