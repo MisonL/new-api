@@ -436,7 +436,7 @@ func downgradeUserGroupForSubscriptionTx(tx *gorm.DB, sub *UserSubscription, now
 	if activeQuery.Error == nil && activeQuery.RowsAffected > 0 {
 		return "", nil
 	}
-	prevGroup := strings.TrimSpace(sub.PrevUserGroup)
+	prevGroup := resolveExpiredUpgradeChainTargetTx(tx, sub.UserId, sub.Id, strings.TrimSpace(sub.PrevUserGroup))
 	if prevGroup == "" || prevGroup == currentGroup {
 		return "", nil
 	}
@@ -445,6 +445,37 @@ func downgradeUserGroupForSubscriptionTx(tx *gorm.DB, sub *UserSubscription, now
 		return "", err
 	}
 	return prevGroup, nil
+}
+
+// resolveExpiredUpgradeChainTargetTx 沿 PrevUserGroup 展开链式升级。
+// VIP 有效期内购买 SVIP 时，SVIP.PrevUserGroup 记录的是 VIP；两级都过期
+// 后只回退到 VIP 会让用户永久保留中间档。这里在“目标分组本身也是某个
+// 已过期订阅的升级目标”时继续回退，直到链首之前的分组。
+func resolveExpiredUpgradeChainTargetTx(tx *gorm.DB, userId int, excludeSubId int, target string) string {
+	seen := make(map[string]struct{}, 4)
+	for i := 0; i < 16; i++ {
+		if target == "" {
+			break
+		}
+		if _, ok := seen[target]; ok {
+			break
+		}
+		seen[target] = struct{}{}
+		query := tx.Where("user_id = ? AND status = ? AND upgrade_group = ?", userId, "expired", target)
+		if excludeSubId > 0 {
+			query = query.Where("id <> ?", excludeSubId)
+		}
+		var prior UserSubscription
+		if err := query.Order("end_time desc, id desc").Limit(1).Find(&prior).Error; err != nil || prior.Id == 0 {
+			break
+		}
+		next := strings.TrimSpace(prior.PrevUserGroup)
+		if next == "" || next == target {
+			break
+		}
+		target = next
+	}
+	return target
 }
 
 func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
@@ -901,23 +932,13 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 			if expiredQuery.Error != nil || expiredQuery.RowsAffected == 0 {
 				return nil
 			}
-			upgradeGroup := strings.TrimSpace(lastExpired.UpgradeGroup)
-			prevGroup := strings.TrimSpace(lastExpired.PrevUserGroup)
-			if upgradeGroup == "" || prevGroup == "" {
-				return nil
-			}
-			currentGroup, err := getUserGroupByIdTx(tx, userId)
+			// 复用统一的降级判定：当前分组必须仍是最新一次升级授予的分组，
+			// 且沿 PrevUserGroup 展开整条过期升级链后再回退。
+			downgraded, err := downgradeUserGroupForSubscriptionTx(tx, &lastExpired, now)
 			if err != nil {
 				return err
 			}
-			if currentGroup != upgradeGroup || currentGroup == prevGroup {
-				return nil
-			}
-			if err := tx.Model(&User{}).Where("id = ?", userId).
-				Update("group", prevGroup).Error; err != nil {
-				return err
-			}
-			cacheGroup = prevGroup
+			cacheGroup = downgraded
 			return nil
 		})
 		if err != nil {
