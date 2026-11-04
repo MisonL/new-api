@@ -211,6 +211,18 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		}
 	} else {
 		if a.IsNova {
+			// Nova 在 AKSK 模式下只有 InvokeModel（非流式）实现。此前先看
+			// IsStream 才分派，stream:true 的请求也落到非流式 handler，向
+			// SSE 客户端写出一个 application/json 体：客户端解析失败、渠道
+			// 侧却记为成功。静默降级不可接受，显式失败让上层按错误处理。
+			if info.IsStream {
+				return nil, types.NewErrorWithStatusCode(
+					errors.New("aws nova models do not support streaming on this channel"),
+					types.ErrorCodeInvalidRequest,
+					http.StatusNotImplemented,
+					types.ErrOptionWithSkipRetry(),
+				)
+			}
 			err, usage = handleNovaRequest(c, info, a)
 		} else {
 			if info.IsStream {
