@@ -9,14 +9,20 @@
 
 @layer theme, base, semi, components, utilities;
 
+/* 主题开关改的是 html.dark 类，不是系统媒体查询。不声明自定义变体时
+   Tailwind 4 把 dark: 编译成 prefers-color-scheme，应用内切暗色不会生效。 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* semi-color-* 令牌必须用 inline：Tailwind 4 默认把 @theme 变量声明在 :root，
    而 Semi 的 --semi-color-* 定义在 body（body / body[theme-mode=dark]）。
    :root 是 body 的祖先，祖先解析不到后代元素上的自定义属性，于是
    --color-semi-color-*: var(--semi-color-*) 在 :root 上求值失败，
    所有 bg/text/border-semi-color-* 工具类变成无效值。inline 让工具类直接输出
-   var(--semi-color-*)，在真正使用它的元素上解析，恢复 Tailwind 3 的行为。 */
+   var(--semi-color-*)，在真正使用它的元素上解析，恢复 Tailwind 3 的行为。
+
+   注意不要把 --color-* 清空：源码里仍有大量默认调色板工具类
+   （bg-white、text-gray-500、bg-red-500 等），清空后这些类不产出任何 CSS。 */
 @theme inline {
-  --color-*: initial;
   --radius-*: initial;
 
   --color-semi-color-white: var(--semi-color-white);
