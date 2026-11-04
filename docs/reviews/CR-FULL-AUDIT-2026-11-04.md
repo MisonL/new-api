@@ -182,6 +182,42 @@
 
 ---
 
+## 七、本会话已修复项（2026-11-04，全部 TDD + 反向验证）
+
+以下 P1/P2 项已修复并提交，均有回归测试、`go test` 全绿、且对关键修复做了
+“去掉修复→测试失败→恢复”的反向验证：
+
+1. User.Update/Edit 吞掉 First 错误并回写软删用户缓存 → 失败即返回、更新后重读再写缓存（`05f99201e`）
+2. 渠道状态更新读改写不同锁、整行 Save 丢并发更新 → per-channel 锁内读改写、只写 status/channel_info/other_info（`40c393de8`）
+3. 订阅预扣把 DB 错误伪装成无订阅 → 哨兵错误 ErrNoActiveSubscription / ErrSubscriptionQuotaInsufficient（`762adfac1`）
+4. 链式升级过期只回退一档保留中间分组 → 沿 PrevUserGroup 整链回退（`32ceef2d7`）
+5. prelude 重试标记跨 attempt 残留致重复结算 → attempt 开始处置 false 并归零帧计数（`446685897`）
+6. Cloudflare /v1/completions nil usage panic → 显式 501（`4fdbe1311`，反向验证）
+7. classic 默认调色板整体失效 + dark: 绑定媒体查询 → 移除颜色清空、补 @custom-variant dark（`b16ab21f5`，重建产物验证 .bg-white 等恢复）
+8. 用户级限流把 0 当关闭时 500/429 → 0/负数放行（`95e1eb79a`）
+9. ManageUser id=0 落到第一行用户 → 入口拒绝 id<=0（`d0aac0ad6`）
+10. TwoFA.Update 整行 Save 写零值 created_at / 清锁 → 列级更新（`1c11b8e5d`）
+11. 邀请额度转余额不同步缓存 → 提交后 InvalidateUserQuotaAfterRecharge（`81c7487b6`）
+12. 流式错误对 Claude/Gemini 写裸 JSON → ClaudeErrorEvent / data 帧（`f24877be8`）
+13. 标签批量更新无法把权重清零 → map 更新（`9d650cc85`）
+14. 日志批量删除无界 DELETE → 分批 + ctx 取消（`86d07122c`）
+15. quota_data 迁移缺列启动失败 → 先补列再合并（`408de7f94`）
+16. prefill_groups 旧唯一索引删不掉 → DROP INDEX IF EXISTS（`1472b1c6e`）
+17. OpenRouter Claude prompt 负值压配额 → 0 下限（`b557421f7`）
+18. 订阅重置任务紧循环 → 无法重置行清 next_reset_time（`ef9ea89e4`）
+19. 额度缓存整值回写覆盖 HINCRBY → HSETNX 建基数 / 增量仅在存在时（`3c3d7938b`，反向验证）
+
+保留未修（需真实 MySQL/PG/Redis/多实例，或属行为取舍，已在正文标注）：
+- V2 播种 20000bps（依赖并发/禁用态创建，运行时已静默归一化；隔离环境默认开 V2）
+- 多实例渠道缓存无 Redis Pub/Sub 失效、订阅套餐缓存进程内
+- MySQL/PG 路由 scope 与渠道写事务 ABBA 死锁
+- prefill/cohera/zhipu/tencent/xunfei 各渠道终止标记与超时（需真实上游）
+- Nova 流式静默降级
+- Telegram 绑定缺 state（SameSite=Strict 是既有缓解）
+- TRUSTED_PROXIES=auto 信任容器子网（生产为空不受影响）
+- 生产安全基线（口令/0.0.0.0:13000/root 镜像/codex npm 超限）：已写入升级方案，待用户授权执行，非本轮改动范围
+
+"""
 ## 六、验证边界
 
 - 本轮未运行 Go 测试、未连真实数据库或 Redis 做并发复现；计费/并发类结论均为代码语义级证据，端到端后果标注为推断。
