@@ -36,6 +36,18 @@ func migrateQuotaDataUniqueIndexWithExecutor(executor prefillGroupMigrationExecu
 
 	db := executor.DB()
 
+	// 合并查询读取全部模型列。旧库可能还没有 token_used（晚于本迁移引入的
+	// 模型版本），缺列会让合并直接报错、InitDB 中断，而补列的 AutoMigrate
+	// 排在所有合并之后，永远执行不到。先按需补列，再扫描合并。
+	for _, column := range []string{"user_id", "username", "model_name", "created_at", "token_used", "count", "quota"} {
+		if executor.HasColumn(&QuotaData{}, column) {
+			continue
+		}
+		if err := executor.AddColumn(&QuotaData{}, column); err != nil {
+			return fmt.Errorf("failed to add quota_data.%s: %w", column, err)
+		}
+	}
+
 	var duplicates []struct {
 		UserID    int
 		Username  string
