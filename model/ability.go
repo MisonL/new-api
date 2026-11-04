@@ -1066,17 +1066,23 @@ func UpdateAbilityByTag(tag string, newTag *string, priority *int64, weight *uin
 	if err != nil {
 		return err
 	}
-	ability := Ability{}
+	// Updates 用结构体会跳过零值字段：显式清零权重时 Weight=0 不写库，
+	// 路由仍用旧权重。改用 map 让 0 也能落库；Tag/Priority 是指针，直接作为
+	// 列赋值的输入即可（未提供的字段不含在 map 里，天然不动）。
+	updates := make(map[string]interface{}, 3)
 	if newTag != nil {
-		ability.Tag = newTag
+		updates["tag"] = newTag
 	}
 	if priority != nil {
-		ability.Priority = priority
+		updates["priority"] = priority
 	}
 	if weight != nil {
-		ability.Weight = *weight
+		updates["weight"] = *weight
 	}
-	if err := DB.Model(&Ability{}).Where("tag = ?", tag).Updates(ability).Error; err != nil {
+	if len(updates) == 0 {
+		return nil
+	}
+	if err := DB.Model(&Ability{}).Where("tag = ?", tag).Updates(updates).Error; err != nil {
 		return err
 	}
 	refreshAbilityChannelCaches(channelIDs)
