@@ -87,11 +87,11 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	if a.request == nil {
 		return nil, types.NewError(errors.New("request is nil"), types.ErrorCodeInvalidRequest)
 	}
+	domain, authUrl := getXunfeiAuthUrl(c, splits[2], splits[1], a.request.Model)
 	if info.IsStream {
-		domain, authUrl := getXunfeiAuthUrl(c, splits[2], splits[1], a.request.Model)
 		usage, err = xunfeiStreamHandler(c, info, *a.request, splits[0], domain, authUrl)
 	} else {
-		usage, err = xunfeiHandler(c, *a.request, splits[0], splits[1], splits[2])
+		usage, err = xunfeiHandler(c, *a.request, splits[0], domain, authUrl)
 	}
 	return
 }

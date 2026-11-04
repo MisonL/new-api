@@ -166,6 +166,8 @@ func xunfeiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, textReques
 	}
 	helper.SetEventStreamHeaders(c)
 	var usage dto.Usage
+	var apiErr *types.NewAPIError
+	sawData := false
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case xunfeiResponse := <-dataChan:
@@ -178,9 +180,20 @@ func xunfeiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, textReques
 				common.SysLog("error marshalling stream response: " + err.Error())
 				return true
 			}
+			sawData = true
 			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
 			return true
 		case res := <-stopChan:
+			if res.upstreamCode != 0 {
+				apiErr = xunfeiUpstreamError(res.upstreamCode, res.upstreamMessage)
+				helper.RecordStreamEnd(c, info, false)
+				if sawData {
+					// 已经下发过内容：协议要求以 SSE 错误帧告知客户端，
+					// 且不能用 [DONE] 伪装成正常完成。
+					_ = helper.OpenAIChatErrorEvent(c, apiErr.ToOpenAIError())
+				}
+				return false
+			}
 			helper.RecordStreamEnd(c, info, res.endedNormally)
 			c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
 			return false
@@ -188,11 +201,20 @@ func xunfeiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, textReques
 			return false
 		}
 	})
-	return &usage, nil
+	return &usage, apiErr
 }
 
-func xunfeiHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId string, apiSecret string, apiKey string) (*dto.Usage, *types.NewAPIError) {
-	domain, authUrl := getXunfeiAuthUrl(c, apiKey, apiSecret, textRequest.Model)
+func xunfeiUpstreamError(code int, message string) *types.NewAPIError {
+	if message == "" {
+		message = "upstream returned an error frame"
+	}
+	return types.NewError(
+		fmt.Errorf("xunfei upstream error %d: %s", code, message),
+		types.ErrorCodeBadResponseBody,
+	)
+}
+
+func xunfeiHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId string, domain string, authUrl string) (*dto.Usage, *types.NewAPIError) {
 	dataChan, stopChan, requestErr := xunfeiMakeRequest(c, textRequest, domain, authUrl, appId)
 	if requestErr != nil {
 		return nil, requestErr
@@ -211,7 +233,12 @@ func xunfeiHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId s
 			usage.PromptTokens += xunfeiResponse.Payload.Usage.Text.PromptTokens
 			usage.CompletionTokens += xunfeiResponse.Payload.Usage.Text.CompletionTokens
 			usage.TotalTokens += xunfeiResponse.Payload.Usage.Text.TotalTokens
-		case <-stopChan:
+		case res := <-stopChan:
+			// 讯飞把鉴权/限流/余额错误放在 header.code 里；不转成错误，
+			// 这条路径会返回 200 空回复，调用方无从得知失败。
+			if res.upstreamCode != 0 {
+				return nil, xunfeiUpstreamError(res.upstreamCode, res.upstreamMessage)
+			}
 			stop = true
 		case <-relaycommon.GinRequestContext(c).Done():
 			stop = true
@@ -241,6 +268,11 @@ func xunfeiHandler(c *gin.Context, textRequest dto.GeneralOpenAIRequest, appId s
 // 消费者收到该信号时才写 StreamStatus；发送发生在写入之后，构成 happens-before。
 type xunfeiStreamResult struct {
 	endedNormally bool
+	// upstreamCode/upstreamMessage 来自 header.code 非 0 的错误帧：讯飞把鉴权
+	// 失败、限流、余额不足等放在这里然后关闭连接，payload 为空。不读取它，
+	// 错误帧会被当成一个空内容数据帧，调用方看到"成功但空"。
+	upstreamCode    int
+	upstreamMessage string
 }
 
 func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, domain, authUrl, appId string) (chan XunfeiChatResponse, chan xunfeiStreamResult, *types.NewAPIError) {
@@ -307,7 +339,7 @@ func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, dom
 		defer func() {
 			conn.Close()
 		}()
-		endedNormally := false
+		result := xunfeiStreamResult{}
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -322,6 +354,13 @@ func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, dom
 				common.SysLog("error unmarshalling stream response: " + err.Error())
 				break
 			}
+			if response.Header.Code != 0 {
+				common.SysLog(fmt.Sprintf("xunfei upstream error frame: code=%d message=%s sid=%s",
+					response.Header.Code, response.Header.Message, response.Header.Sid))
+				result.upstreamCode = response.Header.Code
+				result.upstreamMessage = response.Header.Message
+				break
+			}
 			select {
 			case dataChan <- response:
 			case <-requestContext.Done():
@@ -330,15 +369,12 @@ func xunfeiMakeRequest(c *gin.Context, textRequest dto.GeneralOpenAIRequest, dom
 			if response.Payload.Choices.Status == 2 {
 				// 讯飞协议的终止帧：payload.status==2 是「正常收尾」的唯一信号，
 				// 与读错误区分开，否则健康流会被记成上游中断。
-				endedNormally = true
-				if err != nil {
-					common.SysLog("error closing websocket connection: " + err.Error())
-				}
+				result.endedNormally = true
 				break
 			}
 		}
 		select {
-		case stopChan <- xunfeiStreamResult{endedNormally: endedNormally}:
+		case stopChan <- result:
 		default:
 		}
 	}()
