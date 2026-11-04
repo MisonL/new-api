@@ -111,6 +111,14 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		} else {
 			err, usage = cfHandler(c, info, resp)
 		}
+	case constant.RelayModeCompletions:
+		// 请求侧已支持 /v1/completions（ConvertOpenAIRequest 有
+		// RelayModeCompletions 分支）。响应侧缺失会让这里裸 return nil usage，
+		// 调用方在 compatible_handler 里对 nil 接口断言直接 panic。这里显式
+		// 拒绝，返回明确错误而不是崩溃。
+		return nil, types.NewErrorWithStatusCode(errors.New(
+			"Cloudflare channel does not support /v1/completions responses"),
+			types.ErrorCodeInvalidRequest, http.StatusNotImplemented)
 	case constant.RelayModeResponses:
 		if info.IsStream {
 			usage, err = openai.OaiResponsesStreamHandler(c, info, resp)
