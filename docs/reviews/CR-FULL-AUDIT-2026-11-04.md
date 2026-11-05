@@ -116,7 +116,7 @@
 ### relay 流式
 - **自管扫描器渠道在客户端断开路径漏写 StreamStatus** `relay/channel/xunfei/relay-xunfei.go:187-188`（直接 return，不调 `RecordStreamEnd`）、`relay-cohere.go:147-207`、`relay-tencent.go:161-189`。断开被判成 `error`/`upstream_transport_interrupted`，健康探针与计费分类失真。
 - **上游请求未绑定客户端 context，且 `RELAY_TIMEOUT` 默认 0 无超时兜底** `relay/channel/api_request.go:692/738/1081` 用 `http.NewRequest`；`service/http_client.go:380-384`、`common/init.go:122`。客户端断开后上游请求继续，挂死时连接/计费会话/并发租约长期占用。
-- **错误被吞成成功**：`relay/channel/cloudflare/relay_cloudflare.go:109-125`（`scanner.Err()` 只记日志，照常 `[DONE]` 并按估算计费 ★）、`coze/relay-coze.go:222-231`（带内 error 只 SysLog，`return nil`）、`palm/relay-palm.go:148-212`（读/解析失败都只 SysLog 并发 `[DONE]`）。
+- **错误被吞成成功**（已修，见第八节第 17-19 项）：`relay/channel/cloudflare/relay_cloudflare.go:109-125`（`scanner.Err()` 只记日志，照常 `[DONE]` 并按估算计费 ★）、`coze/relay-coze.go:222-231`（带内 error 只 SysLog，`return nil`）、`palm/relay-palm.go:148-212`（读/解析失败都只 SysLog 并发 `[DONE]`）。
 - **xunfei 从不检查上游 `header.code`** `relay/channel/xunfei/dto.go:37-42`、`relay-xunfei.go`（全包无读取）。鉴权/限流类错误帧被包装成 200 空流 ★。
 - **`writeRelayErrorResponse` 对 Claude/Gemini 流中错误写裸 JSON** `controller/relay.go:515-522`、`:551`。已写过帧时 Content-Type 仍是 `text/event-stream`，追加的 `{"type":"error",...}` 无 `data:` 前缀，合规 SSE 客户端会忽略。★
 - **Baidu `is_end` 未映射为终止** `relay/channel/baidu/relay-baidu.go:96-113`、`:138-158`。共享扫描器只认字面 `[DONE]`，若上游不发 `[DONE]`，所有健康流被判 `UpstreamInterrupted`，渠道健康探针永远无法标记成功。推断（上游行为）。
@@ -238,9 +238,13 @@
 14. `DeleteDisabledChannel` 先 Pluck 后删除、不重判 status 且不分块 → 删除语句重断言 status + 200 分块 + 只清理真正删除的 ability（`111e585c4`，反向验证）
 15. OAuth 绑定路径不复读用户状态，被禁用账号旧会话仍可绑定 → `resolveEnabledBindUser` 统一复读（`190b43da6`，反向验证）
 16. 上游请求未绑定客户端 context（客户端断开/超时传不到 net/http） → `http.NewRequestWithContext(GinRequestContext(c))`，并同步修正 jimeng/coze/replicate（`7c7e817f0`，反向验证）
+17. cloudflare 流传输中断只记日志后照常发 `[DONE]` → 扫描错误转成 API 错误，已下发内容保留，不再声称完成（`0ede41626`，反向验证）
+18. coze 带内 `event: error` 只记 SysLog 后当正常结束 → 转成 API 错误，不发 `[DONE]`、不记成功结束（`4013366a`，反向验证）
+19. palm 单帧包装的读取/解析失败只记日志并发 `[DONE]` → `stopChan` 携带错误上抛，失败不发 `[DONE]`（`d0f707f98`，反向验证）
 
-验证记录（2026-11-05）：`go test ./controller ./model ./service` 全绿；
-`web/default` `bun test src` 72 通过、`bun run lint` 0 error、`bun run build` 成功；
+验证记录（2026-11-05，第 19 项之后重跑）：`go test ./controller ./model ./relay/common ./relay/helper ./middleware ./service -count=1` 六个包全绿；
+流错误相关包 `go test ./relay/channel/{cloudflare,coze,palm} -count=1` 全绿；
+`web/default` `bun test src` 72 通过、`bun run lint` 0 error（22 个既有 warning）、`bun run build` 成功；
 `web/tests` `node --test` 153 通过；`web/classic` `bun run build` 成功。
 
 仍未覆盖：真实 MySQL/PG/Redis 并发、多实例失效通道、真实上游渠道协议
