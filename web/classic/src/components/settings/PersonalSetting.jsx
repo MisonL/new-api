@@ -30,6 +30,7 @@ import {
   buildRegistrationResult,
   isPasskeySupported,
   setUserData,
+  updateAPI,
 } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { Modal } from '@douyinfe/semi-ui';
@@ -303,6 +304,8 @@ const PersonalSetting = () => {
       await API.get('/api/user/logout');
       userDispatch({ type: 'logout' });
       localStorage.removeItem('user');
+      // 与退出登录一致：不重建 axios 实例，New-API-User 头会保留已删除账号的 id。
+      updateAPI();
       navigate('/login');
     } else {
       showError(message);
