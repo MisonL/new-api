@@ -237,13 +237,22 @@
 13. classic 直接 import dompurify 但未声明依赖 → 写入 dependencies 并更新 bun.lock（`ca523b787`）
 14. `DeleteDisabledChannel` 先 Pluck 后删除、不重判 status 且不分块 → 删除语句重断言 status + 200 分块 + 只清理真正删除的 ability（`111e585c4`，反向验证）
 15. OAuth 绑定路径不复读用户状态，被禁用账号旧会话仍可绑定 → `resolveEnabledBindUser` 统一复读（`190b43da6`，反向验证）
+16. 上游请求未绑定客户端 context（客户端断开/超时传不到 net/http） → `http.NewRequestWithContext(GinRequestContext(c))`，并同步修正 jimeng/coze/replicate（`7c7e817f0`，反向验证）
 
 验证记录（2026-11-05）：`go test ./controller ./model ./service` 全绿；
 `web/default` `bun test src` 72 通过、`bun run lint` 0 error、`bun run build` 成功；
 `web/tests` `node --test` 153 通过；`web/classic` `bun run build` 成功。
 
 仍未覆盖：真实 MySQL/PG/Redis 并发、多实例失效通道、真实上游渠道协议
-（prefill/cohera/zhipu/tencent/xunfei 超时与终止标记）、以及浏览器端视觉验证。
+（prefill/cohera/zhipu/tencent 超时与终止标记）、以及浏览器端视觉验证。
+
+留待后续（本轮明确不做）：
+- 共享扫描器把截断的最后一个 SSE 帧当完整帧下发：需要改 `bufio.Scanner` 的分行
+  缓冲，属核心组件重构，回归面大；当前实现下这类流的结束原因已判为
+  upstream_interrupted，只在客户端侧多一帧不完整内容。
+- `GetAllChannels` tag 模式与 `SearchChannels` tag 分支无分页、`Register` 邮箱
+  check-then-insert、请求层统一超时、会话 cookie 服务端撤销：都涉及行为或
+  数据模型变更，需单独立项。
 
 
 """
