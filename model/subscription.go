@@ -1193,6 +1193,19 @@ func RefundSubscriptionPreConsume(requestId string) error {
 			record.Status = "refunded"
 			return tx.Save(&record).Error
 		}
+		// 订阅在这条预扣之后发生过周期重置：重置已把 AmountUsed 归零，等于
+		// 把上一个周期的预扣还给了用户。此时再按负 delta 退款只会冲掉新周期
+		// 已经产生的用量（负值还会被夹到 0，接口却返回成功），造成平台少计费。
+		// 跨周期的退款只结束记录，不再调整用量。
+		var sub UserSubscription
+		if err := forUpdate(tx).
+			Where("id = ?", record.UserSubscriptionId).First(&sub).Error; err != nil {
+			return err
+		}
+		if sub.LastResetTime > record.CreatedAt {
+			record.Status = "refunded"
+			return tx.Save(&record).Error
+		}
 		if err := postConsumeUserSubscriptionDeltaTx(tx, record.UserSubscriptionId, -record.PreConsumed); err != nil {
 			return err
 		}
