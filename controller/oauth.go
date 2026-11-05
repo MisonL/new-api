@@ -359,19 +359,13 @@ func handleDesktopOAuthBind(c *gin.Context, provider oauth.Provider, request *de
 }
 
 func bindOAuthIdentityToCurrentUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser) error {
-	// Get current user from session
-	session := sessions.Default(c)
-	id := session.Get("id")
-	if id == nil {
-		return fmt.Errorf("missing current user session")
-	}
-	user := model.User{Id: id.(int)}
-	err := user.FillUserById()
+	// 绑定是公开回调：必须复读用户状态，被禁用账号的旧会话不得再绑定新身份。
+	user, err := resolveEnabledBindUser(c)
 	if err != nil {
 		return err
 	}
 
-	if err := ensureProviderBindingAvailableForUser(&user, provider, oauthUser); err != nil {
+	if err := ensureProviderBindingAvailableForUser(user, provider, oauthUser); err != nil {
 		return err
 	}
 
@@ -384,10 +378,10 @@ func bindOAuthIdentityToCurrentUser(c *gin.Context, provider oauth.Provider, oau
 		}
 	} else {
 		// Built-in provider: update user record directly
-		if err := ensureBuiltInProviderBindingAvailable(&user, provider, oauthUser); err != nil {
+		if err := ensureBuiltInProviderBindingAvailable(user, provider, oauthUser); err != nil {
 			return err
 		}
-		provider.SetProviderUserID(&user, oauthUser.ProviderUserID)
+		provider.SetProviderUserID(user, oauthUser.ProviderUserID)
 		err = user.Update(false)
 		if err != nil {
 			return err

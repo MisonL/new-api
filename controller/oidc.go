@@ -204,15 +204,13 @@ func OidcBind(c *gin.Context) {
 		})
 		return
 	}
-	session := sessions.Default(c)
-	id := session.Get("id")
-	// id := c.GetInt("id")  // critical bug!
-	user.Id = id.(int)
-	err = user.FillUserById()
+	// 绑定是公开回调：复读用户状态，被禁用账号的旧会话不得再绑定新身份。
+	sessionUser, err := resolveEnabledBindUser(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	user = *sessionUser
 	user.OidcId = oidcUser.OpenID
 	err = user.Update(false)
 	if err != nil {
