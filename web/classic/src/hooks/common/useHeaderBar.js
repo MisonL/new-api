@@ -24,7 +24,7 @@ import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useSetTheme, useTheme, useActualTheme } from '../../context/Theme';
 import { parseHeaderNavModules } from '../../helpers/headerNavModules';
-import { API } from '../../helpers/apiCore';
+import { API, updateAPI } from '../../helpers/apiCore';
 import { getLogo, getSystemName, showSuccess } from '../../helpers/utils';
 import { postMessageToIframe } from '../../helpers/iframeMessaging';
 import { normalizeLanguage } from '../../i18n/language';
@@ -139,6 +139,10 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     showSuccess(t('注销成功!'));
     userDispatch({ type: 'logout' });
     localStorage.removeItem('user');
+    // axios 实例的默认头在创建时就固定了 New-API-User；不重建实例，退出后
+    // 发出的请求仍会带上一个已注销用户的 id。updateAPI 会用当前（已清空的）
+    // localStorage 重建实例，与登录路径保持一致。
+    updateAPI();
     navigate('/login');
   }, [navigate, t, userDispatch]);
 
