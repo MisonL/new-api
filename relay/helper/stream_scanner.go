@@ -328,9 +328,15 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 		sr := newStreamResult(info.StreamStatus)
 		for data := range dataChan {
 			sr.reset()
-			writeMutex.Lock()
-			dataHandler(data, sr)
-			writeMutex.Unlock()
+			// 处理器 panic 时必须仍然释放写锁：本协程的 recover 在外层 defer，
+			// 而等锁的 ping 写协程计入 wg，锁不释放会让 wg.Wait() 永久挂起。
+			// 处理器 panic 时必须仍然释放写锁：本协程的 recover 在外层 defer，
+			// 而等锁的 ping 写协程计入 wg，锁不释放会让 wg.Wait() 永久挂起。
+			func() {
+				writeMutex.Lock()
+				defer writeMutex.Unlock()
+				dataHandler(data, sr)
+			}()
 			if sr.IsStopped() {
 				return
 			}
