@@ -211,11 +211,40 @@
 - V2 播种 20000bps（依赖并发/禁用态创建，运行时已静默归一化；隔离环境默认开 V2）
 - 多实例渠道缓存无 Redis Pub/Sub 失效、订阅套餐缓存进程内
 - MySQL/PG 路由 scope 与渠道写事务 ABBA 死锁
-- prefill/cohera/zhipu/tencent/xunfei 各渠道终止标记与超时（需真实上游）
-- Nova 流式静默降级
-- Telegram 绑定缺 state（SameSite=Strict 是既有缓解）
+- prefill/cohera/zhipu/tencent 各渠道终止标记与超时（需真实上游）
 - TRUSTED_PROXIES=auto 信任容器子网（生产为空不受影响）
 - 生产安全基线（口令/0.0.0.0:13000/root 镜像/codex npm 超限）：已写入升级方案，待用户授权执行，非本轮改动范围
+
+---
+
+## 八、续修项（2026-11-05）
+
+在上一轮基础上继续修复，全部有回归测试；标注"反向验证"的条目做过
+"去掉修复→测试失败→恢复"的验证：
+
+1. 个人用量统计按会话 username 聚合 → 改用当前用户 id 过滤（`d1aee055f`）
+2. Telegram 绑定缺 OAuth state（登录 CSRF） → 校验会话 state 并在成功后消费；两套前端改为先取 state 再发起绑定（`d0f085113`，反向验证）
+3. xunfei 从不检查上游 `header.code`，错误帧被包装成 200 空流 → 识别错误帧并转成 API 错误 / SSE 错误帧（`64b435faa`，反向验证）
+4. Baidu `is_end` 未映射为终止，健康流被判中断 → `sr.MarkDone()`（`655750ca6`，反向验证）
+5. Nova 流式请求被静默降级为非流式 → 显式 501（`94842bf63`，反向验证）
+6. 只读守卫覆盖不到 XHR（sse.js） → 两套前端 patch `XMLHttpRequest.prototype.open`（`ef4f0eef5`，反向验证）
+7. 任务提交后结算失败只进 stderr → 写入消费日志 `other.settle_error`（`8e6955199`，反向验证）
+8. FetchModels 无响应体上限 → `common.UpstreamSmallResponseLimit` 封顶（`16403e4ff`，反向验证）
+9. classic GET 去重不豁免 AbortSignal → 抽到 `apiGetDedupe.js` 并豁免 signal（`0ba67776a`，反向验证）
+10. classic 固定像素宽度弹窗在移动端溢出 → 全局 `.semi-modal { max-width: calc(100vw - 32px) }`（`02ad9d11c`，构建产物验证）
+11. classic 损坏 localStorage 导致模块顶层抛异常白屏 → `userStorage.js` 全路径降级 -1（`211c738ba`）
+12. classic 退出登录不重建 axios 实例，`New-API-User` 头保留旧 id → 退出后 `updateAPI()`（`a738d83dd`；hook 路径无自动化测试）
+13. classic 直接 import dompurify 但未声明依赖 → 写入 dependencies 并更新 bun.lock（`ca523b787`）
+14. `DeleteDisabledChannel` 先 Pluck 后删除、不重判 status 且不分块 → 删除语句重断言 status + 200 分块 + 只清理真正删除的 ability（`111e585c4`，反向验证）
+15. OAuth 绑定路径不复读用户状态，被禁用账号旧会话仍可绑定 → `resolveEnabledBindUser` 统一复读（`190b43da6`，反向验证）
+
+验证记录（2026-11-05）：`go test ./controller ./model ./service` 全绿；
+`web/default` `bun test src` 72 通过、`bun run lint` 0 error、`bun run build` 成功；
+`web/tests` `node --test` 153 通过；`web/classic` `bun run build` 成功。
+
+仍未覆盖：真实 MySQL/PG/Redis 并发、多实例失效通道、真实上游渠道协议
+（prefill/cohera/zhipu/tencent/xunfei 超时与终止标记）、以及浏览器端视觉验证。
+
 
 """
 ## 六、验证边界
