@@ -103,13 +103,29 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 		}
 		if err != nil {
 			logger.LogError(c, "error_rendering_stream_response: "+err.Error())
+		} else {
+			// 记录已下发的响应帧数：重试判定依赖它区分"首帧之前断流"
+			// （可以换渠道重放）与"已经吐出内容"（重放会重复内容）。
+			info.ReceivedResponseCount++
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		logger.LogError(c, "error_scanning_stream_response: "+err.Error())
+	scanErr := scanner.Err()
+	helper.RecordStreamEnd(c, info, sawDone && scanErr == nil)
+	if scanErr != nil {
+		// 上游传输中断不能被吞成成功：此前只记一行日志，随后照常发送 [DONE]，
+		// 客户端据此认为流已正常完成。首帧之前断流返回可重试错误；已吐出内容
+		// 时不可重试，但同样不得以 [DONE] 收尾，改为显式错误。
+		logger.LogError(c, "error_scanning_stream_response: "+scanErr.Error())
+		service.CloseResponseBodyGracefully(resp)
+		if newAPIError := relaycommon.RetryableUpstreamStreamInterruptedError(c, info); newAPIError != nil {
+			return newAPIError, nil
+		}
+		return types.NewError(
+			fmt.Errorf("cloudflare stream interrupted after content was delivered: %w", scanErr),
+			types.ErrorCodeBadResponseBody,
+		), nil
 	}
-	helper.RecordStreamEnd(c, info, sawDone)
 	usage := service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
 	if info.ShouldIncludeUsage {
 		response := helper.GenerateFinalUsageResponse(id, info.StartTime.Unix(), info.UpstreamModelName, *usage)
