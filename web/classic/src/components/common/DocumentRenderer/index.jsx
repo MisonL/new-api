@@ -28,6 +28,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import MarkdownRenderer from '../markdown/LazyMarkdownRenderer';
 import { sanitizeHtml as sanitizeAdminHtml } from '../../../helpers/sanitizeHtml';
+import { sanitizeDocumentCss } from '../../../helpers/documentCss';
 
 // Check whether content is a URL.
 const isUrl = (content) => {
@@ -53,9 +54,13 @@ const extractHtmlPayload = (html) => {
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = html;
 
-  const styles = Array.from(tempDiv.querySelectorAll('style'))
-    .map((style) => style.innerHTML)
-    .join('\n');
+  // <style> 会被注入 document.head，影响整站而不只是文档区。DOMPurify 不解析
+  // CSS，这里必须单独清洗：闭合逃逸、@import、expression() 与脚本协议。
+  const styles = sanitizeDocumentCss(
+    Array.from(tempDiv.querySelectorAll('style'))
+      .map((style) => style.textContent || '')
+      .join('\n'),
+  );
 
   const bodyContent = tempDiv.querySelector('body');
   const content = bodyContent ? bodyContent.innerHTML : html;
