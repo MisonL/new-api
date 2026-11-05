@@ -3,14 +3,30 @@ package middleware
 import (
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
+// turnstilePassTTL 定义 Turnstile 通过标记的有效期。用户解一次谜之后，标记
+// 保留在该会话中；超过此时间后即使标记存在也重新要求校验。
+const turnstilePassTTL = 1 * time.Hour
+
 type turnstileCheckResponse struct {
 	Success bool `json:"success"`
+}
+
+// turnstilePassActive 判断会话里的通过标记是否仍在有效期内。标记存的是
+// 通过时间戳；旧实现写的是 bool true，没有任何时效信息，等同于整个会话
+// cookie 有效期内（30 天）都免检，因此一律按过期处理。
+func turnstilePassActive(value any, now time.Time) bool {
+	passedAt, ok := value.(int64)
+	if !ok {
+		return false
+	}
+	return now.Sub(time.Unix(passedAt, 0)) <= turnstilePassTTL
 }
 
 func TurnstileCheck() gin.HandlerFunc {
@@ -18,7 +34,7 @@ func TurnstileCheck() gin.HandlerFunc {
 		if common.TurnstileCheckEnabled {
 			session := sessions.Default(c)
 			turnstileChecked := session.Get("turnstile")
-			if turnstileChecked != nil {
+			if turnstilePassActive(turnstileChecked, time.Now()) {
 				c.Next()
 				return
 			}
@@ -65,7 +81,7 @@ func TurnstileCheck() gin.HandlerFunc {
 				c.Abort()
 				return
 			}
-			session.Set("turnstile", true)
+			session.Set("turnstile", time.Now().Unix())
 			err = session.Save()
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{
