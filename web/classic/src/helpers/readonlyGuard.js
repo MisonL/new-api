@@ -152,3 +152,43 @@ export function isReadonlyBlockedRequest(method, url, baseOrigin) {
   }
   return Boolean(base) && parsed.origin !== base && path.startsWith('/api/');
 }
+
+// Installs the read-only guard on XMLHttpRequest.
+//
+// The fetch patch and the axios interceptor both miss any request opened with
+// `new XMLHttpRequest()` -- the streaming helpers in web/default's playground
+// (sse.js) do exactly that, and a future classic call site would too. Blocking
+// inside `open()` rejects the request before a socket is opened, so the guard
+// stays a layer instead of an opt-in helper.
+//
+// The decision callback is injected rather than imported so this module keeps
+// zero runtime dependencies and the patch itself is unit testable.
+const XHR_GUARD_MARK = Symbol.for("new-api.readonly-xhr-guard");
+
+export function installReadonlyXHRGuard({
+  isBlocked,
+  message,
+  enabled = true,
+}) {
+  if (!enabled) {
+    return;
+  }
+  if (typeof globalThis.XMLHttpRequest !== "function") {
+    return;
+  }
+
+  const proto = globalThis.XMLHttpRequest.prototype;
+  const originalOpen = proto.open;
+  if (typeof originalOpen !== "function" || originalOpen[XHR_GUARD_MARK]) {
+    return;
+  }
+
+  const wrapper = function (method, url, ...rest) {
+    if (isBlocked(method, url)) {
+      throw new Error(message);
+    }
+    return originalOpen.call(this, method, url, ...rest);
+  };
+  wrapper[XHR_GUARD_MARK] = true;
+  proto.open = wrapper;
+}

@@ -21,7 +21,10 @@ import axios from 'axios';
 import i18next from 'i18next';
 import { getUserIdFromLocalStorage, showError } from './utils';
 import { handleAuthExpired } from './authRedirect';
-import { isReadonlyBlockedRequest as shouldBlockReadonlyRequest } from './readonlyGuard';
+import {
+  isReadonlyBlockedRequest as shouldBlockReadonlyRequest,
+  installReadonlyXHRGuard,
+} from './readonlyGuard';
 import {
   IS_READONLY_FRONTEND,
   READONLY_FRONTEND_MESSAGE,
@@ -148,6 +151,11 @@ function configureAPIInstance(instance) {
   patchAPIInstance(instance);
   applyReadonlyRequestGuard(instance);
   installReadonlyFetchGuard();
+  installReadonlyXHRGuard({
+    isBlocked: (method, url) => isReadonlyBlockedRequest(method, url),
+    message: i18next.t(READONLY_FRONTEND_MESSAGE),
+    enabled: IS_READONLY_FRONTEND,
+  });
   applyResponseErrorHandler(instance);
 }
 

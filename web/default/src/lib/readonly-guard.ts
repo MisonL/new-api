@@ -244,6 +244,58 @@ export function installReadonlyFetchGuard(): void {
   installedFetchWrapper = wrapper
 }
 
+const XHR_GUARD_MARK = Symbol.for('new-api.readonly-xhr-guard')
+
+export interface ReadonlyXHRGuardOptions {
+  /** Test seam: override the build-time read-only flag. */
+  enabled?: boolean
+}
+
+/**
+ * Installs the guard on `XMLHttpRequest`.
+ *
+ * The fetch patch and the axios interceptor both miss the playground stream:
+ * it uses sse.js, which opens its request with `new XMLHttpRequest()`. Without
+ * this patch a POST /v1/chat/completions from the read-only frontend reaches
+ * the backend, and the nginx proxy is the only remaining layer -- the exact
+ * single-layer setup AGENTS.md section 7 forbids. Blocking inside `open()`
+ * rejects the request before any socket is opened.
+ */
+export function installReadonlyXHRGuard(
+  options?: ReadonlyXHRGuardOptions
+): void {
+  const enabled = options?.enabled ?? IS_READONLY_FRONTEND
+  if (!enabled) {
+    return
+  }
+  if (typeof XMLHttpRequest !== 'function') {
+    return
+  }
+  const proto = XMLHttpRequest.prototype
+  const originalOpen = proto.open
+  const marked = originalOpen as unknown as Record<symbol, unknown>
+  if (marked[XHR_GUARD_MARK]) {
+    return
+  }
+
+  const wrapper = function (
+    this: XMLHttpRequest,
+    method: string,
+    url: string | URL,
+    ...rest: unknown[]
+  ) {
+    if (isReadonlyBlockedRequest(method, String(url))) {
+      rejectReadonlyRequest()
+    }
+    return (originalOpen as unknown as (...args: unknown[]) => void).apply(
+      this,
+      [method, url, ...rest]
+    )
+  } as unknown as XMLHttpRequest['open']
+  Object.defineProperty(wrapper, XHR_GUARD_MARK, { value: true })
+  proto.open = wrapper
+}
+
 /**
  * Installs the guard on an axios instance. A rejected request interceptor makes
  * axios fail the request before any socket is opened, and the instance's error

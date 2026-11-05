@@ -6,6 +6,7 @@ import { markToastShown } from '@/lib/handle-server-error'
 import {
   applyReadonlyRequestGuard,
   installReadonlyFetchGuard,
+  installReadonlyXHRGuard,
 } from '@/lib/readonly-guard'
 
 // ============================================================================
@@ -33,6 +34,7 @@ export const api = axios.create({
 // direct fetch cannot silently reopen the hole.
 applyReadonlyRequestGuard(api)
 installReadonlyFetchGuard()
+installReadonlyXHRGuard()
 
 // ============================================================================
 // Request Deduplication
