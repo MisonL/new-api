@@ -43,7 +43,7 @@ func TestPalmStreamProducerExitsWhenClientDisconnects(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
-	apiErr, _ := palmStreamHandler(c, resp)
+	apiErr, _ := palmStreamHandler(c, newPalmStreamInfo(), resp)
 	require.Nil(t, apiErr)
 
 	waitForGoroutineExit(t, "palmStreamHandler.func")

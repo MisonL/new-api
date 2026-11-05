@@ -185,6 +185,8 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 		err = helper.ObjectData(c, response)
 		if err != nil {
 			common.SysLog(err.Error())
+		} else {
+			helper.RecordStreamFrame(info)
 		}
 	}
 

@@ -315,6 +315,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err := helper.StringData(c, string(data)); err != nil {
 		return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 	}
+	helper.RecordStreamFrame(info)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -356,6 +357,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				if err := helper.StringData(c, string(data)); err != nil {
 					return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 				}
+				helper.RecordStreamFrame(info)
 			}
 		}
 

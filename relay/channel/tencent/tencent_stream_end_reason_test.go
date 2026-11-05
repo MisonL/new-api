@@ -67,3 +67,16 @@ func TestTencentStreamWithoutFinishReasonStaysInterrupted(t *testing.T) {
 		info.StreamStatus.EndReason)
 	require.Equal(t, relaycommon.StreamEndReasonUpstreamInterrupted, info.StreamStatus.EndReason)
 }
+
+// 自管扫描器此前不维护 ReceivedResponseCount：中断的健康流在 consume 日志里
+// 只能落成 error，partial 分类永不命中，运营无法区分"完全没产出"和"产出到
+// 一半"。每写出一帧下游数据都必须记账。
+func TestTencentStreamCountsDeliveredFrames(t *testing.T) {
+	body := "data: {\"Choices\":[{\"Delta\":{\"Content\":\"hi\"}}]}\n\n" +
+		"data: {\"Choices\":[{\"Delta\":{\"Content\":\" there\"}}]}\n\n" +
+		"data: {\"Choices\":[{\"FinishReason\":\"stop\"}]}\n\n"
+	info := runTencentStream(t, body)
+
+	require.Equal(t, 3, info.ReceivedResponseCount,
+		"每帧下发都要计数，实际 %d", info.ReceivedResponseCount)
+}

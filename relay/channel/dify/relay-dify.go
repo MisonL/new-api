@@ -417,6 +417,8 @@ func difyStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 			common.SysLog(err.Error())
 			streamErr = fmt.Errorf("write Dify stream response: %w", err)
 			sr.Stop(streamErr)
+		} else {
+			helper.RecordStreamFrame(info)
 		}
 	})
 	if streamErr == nil {

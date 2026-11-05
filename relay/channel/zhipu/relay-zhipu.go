@@ -252,6 +252,7 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 				return true
 			}
 			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
+			helper.RecordStreamFrame(info)
 			return true
 		case data := <-metaChan:
 			var zhipuResponse ZhipuStreamMetaResponse
@@ -270,6 +271,7 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 			// meta 事件携带 usage，是智谱流式的终止信号。
 			sawMeta = true
 			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
+			helper.RecordStreamFrame(info)
 			return true
 		case <-stopChan:
 			c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})

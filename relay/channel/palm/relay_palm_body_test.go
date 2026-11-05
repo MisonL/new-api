@@ -68,7 +68,7 @@ func TestPalmStreamHandlerClosesBodyOnReadFailure(t *testing.T) {
 	body := &failingBody{}
 	resp := &http.Response{StatusCode: http.StatusOK, Body: body}
 
-	palmStreamHandler(newPalmStreamContext(), resp)
+	palmStreamHandler(newPalmStreamContext(), newPalmStreamInfo(), resp)
 
 	if !body.closed {
 		t.Fatalf("palmStreamHandler left the upstream response body open after a read failure")
@@ -103,7 +103,7 @@ func TestPalmStreamHandlerClosesBodyOnPanic(t *testing.T) {
 
 	func() {
 		defer func() { _ = recover() }()
-		palmStreamHandler(c, resp)
+		palmStreamHandler(c, newPalmStreamInfo(), resp)
 	}()
 
 	if !body.closed {
@@ -116,7 +116,7 @@ func TestPalmStreamHandlerClosesBodyOnParseFailure(t *testing.T) {
 	body := &trackingBody{reader: strings.NewReader("not json at all")}
 	resp := &http.Response{StatusCode: http.StatusOK, Body: body}
 
-	palmStreamHandler(newPalmStreamContext(), resp)
+	palmStreamHandler(newPalmStreamContext(), newPalmStreamInfo(), resp)
 
 	if !body.closed {
 		t.Fatalf("palmStreamHandler left the upstream response body open after a parse failure")
@@ -128,7 +128,7 @@ func TestPalmStreamHandlerClosesBodyOnSuccess(t *testing.T) {
 	body := &trackingBody{reader: strings.NewReader(payload)}
 	resp := &http.Response{StatusCode: http.StatusOK, Body: body}
 
-	_, text := palmStreamHandler(newPalmStreamContext(), resp)
+	_, text := palmStreamHandler(newPalmStreamContext(), newPalmStreamInfo(), resp)
 
 	if !body.closed {
 		t.Fatalf("palmStreamHandler left the upstream response body open on the success path")

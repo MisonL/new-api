@@ -49,7 +49,7 @@ func TestPalmStreamReadErrorIsNotReportedAsSuccess(t *testing.T) {
 		Body:       io.NopCloser(&palmFailingBody{payload: []byte(`{"candidates":[]`), err: errors.New("upstream reset")}),
 	}
 
-	apiErr, _ := palmStreamHandler(c, resp)
+	apiErr, _ := palmStreamHandler(c, newPalmStreamInfo(), resp)
 
 	require.NotNil(t, apiErr, "读取失败必须转成 API 错误")
 	require.NotContains(t, recorder.Body.String(), "[DONE]",
@@ -64,7 +64,7 @@ func TestPalmStreamParseErrorIsNotReportedAsSuccess(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader(`{not json`)),
 	}
 
-	apiErr, _ := palmStreamHandler(c, resp)
+	apiErr, _ := palmStreamHandler(c, newPalmStreamInfo(), resp)
 
 	require.NotNil(t, apiErr, "解析失败必须转成 API 错误")
 	require.NotContains(t, recorder.Body.String(), "[DONE]",
@@ -80,7 +80,7 @@ func TestPalmStreamHealthyStillCompletes(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":"hi"}]}`)),
 	}
 
-	apiErr, text := palmStreamHandler(c, resp)
+	apiErr, text := palmStreamHandler(c, newPalmStreamInfo(), resp)
 
 	require.Nil(t, apiErr, "健康响应不得返回错误")
 	require.Equal(t, "hi", text)

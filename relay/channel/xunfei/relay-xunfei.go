@@ -182,6 +182,7 @@ func xunfeiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, textReques
 			}
 			sawData = true
 			c.Render(-1, &common.CustomEvent{Data: "data: " + string(jsonResponse)})
+			helper.RecordStreamFrame(info)
 			return true
 		case res := <-stopChan:
 			if res.upstreamCode != 0 {

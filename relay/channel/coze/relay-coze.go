@@ -199,7 +199,9 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 
 		finishReason := "stop"
 		stopResponse := helper.GenerateStopResponse(id, common.GetTimestamp(), info.UpstreamModelName, finishReason)
-		helper.ObjectData(c, stopResponse)
+		if err := helper.ObjectData(c, stopResponse); err == nil {
+			helper.RecordStreamFrame(info)
+		}
 		return true, nil
 
 	case "conversation.message.delta":
@@ -233,7 +235,9 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		choice.Delta.SetContentString(content)
 		openaiResponse.Choices = append(openaiResponse.Choices, choice)
 
-		helper.ObjectData(c, openaiResponse)
+		if err := helper.ObjectData(c, openaiResponse); err == nil {
+			helper.RecordStreamFrame(info)
+		}
 
 	case "error":
 		var errorData CozeError
