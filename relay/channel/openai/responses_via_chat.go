@@ -158,6 +158,12 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 
 	defer service.CloseResponseBodyGracefully(resp)
 
+	// 首个内容项（或者任何非前导字段）下发之前，最多只发过 response.created /
+	// response.in_progress 这类生命周期帧，此时断流换渠道重试不会重复内容。
+	// 内容项下发时由 commitChannelCompatPrelude 清掉标记；不设这一行，只发过
+	// 前导帧的中断会因为 ReceivedResponseCount>0 被判成不可重试。
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, true)
+
 	responseID := getResponsesCompatID(c)
 	model := info.UpstreamModelName
 	createdAt := int(time.Now().Unix())
@@ -186,6 +192,11 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		outputIndex := nextOutputIndex
 		nextOutputIndex++
 		return outputIndex
+	}
+
+	// 内容项一旦开始下发，就不能再换渠道重试：重放会重复输出。
+	commitChannelCompatPrelude := func() {
+		common.SetContextKey(c, constant.ContextKeyResponsesStreamPreludeRetrySafe, false)
 	}
 
 	sendResponseCreated := func() bool {
@@ -303,6 +314,7 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		if !sendResponseInProgress() {
 			return false
 		}
+		commitChannelCompatPrelude()
 		state := &responsesCompatReasoningState{
 			itemID:      fmt.Sprintf("rs_%d", len(reasoningStates)),
 			outputIndex: allocateOutputIndex(),
@@ -371,6 +383,7 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		if !sendResponseInProgress() {
 			return false
 		}
+		commitChannelCompatPrelude()
 		if textOutputIndex < 0 {
 			textOutputIndex = allocateOutputIndex()
 		}
@@ -423,6 +436,7 @@ func OaiChatToResponsesStreamHandlerWithOptionsAndState(c *gin.Context, info *re
 		if !sendResponseInProgress() {
 			return false
 		}
+		commitChannelCompatPrelude()
 		if state.outputIndex < 0 {
 			state.outputIndex = allocateOutputIndex()
 		}
