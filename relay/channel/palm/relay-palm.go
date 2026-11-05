@@ -148,7 +148,9 @@ func palmStreamHandler(c *gin.Context, resp *http.Response) (*types.NewAPIError,
 	// 两个协程各自关闭同一个 Body 没有并发安全保证。
 	defer service.CloseResponseBodyGracefully(resp)
 	dataChan := make(chan string)
-	stopChan := make(chan bool)
+	// stopChan 携带本次包装结果：读取/解析失败必须上抛，不能只记日志后
+	// 照常发送 [DONE]——客户端会把 200 空流当成完整回复。
+	stopChan := make(chan *types.NewAPIError, 1)
 	// 客户端断开时 c.Stream 直接返回，不再消费 dataChan/stopChan，生产者会
 	// 永久卡在无缓冲发送上。done 在 handler 返回时关闭，给生产者一条退出路径。
 	done := make(chan struct{})
@@ -161,9 +163,9 @@ func palmStreamHandler(c *gin.Context, resp *http.Response) (*types.NewAPIError,
 			return false
 		}
 	}
-	sendStop := func() {
+	sendStop := func(apiErr *types.NewAPIError) {
 		select {
-		case stopChan <- true:
+		case stopChan <- apiErr:
 		case <-done:
 		}
 	}
@@ -171,14 +173,14 @@ func palmStreamHandler(c *gin.Context, resp *http.Response) (*types.NewAPIError,
 		responseBody, err := common.ReadAllWithLimit(resp.Body, common.UpstreamJSONResponseLimit)
 		if err != nil {
 			common.SysLog("error reading stream response: " + err.Error())
-			sendStop()
+			sendStop(types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError))
 			return
 		}
 		var palmResponse PaLMChatResponse
 		err = common.Unmarshal(responseBody, &palmResponse)
 		if err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			sendStop()
+			sendStop(types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError))
 			return
 		}
 		fullTextResponse := streamResponsePaLM2OpenAI(&palmResponse)
@@ -190,27 +192,32 @@ func palmStreamHandler(c *gin.Context, resp *http.Response) (*types.NewAPIError,
 		jsonResponse, err := common.Marshal(fullTextResponse)
 		if err != nil {
 			common.SysLog("error marshalling stream response: " + err.Error())
-			sendStop()
+			sendStop(types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError))
 			return
 		}
 		if !sendData(string(jsonResponse)) {
 			return
 		}
-		sendStop()
+		sendStop(nil)
 	}()
 	helper.SetEventStreamHeaders(c)
+	var apiErr *types.NewAPIError
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case data := <-dataChan:
 			c.Render(-1, &common.CustomEvent{Data: "data: " + data})
 			return true
-		case <-stopChan:
+		case res := <-stopChan:
+			if res != nil {
+				apiErr = res
+				return false
+			}
 			c.Render(-1, &common.CustomEvent{Data: "data: [DONE]"})
 			return false
 		}
 	})
 	service.CloseResponseBodyGracefully(resp)
-	return nil, responseText
+	return apiErr, responseText
 }
 
 func palmHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
