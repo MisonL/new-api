@@ -2499,6 +2499,14 @@ html.dark .sbg-variant-green {
 }
 
 .card-pro-pagination-text,
+/* Semi Design 的 Modal width 是像素数字：桌面语义的固定宽度（960、900、860 等）
+   在窄屏上会直接溢出视口。这里统一封顶到视口内，左右各留 16px，与 web/default
+   dialog 组件的 max-w-[calc(100%-2rem)] 同一口径。宽度仍由各弹窗按桌面语义指定。 */
+.semi-modal {
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+}
+
 .model-test-pagination-text {
   display: inline-flex;
   align-items: center;
