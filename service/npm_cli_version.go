@@ -20,11 +20,14 @@ import (
 )
 
 const (
-	npmCliVersionOptionLimit       = 5
-	npmCliVersionRecentErrorLimit  = 5
-	npmCliVersionRefreshInterval   = 10 * time.Minute
-	npmRegistryRequestTimeout      = 8 * time.Second
-	npmRegistryMetadataMaxBytes    = 4 << 20
+	npmCliVersionOptionLimit      = 5
+	npmCliVersionRecentErrorLimit = 5
+	npmCliVersionRefreshInterval  = 10 * time.Minute
+	npmRegistryRequestTimeout     = 8 * time.Second
+	// 真实元数据会随包发布历史增长：@openai/codex 的缩写元数据已达约 5.15 MiB
+	// （完整元数据约 18 MB）。上限只用于挡住异常体积，不能低于真实包的大小，
+	// 否则版本刷新会永久失败且只在日志里留下体积告警。
+	npmRegistryMetadataMaxBytes    = 32 << 20
 	defaultNpmRegistryMetadataURL  = "https://registry.npmjs.org"
 	NpmCLIVersionLatestAlias       = "latest"
 	NpmCLIVersionLoadFailedCode    = "npm_version_load_failed"
