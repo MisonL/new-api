@@ -259,7 +259,6 @@
   数据模型变更，需单独立项。
 
 
-"""
 ## 六、验证边界
 
 - 本轮未运行 Go 测试、未连真实数据库或 Redis 做并发复现；计费/并发类结论均为代码语义级证据，端到端后果标注为推断。
@@ -267,3 +266,35 @@
 - 前端审查未启动浏览器，调色板与暗色主题以源码和本轮构建产物为依据，未截图比对渲染效果。
 - 迁移类问题的触发依赖旧版本 schema 或多 master 同时启动，需对应环境才能定量确认。
 - 代理结论中标注为推断的条目未经主会话逐条复现；引用时以本文的标注为准。
+
+---
+
+## 九、续修项（2026-11-05 至 2026-11-06）
+
+在第八节之后继续修复，全部遵循先写失败测试、确认按预期原因失败、再最小修复
+通过的方式；标注"反向验证"的条目做过"去掉修复→测试失败→恢复"的验证。原子
+提交范围 `c1e329a2b` 至 `26271b0a5`：
+
+1. npm CLI 版本刷新对 `@openai/codex` 永久失败（registry 元数据超 4 MiB 上限） → 上限提到 32 MiB（`c1e329a2b`）
+2. 令牌额度预扣先读后改、并发可透支预算 → `DecreaseUserQuotaGuarded` 同型 SQL 守卫，相对扣减 + 阈值在 SQL 内判定（`a97f3c450`，反向验证）
+3. `SetupContextForSelectedChannel` 失败直接 500、绕过 relay 重试 → distributor 改为故障转移到下一个渠道（`1c81fffe5`，反向验证）
+4. 周期重置后到达的退款冲掉新周期用量 → 退款不再把 `newUsed` 静默夹到 0（`75b363e94`）
+5. 任务路径结算/退款失败只进 stderr、无对账记录 → 退款失败写持久化错误日志（`bd2a2ba09`）
+6. JWT-direct/ticket 交换错误回显上游原始响应体 → 不再回显原始 body（`46f524ca3`）
+7. 流处理器 panic 时 `writeMutex` 不释放、ping 写协程可致 `wg.Wait()` 挂起 → panic 路径释放写锁（`0125b6012`，反向验证）
+8. classic `DocumentRenderer` 把管理员 HTML 的 `<style>` 在净化前注入 `document.head`（CSS 注入） → 注入前先清洗 CSS（`252cd6c62`，构建产物验证）
+9. `responses_via_chat` 从不初始化 prelude 标记、截断流被判失败且不可重试 → 初始化 prelude 标记（`450e1d1eb`，反向验证）
+10. 自管流式渠道不维护 `ReceivedResponseCount`/`SetFirstResponseTime`，`partial` 分类与首包时间失真 → 新增 `relay/helper.RecordStreamFrame` 并接入 tencent/xunfei/cohere/zhipu/palm/dify/coze/ollama（`91e372171`，反向验证）
+11. 同一 scope 的 legacy 权重公式在列表与迁移两处不一致（列表 `Σweight+10`、迁移按 ability 累加 `Σ(weight+10)`） → 迁移累加 `uint64(ability.Weight)` 后统一走 `saturatingLegacyVotes`，两处公式一致并新增跨列表/迁移一致性测试（`f1d3a8b11`，反向验证）
+12. classic 删除账号后不重建 axios 实例、`New-API-User` 头残留旧 ID → 删除账号后 `updateAPI()`（`7699510dd`，静态契约测试覆盖 removeItem('user') 与 updateAPI 的邻接）
+13. classic zh-CN/zh-TW 相对 en 缺键（zh-CN 缺 10、zh-TW 缺 9），中文界面露出英文键 → 补齐键并新增 key 覆盖测试（以 en 为基线，复数变体按 i18next 规则豁免）（`18f2b9664`）
+14. Turnstile 通过标记是会话布尔值、随 30 天会话 cookie 长期免检 → 改存通过时间戳 + 1 小时 TTL，旧 bool 标记按过期处理（`ac65eeb34`，反向验证）
+15. 桌面端 OAuth 失败提示反射攻击者可控文案（callback `error_description` 查询与上游 `OAuthError.RawError` 两条路径原样进请求记录，poll/确认页展示） → 失败提示改固定/i18n 文案（`desktopOAuthFailureMessage`），原始值只进服务端日志；顺带删除已无调用方的死文件 `service/pre_consume_quota.go`（`26271b0a5`，两条反射路径均反向验证）
+
+验证记录（2026-11-06，第 15 项之后重跑）：`go test ./controller -count=1 -run 'Desktop|HandleOAuth|OAuth'` 全绿；
+`go build ./...` 退出码 0。此前各原子任务提交时分别运行了对应包的最小测试。
+
+仍未覆盖/留待后续（与第八节一致）：真实 MySQL/PG/Redis 并发、多实例失效通道、
+真实上游渠道协议、浏览器端视觉验证；以及 tag 模式分页、`Register` 邮箱
+check-then-insert、请求层统一超时、会话 cookie 服务端撤销等需要单独立项的行为
+或数据模型变更。
