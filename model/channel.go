@@ -1283,28 +1283,58 @@ func DeleteChannelByStatus(status int64) (int64, error) {
 
 func DeleteDisabledChannel() (int64, error) {
 	var deleted int64
+	disabledStatuses := []int{common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		// Collect the ids first so the ability cleanup can be scoped to exactly
 		// the rows this call deletes; a concurrent insert between the two
 		// statements would otherwise lose its abilities.
 		var ids []int
 		if err := tx.Model(&Channel{}).
-			Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).
+			Where("status IN ?", disabledStatuses).
 			Pluck("id", &ids).Error; err != nil {
 			return err
 		}
 		if len(ids) == 0 {
 			return nil
 		}
-		// A channel's abilities must not outlive it: an orphan ability row
-		// keeps the model listed as routable in some cached paths and breaks
-		// the recreated-channel-with-same-id scenario.
-		if err := tx.Where("channel_id IN ?", ids).Delete(&Ability{}).Error; err != nil {
-			return err
+		for _, chunk := range lo.Chunk(ids, 200) {
+			// 删除语句必须重新断言 status：Pluck 与删除之间管理员可能重新启用
+			// 某个渠道，按过期 id 列表删除会把刚启用的渠道连带 ability 一起删掉。
+			result := tx.Where("id IN ? AND status IN ?", chunk, disabledStatuses).Delete(&Channel{})
+			if result.Error != nil {
+				return result.Error
+			}
+			deleted += result.RowsAffected
+			if result.RowsAffected == 0 {
+				continue
+			}
+			// A channel's abilities must not outlive it: an orphan ability row
+			// keeps the model listed as routable in some cached paths and breaks
+			// the recreated-channel-with-same-id scenario. 只清理真正被删掉的
+			// 渠道：被并发重新启用的渠道虽然还在 chunk 里，但不在 survivors
+			// 之外，必须保留它的 ability。
+			var survivors []int
+			if err := tx.Model(&Channel{}).Where("id IN ?", chunk).Pluck("id", &survivors).Error; err != nil {
+				return err
+			}
+			survivorSet := make(map[int]struct{}, len(survivors))
+			for _, id := range survivors {
+				survivorSet[id] = struct{}{}
+			}
+			removed := make([]int, 0, len(chunk))
+			for _, id := range chunk {
+				if _, ok := survivorSet[id]; !ok {
+					removed = append(removed, id)
+				}
+			}
+			if len(removed) == 0 {
+				continue
+			}
+			if err := tx.Where("channel_id IN ?", removed).Delete(&Ability{}).Error; err != nil {
+				return err
+			}
 		}
-		result := tx.Where("id IN ?", ids).Delete(&Channel{})
-		deleted = result.RowsAffected
-		return result.Error
+		return nil
 	})
 	if err == nil && deleted > 0 {
 		refreshChannelCacheAfterWrite()
