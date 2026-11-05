@@ -401,7 +401,7 @@ func (p *JWTDirectProvider) performTicketAcquireRequest(ctx context.Context, tic
 		return nil, err
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("ticket acquire failed: %s %s", resp.Status, strings.TrimSpace(string(responseBody)))
+		return nil, fmt.Errorf("ticket acquire failed: %s %s", resp.Status, sanitizeOAuthUpstreamErrorBody(string(responseBody)))
 	}
 	return responseBody, nil
 }
@@ -440,7 +440,7 @@ func (p *JWTDirectProvider) fetchUserInfoClaims(ctx context.Context, tokenString
 		return nil, err
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("userinfo request failed: %s %s", resp.Status, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("userinfo request failed: %s %s", resp.Status, sanitizeOAuthUpstreamErrorBody(string(body)))
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, errors.New("userinfo response is empty")
@@ -797,7 +797,7 @@ func fetchJWKSDocument(ctx context.Context, jwksURL string) (*jwksDocument, erro
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("jwks request failed: %s %s", resp.Status, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("jwks request failed: %s %s", resp.Status, sanitizeOAuthUpstreamErrorBody(string(body)))
 	}
 
 	var doc jwksDocument

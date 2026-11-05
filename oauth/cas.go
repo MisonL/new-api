@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
@@ -25,11 +24,6 @@ type CASIdentity struct {
 	ClaimsJSON []byte
 	Group      string
 	Role       int
-}
-
-var casSensitiveResponsePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)("?(?:access_token|refresh_token|id_token|token|password|passwd|secret)"?\s*[:=]\s*"?)([^",<\s]+)`),
-	regexp.MustCompile(`(?i)(<(?:access_token|refresh_token|id_token|token|password|passwd|secret)>)([^<]*)(</(?:access_token|refresh_token|id_token|token|password|passwd|secret)>)`),
 }
 
 func NewCASProvider(config *model.CustomOAuthProvider) *CASProvider {
@@ -138,7 +132,7 @@ func (p *CASProvider) ResolveIdentityFromTicket(ctx context.Context, ticket stri
 		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthTokenFailed, map[string]any{"Provider": p.config.Name}, err.Error())
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		errorSummary := sanitizeCASValidationErrorBody(string(body))
+		errorSummary := sanitizeOAuthUpstreamErrorBody(string(body))
 		if errorSummary == "" {
 			errorSummary = "empty response body"
 		}
@@ -209,21 +203,4 @@ func isValidAbsoluteCASHTTPURL(raw string) bool {
 		return false
 	}
 	return strings.TrimSpace(parsed.Host) != ""
-}
-
-func sanitizeCASValidationErrorBody(raw string) string {
-	const maxErrorBodyLength = 200
-
-	collapsed := strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
-	if collapsed == "" {
-		return ""
-	}
-	sanitized := collapsed
-	for _, pattern := range casSensitiveResponsePatterns {
-		sanitized = pattern.ReplaceAllString(sanitized, "$1[redacted]$3")
-	}
-	if len(sanitized) <= maxErrorBodyLength {
-		return sanitized
-	}
-	return sanitized[:maxErrorBodyLength] + "...(truncated)"
 }
