@@ -63,12 +63,10 @@ export function getLogo() {
   return logo;
 }
 
-export function getUserIdFromLocalStorage() {
-  let user = localStorage.getItem('user');
-  if (!user) return -1;
-  user = JSON.parse(user);
-  return user.id;
-}
+// apiCore.js 在模块顶层用它构造默认请求头；损坏的 localStorage 不能让
+// 模块加载失败（白屏），解析失败一律降级成未登录。实现见 userStorage.js。
+export { getUserIdFromLocalStorage } from './userStorage';
+
 
 export function getFooterHTML() {
   return localStorage.getItem('footer_html');
