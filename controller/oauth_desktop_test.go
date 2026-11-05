@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	miniredis "github.com/alicebob/miniredis/v2"
@@ -15,6 +16,7 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
+	"github.com/stretchr/testify/require"
 )
 
 type desktopOAuthStartResponse struct {
@@ -25,8 +27,9 @@ type desktopOAuthStartResponse struct {
 }
 
 type desktopOAuthTestProvider struct {
-	name string
-	user *oauth.OAuthUser
+	name    string
+	user    *oauth.OAuthUser
+	infoErr error
 }
 
 type unavailableDesktopOAuthStore struct{}
@@ -79,6 +82,9 @@ func (p *desktopOAuthTestProvider) ExchangeToken(ctx context.Context, code strin
 }
 
 func (p *desktopOAuthTestProvider) GetUserInfo(ctx context.Context, token *oauth.OAuthToken) (*oauth.OAuthUser, error) {
+	if p.infoErr != nil {
+		return nil, p.infoErr
+	}
 	if p.user != nil {
 		return p.user, nil
 	}
@@ -179,8 +185,11 @@ func TestHandleOAuthMarksDesktopRequestFailedWhenProviderReturnsError(t *testing
 	if !found {
 		t.Fatalf("expected desktop oauth request to remain available for polling")
 	}
-	if stored.ErrorMessage != "user_cancelled" {
-		t.Fatalf("expected desktop oauth error to be captured, got %q", stored.ErrorMessage)
+	if stored.ErrorMessage != desktopOAuthProviderErrorMessage {
+		t.Fatalf("expected desktop oauth error to be stored as the fixed message, got %q", stored.ErrorMessage)
+	}
+	if strings.Contains(stored.ErrorMessage, "user_cancelled") {
+		t.Fatalf("expected provider error text not to be reflected, got %q", stored.ErrorMessage)
 	}
 	if stored.CompletedAt.IsZero() {
 		t.Fatalf("expected failed desktop oauth request to have completion timestamp")
@@ -500,4 +509,99 @@ func confirmDesktopOAuthForTest(t *testing.T, router *gin.Engine, callbackRecord
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected browser confirmation to succeed, got %d: %s", recorder.Code, recorder.Body.String())
 	}
+}
+
+// 回调的 error 分支不需要换码：任何知道 state 的人都能构造
+// /api/oauth/<provider>?state=...&error=...&error_description=任意文本。
+// 把这段文本写进请求记录，桌面端 poll 与确认页就会原样显示攻击者选定的
+// 文案（文案反射，可用于社工诱导）。失败原因只存固定提示，原始值仅进服务端日志。
+func TestDesktopOAuthProviderErrorMessageIsNotReflected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetDesktopOAuthStoreForTest(newMemoryDesktopOAuthStore())
+	t.Cleanup(func() {
+		resetDesktopOAuthStoreForTest(nil)
+	})
+
+	const providerSlug = "desktop-error-reflect-provider"
+	oauth.RegisterCustom(providerSlug, &desktopOAuthTestProvider{name: "Desktop Error Reflect Provider"})
+	t.Cleanup(func() {
+		oauth.Unregister(providerSlug)
+	})
+
+	request, err := createDesktopOAuthRequest(providerSlug, desktopOAuthModeLogin, 0, "")
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.Use(sessions.Sessions("desktop-oauth-test", cookie.NewStore([]byte("desktop-oauth-test-secret"))))
+	router.GET("/api/oauth/:provider", HandleOAuth)
+	router.GET("/api/oauth/desktop/poll", PollDesktopOAuth)
+
+	const marker = "attacker-controlled-notice-9f2c"
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodGet,
+		"/api/oauth/"+providerSlug+"?state="+request.State+"&error=access_denied&error_description="+marker,
+		nil,
+	))
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	stored, found, err := getDesktopOAuthRequestByHandoff(request.HandoffToken)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, stored.CompletedAt.IsZero(), "provider error must still fail the pending request")
+	require.NotEmpty(t, stored.ErrorMessage)
+	require.NotContains(t, stored.ErrorMessage, marker, "provider error text must not be stored verbatim")
+
+	pollRecorder := httptest.NewRecorder()
+	router.ServeHTTP(pollRecorder, httptest.NewRequest(http.MethodGet,
+		"/api/oauth/desktop/poll?handoff_token="+request.HandoffToken, nil))
+	require.NotContains(t, pollRecorder.Body.String(), marker)
+}
+
+// OAuthError.Error() 返回的是 RawError，也就是上游响应里的原始错误文本。它同样
+// 会被写进桌面端请求记录，poll 与确认页原样显示，等于把上游/攻击者可控的文案
+// 反射给用户。失败提示必须只取 i18n 文案或固定兜底，原始文本进服务端日志。
+func TestDesktopOAuthUpstreamErrorRawTextIsNotReflected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetDesktopOAuthStoreForTest(newMemoryDesktopOAuthStore())
+	t.Cleanup(func() {
+		resetDesktopOAuthStoreForTest(nil)
+	})
+
+	const marker = "upstream-controlled-text-4a1d"
+	const providerSlug = "desktop-upstream-error-provider"
+	oauth.RegisterCustom(providerSlug, &desktopOAuthTestProvider{
+		name:    "Desktop Upstream Error Provider",
+		infoErr: oauth.NewOAuthErrorWithRaw(i18n.MsgOAuthGetUserErr, nil, marker),
+	})
+	t.Cleanup(func() {
+		oauth.Unregister(providerSlug)
+	})
+
+	request, err := createDesktopOAuthRequest(providerSlug, desktopOAuthModeLogin, 0, "")
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.Use(sessions.Sessions("desktop-oauth-test", cookie.NewStore([]byte("desktop-oauth-test-secret"))))
+	router.GET("/api/oauth/:provider", HandleOAuth)
+	router.GET("/api/oauth/desktop/poll", PollDesktopOAuth)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodGet,
+		"/api/oauth/"+providerSlug+"?state="+request.State+"&code=desktop-upstream-error-code",
+		nil,
+	))
+
+	stored, found, err := getDesktopOAuthRequestByHandoff(request.HandoffToken)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, stored.CompletedAt.IsZero(), "upstream error must fail the pending request")
+	require.NotEmpty(t, stored.ErrorMessage)
+	require.NotContains(t, stored.ErrorMessage, marker, "upstream error raw text must not be stored verbatim")
+
+	pollRecorder := httptest.NewRecorder()
+	router.ServeHTTP(pollRecorder, httptest.NewRequest(http.MethodGet,
+		"/api/oauth/desktop/poll?handoff_token="+request.HandoffToken, nil))
+	require.NotContains(t, pollRecorder.Body.String(), marker)
 }

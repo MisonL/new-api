@@ -2,6 +2,7 @@ package controller
 
 import (
 	crand "crypto/rand"
+	"errors"
 	"math/big"
 	"net/http"
 	"strings"
@@ -32,6 +33,11 @@ const (
 	desktopOAuthConfirmMaxWrongAttempt = 5
 	desktopOAuthConfirmCookieName      = "desktop_oauth_confirm"
 	desktopOAuthConfirmPath            = "/api/oauth/desktop/confirm"
+
+	// 桌面端 OAuth 失败提示只写固定文案：回调的 error 查询参数与上游错误文本
+	// 都可能是攻击者可控的，原样写进请求记录会让桌面端 poll 与确认页反射出
+	// 攻击者选定的内容（文案反射，可用于社工）。原始值只写服务端日志。
+	desktopOAuthProviderErrorMessage = "第三方授权未能完成，请在桌面应用里重新登录"
 )
 
 var (
@@ -275,6 +281,26 @@ func completeDesktopOAuthRequest(state string, resultUserID int) error {
 
 func failDesktopOAuthRequest(state string, message string) error {
 	return currentDesktopOAuthStore().Fail(state, message)
+}
+
+// desktopOAuthFailureMessage 把回调拿到的错误转换成可以安全存入请求记录的
+// 文案。桌面端 poll 与确认页会原样展示 ErrorMessage，因此这里只取 i18n 文案
+// 或固定兜底：OAuthError.Error()/RawError 与 AccessDeniedError.Message 都可能
+// 带上游或调用方可控的文本，不能原样反射给用户；原始错误仍由调用方交给
+// handleOAuthError 走服务端错误响应与日志。
+func desktopOAuthFailureMessage(c *gin.Context, err error) string {
+	var oauthErr *oauth.OAuthError
+	if errors.As(err, &oauthErr) {
+		if oauthErr.Params != nil {
+			return i18n.T(c, oauthErr.MsgKey, oauthErr.Params)
+		}
+		return i18n.T(c, oauthErr.MsgKey)
+	}
+	var trustLevelErr *oauth.TrustLevelError
+	if errors.As(err, &trustLevelErr) {
+		return i18n.T(c, i18n.MsgOAuthTrustLevelLow)
+	}
+	return desktopOAuthProviderErrorMessage
 }
 
 func consumeDesktopOAuthRequest(handoffToken string) (*desktopOAuthRequest, bool, error) {

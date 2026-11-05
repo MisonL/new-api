@@ -102,11 +102,13 @@ func HandleOAuth(c *gin.Context) {
 	if errorCode != "" {
 		errorDescription := c.Query("error_description")
 		if hasDesktopRequest {
-			message := errorDescription
-			if message == "" {
-				message = errorCode
-			}
-			if err := failDesktopOAuthRequest(state, message); err != nil {
+			// 这个分支不要求换码：任何拿到 state 的人都能用任意
+			// error_description 把待确认的请求置为失败。失败提示只存固定
+			// 文案，否则桌面端 poll 与确认页会原样显示攻击者选定的内容
+			// （文案反射，可用于社工）；原始值只写服务端日志。
+			common.SysLog(fmt.Sprintf("desktop oauth callback error: provider=%s code=%s description_present=%t",
+				provider.GetName(), errorCode, errorDescription != ""))
+			if err := failDesktopOAuthRequest(state, desktopOAuthProviderErrorMessage); err != nil {
 				common.ApiError(c, err)
 				return
 			}
@@ -123,7 +125,7 @@ func HandleOAuth(c *gin.Context) {
 	token, err := provider.ExchangeToken(c.Request.Context(), code, c)
 	if err != nil {
 		if hasDesktopRequest {
-			if storeErr := failDesktopOAuthRequest(state, err.Error()); storeErr != nil {
+			if storeErr := failDesktopOAuthRequest(state, desktopOAuthFailureMessage(c, err)); storeErr != nil {
 				common.ApiError(c, storeErr)
 				return
 			}
@@ -136,7 +138,7 @@ func HandleOAuth(c *gin.Context) {
 	oauthUser, err := provider.GetUserInfo(c.Request.Context(), token)
 	if err != nil {
 		if hasDesktopRequest {
-			if storeErr := failDesktopOAuthRequest(state, err.Error()); storeErr != nil {
+			if storeErr := failDesktopOAuthRequest(state, desktopOAuthFailureMessage(c, err)); storeErr != nil {
 				common.ApiError(c, storeErr)
 				return
 			}
@@ -160,7 +162,7 @@ func HandleOAuth(c *gin.Context) {
 	resolvedUser, err := findOrCreateOAuthUserWithOptions(c, provider, oauthUser, session, options)
 	if err != nil {
 		if hasDesktopRequest {
-			if storeErr := failDesktopOAuthRequest(state, err.Error()); storeErr != nil {
+			if storeErr := failDesktopOAuthRequest(state, desktopOAuthFailureMessage(c, err)); storeErr != nil {
 				common.ApiError(c, storeErr)
 				return
 			}
@@ -183,7 +185,7 @@ func HandleOAuth(c *gin.Context) {
 	if resolvedUser.BindAfterStatusCheck {
 		if err := bindOAuthIdentityToUser(resolvedUser.User, provider, oauthUser.ProviderUserID); err != nil {
 			if hasDesktopRequest {
-				if storeErr := failDesktopOAuthRequest(state, err.Error()); storeErr != nil {
+				if storeErr := failDesktopOAuthRequest(state, desktopOAuthFailureMessage(c, err)); storeErr != nil {
 					common.ApiError(c, storeErr)
 					return
 				}
@@ -291,7 +293,7 @@ func handleDesktopOAuthBind(c *gin.Context, provider oauth.Provider, request *de
 	code := c.Query("code")
 	token, err := provider.ExchangeToken(c.Request.Context(), code, c)
 	if err != nil {
-		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, desktopOAuthFailureMessage(c, err)); storeErr != nil {
 			common.ApiError(c, storeErr)
 			return
 		}
@@ -301,7 +303,7 @@ func handleDesktopOAuthBind(c *gin.Context, provider oauth.Provider, request *de
 
 	oauthUser, err := provider.GetUserInfo(c.Request.Context(), token)
 	if err != nil {
-		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, desktopOAuthFailureMessage(c, err)); storeErr != nil {
 			common.ApiError(c, storeErr)
 			return
 		}
@@ -311,7 +313,7 @@ func handleDesktopOAuthBind(c *gin.Context, provider oauth.Provider, request *de
 
 	user := model.User{Id: request.BindUserID}
 	if err := user.FillUserById(); err != nil {
-		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, desktopOAuthFailureMessage(c, err)); storeErr != nil {
 			common.ApiError(c, storeErr)
 			return
 		}
@@ -327,7 +329,7 @@ func handleDesktopOAuthBind(c *gin.Context, provider oauth.Provider, request *de
 		return
 	}
 	if err := ensureProviderBindingAvailableForUser(&user, provider, oauthUser); err != nil {
-		if storeErr := failDesktopOAuthRequest(request.State, err.Error()); storeErr != nil {
+		if storeErr := failDesktopOAuthRequest(request.State, desktopOAuthFailureMessage(c, err)); storeErr != nil {
 			common.ApiError(c, storeErr)
 			return
 		}
