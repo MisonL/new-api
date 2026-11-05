@@ -1840,7 +1840,19 @@ func FetchModels(c *gin.Context) {
 		} `json:"data"`
 	}
 
-	if err := common.DecodeJson(response.Body, &result); err != nil {
+	// base_url 由调用方提供，上游可返回任意大小的响应体；直接解码会让每个
+	// 并发请求各持一份完整响应。模型列表属于小 JSON 信封，用对应档位封顶，
+	// 超限显式失败而不是截断后当成完整列表解析。
+	responseBody, err := common.ReadAllWithLimit(response.Body, common.UpstreamSmallResponseLimit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	if err := common.Unmarshal(responseBody, &result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": err.Error(),
