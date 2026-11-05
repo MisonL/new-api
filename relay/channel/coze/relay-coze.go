@@ -117,6 +117,7 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 	var currentData string
 	var usage = &dto.Usage{}
 	sawCompleted := false
+	var streamErr error
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -124,8 +125,13 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 		if line == "" {
 			if currentEvent != "" && currentData != "" {
 				// handle last event
-				if handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info) {
+				completed, eventErr := handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info)
+				if completed {
 					sawCompleted = true
+				}
+				if eventErr != nil {
+					streamErr = eventErr
+					break
 				}
 				currentEvent = ""
 				currentData = ""
@@ -145,14 +151,23 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 	}
 
 	// Last event
-	if currentEvent != "" && currentData != "" {
-		if handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info) {
+	if streamErr == nil && currentEvent != "" && currentData != "" {
+		completed, eventErr := handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info)
+		if completed {
 			sawCompleted = true
 		}
+		streamErr = eventErr
 	}
 
 	if err := scanner.Err(); err != nil {
+		helper.RecordStreamEnd(c, info, false)
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	}
+	if streamErr != nil {
+		// 带内错误不能伪装成成功：此前只记一行日志，随后照常发送 [DONE]，
+		// 客户端与计费都按完整回复处理。
+		helper.RecordStreamEnd(c, info, false)
+		return nil, types.NewError(streamErr, types.ErrorCodeBadResponseBody)
 	}
 	helper.RecordStreamEnd(c, info, sawCompleted)
 	helper.Done(c)
@@ -165,8 +180,9 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 }
 
 // handleCozeEvent 处理单个 SSE 事件；返回值表示是否收到了终止事件
-// conversation.chat.completed，供调用方记录流的正常结束。
-func handleCozeEvent(c *gin.Context, event string, data string, responseText *string, usage *dto.Usage, id string, info *relaycommon.RelayInfo) bool {
+// conversation.chat.completed，供调用方记录流的正常结束；error 表示上游在
+// 流内下发的 error 事件，调用方必须把它转成失败而不是继续当作成功。
+func handleCozeEvent(c *gin.Context, event string, data string, responseText *string, usage *dto.Usage, id string, info *relaycommon.RelayInfo) (bool, error) {
 	switch event {
 	case "conversation.chat.completed":
 		// 将 data 解析为 CozeChatResponseData
@@ -174,7 +190,7 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		err := common.Unmarshal([]byte(data), &chatData)
 		if err != nil {
 			common.SysLog("error_unmarshalling_stream_response: " + err.Error())
-			return false
+			return false, nil
 		}
 
 		usage.PromptTokens = chatData.Usage.InputCount
@@ -184,7 +200,7 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		finishReason := "stop"
 		stopResponse := helper.GenerateStopResponse(id, common.GetTimestamp(), info.UpstreamModelName, finishReason)
 		helper.ObjectData(c, stopResponse)
-		return true
+		return true, nil
 
 	case "conversation.message.delta":
 		// 将 data 解析为 CozeChatV3MessageDetail
@@ -192,14 +208,14 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		err := common.Unmarshal([]byte(data), &messageData)
 		if err != nil {
 			common.SysLog("error_unmarshalling_stream_response: " + err.Error())
-			return false
+			return false, nil
 		}
 
 		var content string
 		err = common.Unmarshal(messageData.Content, &content)
 		if err != nil {
 			common.SysLog("error_unmarshalling_stream_response: " + err.Error())
-			return false
+			return false, nil
 		}
 
 		*responseText += content
@@ -224,12 +240,13 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 		err := common.Unmarshal([]byte(data), &errorData)
 		if err != nil {
 			common.SysLog("error_unmarshalling_stream_response: " + err.Error())
-			return false
+			return false, nil
 		}
 
 		common.SysLog(fmt.Sprintf("stream event error: %v %v", errorData.Code, errorData.Message))
+		return false, fmt.Errorf("coze stream error %d: %s", errorData.Code, errorData.Message)
 	}
-	return false
+	return false, nil
 }
 
 func checkIfChatComplete(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) (error, bool) {
