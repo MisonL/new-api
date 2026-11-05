@@ -16,7 +16,10 @@ import (
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
-func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
+// settleErr 是本次提交的结算结果：失败必须写进消费日志 other（与文本/音频/
+// realtime 路径的 MarkSettleFailure 一致），否则这笔差额只有一行 stderr，
+// 无法与具体请求对账。
+func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, settleErr error) {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
 	// 支持任务仅按次计费
@@ -52,6 +55,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	}
 	usageStatsErr := RecordUsageStats(info.UserId, info.ChannelId, info.PriceData.Quota)
 	MarkUsageStatsFailure(c, info, info.PriceData.Quota, usageStatsErr, other)
+	MarkSettleFailure(c, info, info.PriceData.Quota, settleErr, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
 		ModelName: info.OriginModelName,

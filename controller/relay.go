@@ -3886,10 +3886,11 @@ func RelayTask(c *gin.Context) {
 				// turn this into a retryable submission error, otherwise clients may
 				// submit the same provider task twice. Keep the task queryable and
 				// leave an explicit operator-visible error in the log.
-				if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+				var settleErr error
+				if settleErr = service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
 					common.SysError("settle task billing error after durable insert: " + settleErr.Error())
 				}
-				service.LogTaskConsumption(c, relayInfo)
+				service.LogTaskConsumption(c, relayInfo, settleErr)
 				if result.Response != nil {
 					if flushErr := result.Response.FlushTo(c.Writer); flushErr != nil {
 						// The task and billing state are already durable; do not
@@ -3925,13 +3926,14 @@ func finalizeAmbiguousTaskBilling(c *gin.Context, info *relaycommon.RelayInfo, r
 		actualQuota = 0
 	}
 	info.PriceData.Quota = actualQuota
+	var settleErr error
 	if info.Billing != nil {
-		if err := service.SettleBilling(c, info, actualQuota); err != nil {
-			common.SysError(fmt.Sprintf("settle ambiguous task billing failed task_id=%s channel_id=%d request_id=%s: %s", info.PublicTaskID, info.ChannelId, info.RequestId, err.Error()))
+		if settleErr = service.SettleBilling(c, info, actualQuota); settleErr != nil {
+			common.SysError(fmt.Sprintf("settle ambiguous task billing failed task_id=%s channel_id=%d request_id=%s: %s", info.PublicTaskID, info.ChannelId, info.RequestId, settleErr.Error()))
 		}
 	}
 	if c.Request != nil {
-		service.LogTaskConsumption(c, info)
+		service.LogTaskConsumption(c, info, settleErr)
 	}
 }
 
