@@ -33,6 +33,11 @@ type ModelRequest struct {
 	Group string `json:"group,omitempty"`
 }
 
+// distributorChannelSetupFailoverLimit 限制渠道初始化失败后换渠道的次数。
+// 排除是请求级的，所有渠道都被排除时选渠会自然结束；这里的上限只是防止
+// 退化场景下反复重选。
+const distributorChannelSetupFailoverLimit = 3
+
 // captureTaskRouteIntent records the operation that can be inferred before a
 // concrete provider channel is selected. It deliberately decodes a tolerant
 // JSON object instead of TaskSubmitReq: provider adaptors may legally use
@@ -156,7 +161,13 @@ func ValidateTokenModelAccess(c *gin.Context, modelName string) error {
 
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		var channel *model.Channel
+		var (
+			channel          *model.Channel
+			selectGroup      string
+			usingGroup       string
+			bootstrapState   *service.ResponsesBootstrapRecoveryState
+			channelSetupDone bool
+		)
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
@@ -212,13 +223,13 @@ func Distribute() func(c *gin.Context) {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
 					return
 				}
-				bootstrapState, bootstrapErr := service.EnsureResponsesBootstrapRecoveryStateFromRequest(c)
+				var bootstrapErr error
+				bootstrapState, bootstrapErr = service.EnsureResponsesBootstrapRecoveryStateFromRequest(c)
 				if bootstrapErr != nil {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": bootstrapErr.Error()}))
 					return
 				}
-				var selectGroup string
-				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+				usingGroup = common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
 					playgroundRequest := &dto.PlayGroundRequest{}
@@ -276,36 +287,60 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 
-				if channel == nil {
-					channel, selectGroup, err = getChannelWithBootstrapGrace(c, modelRequest.Model, usingGroup, bootstrapState)
-					if err != nil {
-						showGroup := usingGroup
-						if common.IsAutoGroup(usingGroup) {
-							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
-						}
-						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
-						// 如果错误，但是渠道不为空，说明是数据库一致性问题
-						//if channel != nil {
-						//	common.SysError(fmt.Sprintf("渠道不存在：%d", channel.Id))
-						//	message = "数据库一致性已被破坏，请联系管理员"
-						//}
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, message, types.ErrorCodeModelNotFound)
-						return
-					}
+				common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+
+				// 渠道初始化失败（典型：多密钥渠道所有 key 都不可用）此前直接
+				// 按错误结束。选渠发生在 relay 的排除式重试循环之前，请求到
+				// 不了 relay，同分组里的健康渠道永远接不到这次请求。这里按
+				// relay 的语义排除该渠道并重新选渠；token 显式钉住的渠道走上面
+				// 的分支，不参与故障转移。
+				for attempt := 0; ; attempt++ {
 					if channel == nil {
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+						state := bootstrapState
+						if attempt > 0 {
+							// 重选不再等待 bootstrap 恢复窗口。
+							state = nil
+						}
+						channel, selectGroup, err = getChannelWithBootstrapGrace(c, modelRequest.Model, usingGroup, state)
+						if err != nil {
+							showGroup := usingGroup
+							if common.IsAutoGroup(usingGroup) {
+								showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+							}
+							message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, message, types.ErrorCodeModelNotFound)
+							return
+						}
+						if channel == nil {
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+							return
+						}
+					}
+					setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+					if setupErr == nil {
+						channelSetupDone = true
+						break
+					}
+					service.ReleaseChannelHealthProbeForChannel(c, channel.Id)
+					if setupErr.GetErrorCode() != types.ErrorCodeChannelNoAvailableKey ||
+						attempt >= distributorChannelSetupFailoverLimit ||
+						!service.ExcludeChannelHealthSelection(c, usingGroup, modelRequest.Model, channel.Id) {
+						abortWithSelectedChannelSetupError(c, setupErr)
 						return
 					}
+					channel = nil
 				}
 			}
 		}
-		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+		if !channelSetupDone {
+			common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+		}
 		// Task fetch/content endpoints deliberately defer channel restoration to
 		// their controller because the task row is the source of truth. When
 		// there is no token-pinned channel, do not initialize a nil channel here:
 		// SetupContextForSelectedChannel would turn a valid fetch into a 500.
 		// A selected channel remains strict and must still be initialized.
-		if channel != nil {
+		if channel != nil && !channelSetupDone {
 			if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
 				// Channel health selection may reserve a half-open probe before
 				// local setup chooses a key/header/profile. No upstream request is
