@@ -439,6 +439,42 @@ func increaseTokenQuota(id int, quota int) (err error) {
 	return err
 }
 
+// ErrTokenQuotaInsufficient 表示带守卫的令牌额度扣减因预算不足被拒绝。
+var ErrTokenQuotaInsufficient = errors.New("token remain quota is insufficient")
+
+// DecreaseTokenQuotaGuarded 在 SQL 层带预算守卫地扣减令牌额度。只有 remain_quota
+// 足以覆盖本次扣减时语句才生效，否则返回 ErrTokenQuotaInsufficient 且不改动
+// 额度。同时更新 used_quota 与 accessed_time。
+func DecreaseTokenQuotaGuarded(id int, key string, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if quota == 0 {
+		return nil
+	}
+	result := DB.Model(&Token{}).
+		Where("id = ? AND remain_quota >= ?", id, quota).
+		Updates(map[string]interface{}{
+			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+			"used_quota":    gorm.Expr("used_quota + ?", quota),
+			"accessed_time": common.GetTimestamp(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrTokenQuotaInsufficient
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheDecrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to decrease token quota cache: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
 func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")

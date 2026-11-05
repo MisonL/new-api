@@ -412,19 +412,19 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	if relayInfo.IsPlayground {
 		return nil
 	}
-	//if relayInfo.TokenUnlimited {
-	//	return nil
-	//}
-	token, err := model.GetTokenByKey(relayInfo.TokenKey, false)
-	if err != nil {
-		return err
-	}
-	if !relayInfo.TokenUnlimited && token.RemainQuota < quota {
-		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
-	}
-	err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
-	if err != nil {
-		return err
+	if !relayInfo.TokenUnlimited {
+		err := model.DecreaseTokenQuotaGuarded(relayInfo.TokenId, relayInfo.TokenKey, quota)
+		if err != nil {
+			if errors.Is(err, model.ErrTokenQuotaInsufficient) {
+				return fmt.Errorf("token quota is not enough, need quota: %s", logger.FormatQuota(quota))
+			}
+			return err
+		}
+	} else {
+		err := model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
