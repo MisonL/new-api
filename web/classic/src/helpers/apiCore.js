@@ -25,6 +25,7 @@ import {
   isReadonlyBlockedRequest as shouldBlockReadonlyRequest,
   installReadonlyXHRGuard,
 } from './readonlyGuard';
+import { installGetDeduplication } from './apiGetDedupe';
 import {
   IS_READONLY_FRONTEND,
   READONLY_FRONTEND_MESSAGE,
@@ -104,31 +105,7 @@ function installReadonlyFetchGuard() {
 }
 
 function patchAPIInstance(instance) {
-  const originalGet = instance.get.bind(instance);
-  const inFlightGetRequests = new Map();
-
-  const genKey = (url, config = {}) => {
-    const params = config.params ? JSON.stringify(config.params) : '{}';
-    return `${url}?${params}`;
-  };
-
-  instance.get = (url, config = {}) => {
-    if (config?.disableDuplicate) {
-      return originalGet(url, config);
-    }
-
-    const key = genKey(url, config);
-    if (inFlightGetRequests.has(key)) {
-      return inFlightGetRequests.get(key);
-    }
-
-    const reqPromise = originalGet(url, config).finally(() => {
-      inFlightGetRequests.delete(key);
-    });
-
-    inFlightGetRequests.set(key, reqPromise);
-    return reqPromise;
-  };
+  installGetDeduplication(instance);
 }
 
 function applyResponseErrorHandler(instance) {
