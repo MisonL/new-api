@@ -107,19 +107,31 @@ func (s *BillingSession) Refund(c *gin.Context) {
 		// 1) 退还资金来源
 		if err := funding.Refund(); err != nil {
 			common.SysLog("error refunding billing source: " + err.Error())
+			recordRefundFailure(s.relayInfo.UserId, s.relayInfo.RequestId, funding.Source(), s.preConsumedQuota, s.relayInfo.TokenId, err)
 		}
 		if extraReserved > 0 && funding.Source() == BillingSourceSubscription && subscriptionId > 0 {
 			if err := model.PostConsumeUserSubscriptionDelta(subscriptionId, -int64(extraReserved)); err != nil {
 				common.SysLog("error refunding subscription extra reserved quota: " + err.Error())
+				recordRefundFailure(s.relayInfo.UserId, s.relayInfo.RequestId, "subscription_extra", extraReserved, s.relayInfo.TokenId, err)
 			}
 		}
 		// 2) 退还令牌额度
 		if tokenConsumed > 0 && !isPlayground {
 			if err := model.IncreaseTokenQuota(tokenId, tokenKey, tokenConsumed); err != nil {
 				common.SysLog("error refunding token quota: " + err.Error())
+				recordRefundFailure(s.relayInfo.UserId, s.relayInfo.RequestId, "token", tokenConsumed, s.relayInfo.TokenId, err)
 			}
 		}
 	})
+}
+
+// recordRefundFailure 在退款失败时写一条持久化的错误日志。退款中的
+// IncreaseUserQuota 是非幂等操作，不能重试，只能留下可检索的记录供人工
+// 对账；只写 stderr 时，用户少退的预扣额度没有任何留痕。
+func recordRefundFailure(userId int, requestId string, source string, quota int, tokenId int, err error) {
+	model.RecordLog(userId, model.LogTypeError, fmt.Sprintf(
+		"预扣退款失败: source=%s quota=%s token_id=%d request_id=%s error=%s",
+		source, logger.FormatQuota(quota), tokenId, requestId, err.Error()))
 }
 
 // NeedsRefund 返回是否存在需要退还的预扣状态。
