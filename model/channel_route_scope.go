@@ -811,13 +811,7 @@ func applyDerivedRouteWeights(items []ChannelRouteScopeItem, abilitiesByItem [][
 			numerators[i] = uint64(items[i].RouteWeightBPS)
 			continue
 		}
-		legacy := uint64(items[i].LegacyWeight)
-		if legacy > ^uint64(0)-10 {
-			legacy = ^uint64(0)
-		} else {
-			legacy += 10
-		}
-		numerators[i] = legacy
+		numerators[i] = saturatingLegacyVotes(items[i].LegacyWeight)
 	}
 	bps := NormalizeRouteWeights(numerators)
 	for i := range items {
@@ -1116,6 +1110,9 @@ func EnsureRouteFieldsBackfilled(tx *gorm.DB, dryRun bool) (int, error) {
 	return report.AbilitiesToBackfill, err
 }
 
+// saturatingLegacyVotes 是 legacy 加权选择的渠道票数：weight + 10。
+// 旧式 chooseWeightedChannelWithRandom 对每个候选渠道各加 10，因此同一渠道
+// 映射多个 raw ability 时只应加一次 10；scope 列表与迁移必须共用这一口径。
 func saturatingLegacyVotes(weight uint) uint64 {
 	value := uint64(weight)
 	if value > ^uint64(0)-10 {
@@ -1248,6 +1245,7 @@ func ensureRouteFieldsBackfilledReport(tx *gorm.DB, dryRun bool) (ChannelRouteSc
 			sort.Slice(memberAbilities, func(i, j int) bool { return memberAbilities[i].Model < memberAbilities[j].Model })
 			item := ChannelRouteScopeMigrationItem{ChannelID: channelID, RawAbilityCount: len(memberAbilities), NewRoutePriority: key.RoutePriority}
 			var explicitWeight *uint
+			var legacyWeight uint64
 			allExplicitWeight := true
 			for _, ability := range memberAbilities {
 				if item.OldRoutePriority == nil && ability.RoutePriority != nil {
@@ -1258,7 +1256,7 @@ func ensureRouteFieldsBackfilledReport(tx *gorm.DB, dryRun bool) (ChannelRouteSc
 					value := *ability.RouteWeightBPS
 					item.OldRouteWeightBPS = &value
 				}
-				item.LegacyVotes = addSaturatingUint64(item.LegacyVotes, saturatingLegacyVotes(ability.Weight))
+				legacyWeight = addSaturatingUint64(legacyWeight, uint64(ability.Weight))
 				if !ability.HasExplicitRouteWeight() {
 					allExplicitWeight = false
 					continue
@@ -1272,6 +1270,10 @@ func ensureRouteFieldsBackfilledReport(tx *gorm.DB, dryRun bool) (ChannelRouteSc
 					report.WeightConflicts = append(report.WeightConflicts, message)
 				}
 			}
+			if legacyWeight > uint64(^uint(0)) {
+				legacyWeight = uint64(^uint(0))
+			}
+			item.LegacyVotes = saturatingLegacyVotes(uint(legacyWeight))
 			for _, ability := range memberAbilities {
 				if !ability.HasExplicitRoutePriority() || !ability.HasExplicitRouteWeight() {
 					item.NeedsBackfill = true

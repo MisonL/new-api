@@ -693,3 +693,65 @@ func TestApplyRouteFieldsBackfillRollsBackWhenLaterAbilityUpdateFails(t *testing
 		require.False(t, ability.RouteWeightBPSConfigured)
 	}
 }
+
+// 列表与迁移必须用同一个 legacy 公式核对同一 scope 的份额。旧式加权选择是
+// 按渠道投票：sum(weight_i + 10)，所以 N 个候选里每个渠道都带 +10 的基础票；
+// 迁移按 ability 累加 (weight + 10)，同一渠道映射多个 raw ability 时凭空多出
+// 基础票，预览结果与 scope 列表不一致。
+func TestLegacyScopeWeightsMatchChannelVoteFormulaAcrossListAndMigration(t *testing.T) {
+	previousDB, previousLogDB := DB, LOG_DB
+	previousSQLite, previousPostgres := common.UsingSQLite, common.UsingPostgreSQL
+	t.Cleanup(func() {
+		DB, LOG_DB = previousDB, previousLogDB
+		common.UsingSQLite, common.UsingPostgreSQL = previousSQLite, previousPostgres
+		initCol()
+	})
+
+	common.UsingSQLite = true
+	common.UsingPostgreSQL = false
+	db := openTestDB(t, &Channel{}, &Ability{})
+	DB, LOG_DB = db, db
+	initCol()
+
+	priority := int64(2)
+	require.NoError(t, db.Create(&Channel{
+		Id:           90401,
+		Name:         "legacy-multi-raw",
+		Status:       common.ChannelStatusEnabled,
+		ModelMapping: common.GetPointer(`{"raw-a":"provider-model","raw-b":"provider-model"}`),
+	}).Error)
+	require.NoError(t, db.Create(&Channel{Id: 90402, Name: "legacy-peer", Status: common.ChannelStatusEnabled}).Error)
+	require.NoError(t, db.Create(&Ability{Group: "default", Model: "raw-a", ChannelId: 90401, Enabled: true, Priority: &priority, Weight: 90}).Error)
+	require.NoError(t, db.Create(&Ability{Group: "default", Model: "raw-b", ChannelId: 90401, Enabled: true, Priority: &priority, Weight: 10}).Error)
+	require.NoError(t, db.Create(&Ability{Group: "default", Model: "provider-model", ChannelId: 90402, Enabled: true, Priority: &priority, Weight: 100}).Error)
+
+	// 旧式选择：两个渠道各投 weight_i + 10 票。
+	legacyTotal := 90 + 10 + 100 + 2*10
+	expectedChannelOne := uint(100+10) * uint(RouteWeightTotalBPS) / uint(legacyTotal)
+
+	scopes, err := buildRouteScopesFromAbilities(mustLoadAllAbilities(t, db))
+	require.NoError(t, err)
+	require.Len(t, scopes, 1)
+	require.Equal(t, 2, len(scopes[0].Items))
+	listedBPS := uint(0)
+	for _, item := range scopes[0].Items {
+		if item.ChannelID == 90401 {
+			listedBPS = item.RouteWeightBPS
+		}
+	}
+	require.Equal(t, expectedChannelOne, listedBPS, "列表份额应按渠道投票计算")
+
+	report, err := PreviewRouteFieldsBackfill(db)
+	require.NoError(t, err)
+	require.Len(t, report.Scopes, 1)
+	require.Equal(t, uint64(100+10), report.Scopes[0].Items[0].LegacyVotes, "迁移的 LegacyVotes 必须是渠道票数，不是按 ability 累加的基础票")
+	require.Equal(t, expectedChannelOne, report.Scopes[0].Items[0].NewRouteWeightBPS)
+	require.Equal(t, uint(RouteWeightTotalBPS)-expectedChannelOne, report.Scopes[0].Items[1].NewRouteWeightBPS)
+}
+
+func mustLoadAllAbilities(t *testing.T, db *gorm.DB) []Ability {
+	t.Helper()
+	var abilities []Ability
+	require.NoError(t, db.Order("channel_id ASC, model ASC").Find(&abilities).Error)
+	return abilities
+}
