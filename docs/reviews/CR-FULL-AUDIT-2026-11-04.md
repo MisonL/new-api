@@ -305,7 +305,7 @@ check-then-insert、请求层统一超时、会话 cookie 服务端撤销等需�
 
 第九节列出的"留待后续"项按同样的 TDD 流程处理：先写失败测试、确认按预期
 原因失败、最小修复通过；标注"反向验证"的条目做过"去掉修复→测试失败→恢复"
-的验证。提交范围 `0cdf484d5` 至 `10474bb1b`：
+的验证。提交范围 `0cdf484d5` 至 `37a06b09e`：
 
 1. 共享扫描器把截断的最后一个 SSE 帧当完整帧下发 → 自定义 split 函数，
    输入结束时没有行结束符的最后一行只有是 `[DONE]` 才保留，其余丢弃
@@ -325,20 +325,31 @@ check-then-insert、请求层统一超时、会话 cookie 服务端撤销等需�
    （`855c52d13`，反向验证，查询计数从 6/5 次降到 4/3 次）
 5. 会话世代上线后自助改密会把操作者本人也踢下线 → 改密成功后把新世代写回
    当前会话，其它设备仍被吊销（`10474bb1b`，反向验证）
+6. 吊销判定命中后只返回 401，浏览器仍继续携带失效 Cookie → 吊销响应清空
+   会话并下发过期的会话 Cookie（`37a06b09e`，反向验证）
 
 本轮同时完成的前置项（不在第九节列表内）：`Register` 邮箱 check-then-insert
 串行化（`62812ab37`，反向验证：无锁时 8/8 并发注册产生重复行）、邮箱验证码
 改 Redis 共享存储（`44b518440`）、JSON 解码接入 encoding/json/v2
 （`6770dce7c`，见 `CR-JSON-V2-DECODE-2026-11-06.md`）。
 
-验证记录（2026-11-06，第 5 项之后）：
+验证记录（2026-11-06，第 6 项之后，`37a06b09e` 上重跑）：
 `go test ./controller ./model ./relay/common ./relay/helper ./middleware ./service -count=1`
-六个包全绿（controller 14.9s、model 5.1s、relay/common 0.1s、relay/helper 23.4s、
-middleware 2.7s、service 19.2s）；
-`node --test web/tests/frontendApiTimeout.test.mjs` 3/3 通过；
+六个包全绿（controller 19.5s、model 8.2s、relay/common 0.1s、relay/helper 23.4s、
+middleware 3.5s、service 25.7s）；`go build ./...` 退出码 0；
+`node --test web/tests/*.test.mjs` 164/164 通过；
 `web/default` lint 0 error（22 个既有 warning）、build 成功；`web/classic` build 成功。
+其中一次六包并发运行出现 `service` 的
+`TestChannelHealthConcurrentHalfOpenSelectionHasSingleProbe` 失败
+（`channel health Redis unavailable; routing is failing open`，`context deadline
+exceeded`）；单独 `-count=5` 重跑通过、之后两次六包整轮全绿，判为机器负载下的
+既有偶发，与本次改动无关（未触碰 channel health 与 Redis）。
 
 仍未覆盖：真实 MySQL/PG/Redis 下的并发改密与会话吊销、多实例缓存一致性、
 真实上游渠道的截断流（本次只用 `httptest` 构造的响应体复现）、浏览器端
 视觉验证。tag 模式仍未限制单个标签下的渠道数量：分页单位是标签而不是渠道，
 要限制需要前端配合显示"还有 N 个渠道"，属产品决策，本轮未做。
+
+灰度注意：会话世代上线前签发的会话没有世代字段，按世代 0 处理。用户在旧实例
+改过密码（世代 > 0）后，滚动升级期间旧实例（不认识该字段）新签发的会话会被
+新实例判为过期；升级完成并重新登录后不再出现。
