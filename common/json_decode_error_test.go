@@ -83,7 +83,9 @@ func TestSanitizeJSONDecodeErrorHidesGoTypeNames(t *testing.T) {
 	var target probeRequest
 	err := Unmarshal([]byte(`{"model":"gpt-5.4","max_tokens":"abc"}`), &target)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "Go struct field")
+	// 原始错误在两个引擎里都会点名 Go 类型（v1: "Go struct field ..."，
+	// v2: "Go uint"），清洗后的消息不得保留。
+	require.Contains(t, err.Error(), "Go ")
 
 	sanitized := SanitizeJSONDecodeError(err)
 	require.NotContains(t, sanitized.Error(), "Go struct field")
