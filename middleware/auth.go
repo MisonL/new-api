@@ -180,6 +180,17 @@ func authHelper(c *gin.Context, minRole int) {
 	} else {
 		user, err := loadSessionUserIdentity(session)
 		if err != nil {
+			if errors.Is(err, errSessionRevoked) {
+				// 会话已吊销：清掉会话并让浏览器丢弃这个 Cookie，避免之后每个
+				// 请求继续携带它，也让前端能识别"需要重新登录"。
+				session.Clear()
+				opts := SessionCookieOptions(requestIsHTTPS(c))
+				opts.MaxAge = -1
+				session.Options(opts)
+				if saveErr := session.Save(); saveErr != nil {
+					logger.LogInfo(c, "failed to expire revoked session cookie: "+saveErr.Error())
+				}
+			}
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "无权进行此操作，会话信息无效",

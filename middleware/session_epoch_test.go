@@ -102,6 +102,16 @@ func TestUserAuthRejectsSessionFromBeforePasswordChange(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, revoked.Code,
 		"密码变更后旧会话必须被拒绝：%s", revoked.Body.String())
 
+	// 被吊销的 Cookie 必须由服务端置为过期：否则浏览器会在之后每个请求上
+	// 继续携带它，前端也看不出"应当重新登录"。
+	expiredSessionCookie := false
+	for _, responseCookie := range revoked.Result().Cookies() {
+		if responseCookie.Name == "session" && responseCookie.MaxAge < 0 {
+			expiredSessionCookie = true
+		}
+	}
+	require.True(t, expiredSessionCookie, "吊销响应对应的会话 Cookie 必须置为过期")
+
 	legacyRevoked := fetchMe(legacyCookies)
 	require.Equal(t, http.StatusUnauthorized, legacyRevoked.Code,
 		"没有世代字段的旧会话在密码变更后同样必须被拒绝：%s", legacyRevoked.Body.String())
