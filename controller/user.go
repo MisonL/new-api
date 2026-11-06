@@ -659,6 +659,22 @@ func GetUserModels(c *gin.Context) {
 	return
 }
 
+// refreshCurrentSessionEpoch 在用户修改自己的密码后，把递增后的会话世代写回
+// 当前会话。改密码要吊销其它设备上的旧会话，但操作者本人不应该被顺带踢下线：
+// 不刷新的话，改密成功的下一个请求就会因世代不一致返回 401。
+func refreshCurrentSessionEpoch(c *gin.Context, userId int) {
+	var current model.User
+	if err := model.DB.Select("session_epoch").First(&current, userId).Error; err != nil {
+		common.SysLog("failed to refresh session epoch: " + err.Error())
+		return
+	}
+	session := sessions.Default(c)
+	session.Set(constant.SessionKeyIDEpoch, current.SessionEpoch)
+	if err := session.Save(); err != nil {
+		common.SysLog("failed to save refreshed session epoch: " + err.Error())
+	}
+}
+
 func UpdateUser(c *gin.Context) {
 	var updatedUser model.User
 	err := common.DecodeJson(c.Request.Body, &updatedUser)
@@ -694,6 +710,9 @@ func UpdateUser(c *gin.Context) {
 	if err := updatedUser.Edit(updatePassword); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if updatePassword && updatedUser.Id == c.GetInt("id") {
+		refreshCurrentSessionEpoch(c, updatedUser.Id)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -843,6 +862,9 @@ func UpdateSelf(c *gin.Context) {
 	if err := cleanUser.Update(updatePassword); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if updatePassword {
+		refreshCurrentSessionEpoch(c, cleanUser.Id)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
