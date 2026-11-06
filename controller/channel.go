@@ -124,12 +124,19 @@ func GetAllChannels(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签数量失败，请稍后重试"})
 			return
 		}
+		tagValues := make([]string, 0, len(tags))
 		for _, tag := range tags {
 			if tag == nil || *tag == "" {
 				continue
 			}
+			tagValues = append(tagValues, *tag)
+		}
+		// 同页所有标签的渠道一次查回再按标签聚合。逐个标签查询会随
+		// page_size 线性放大往返次数（100 个标签就是 100 次查询加 100 次
+		// 排序）；聚合顺序仍按标签页序、组内按排序键，与原逐标签查询一致。
+		if len(tagValues) > 0 {
 			var tagChannels []*model.Channel
-			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag = ?", *tag)).
+			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag IN ?", tagValues)).
 				Omit("key").
 				Find(&tagChannels).Error
 			if err != nil {
@@ -137,7 +144,16 @@ func GetAllChannels(c *gin.Context) {
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签渠道失败，请稍后重试"})
 				return
 			}
-			channelData = append(channelData, tagChannels...)
+			channelsByTag := make(map[string][]*model.Channel, len(tagValues))
+			for _, channel := range tagChannels {
+				if channel.Tag == nil {
+					continue
+				}
+				channelsByTag[*channel.Tag] = append(channelsByTag[*channel.Tag], channel)
+			}
+			for _, tag := range tagValues {
+				channelData = append(channelData, channelsByTag[tag]...)
+			}
 		}
 	} else {
 		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter).Count(&total).Error; err != nil {
@@ -292,10 +308,18 @@ func SearchChannels(c *gin.Context) {
 			})
 			return
 		}
-		for _, tag := range tags {
-			if tag != nil && *tag != "" {
+		if len(tags) > 0 {
+			tagValues := make([]string, 0, len(tags))
+			for _, tag := range tags {
+				if tag != nil && *tag != "" {
+					tagValues = append(tagValues, *tag)
+				}
+			}
+			if len(tagValues) > 0 {
+				// 与 GetAllChannels 的 tag 模式相同：一次查回全部匹配渠道再按
+				// 标签聚合，避免每个标签一次查询。
 				var tagChannels []*model.Channel
-				query := buildChannelListQuery(group, -1, -1).Where("tag = ?", *tag)
+				query := buildChannelListQuery(group, -1, -1).Where("tag IN ?", tagValues)
 				query = model.ApplyChannelSearchFilters(query, keyword, "", modelKeyword)
 				err := sortOptions.Apply(query).
 					Omit("key").
@@ -307,7 +331,16 @@ func SearchChannels(c *gin.Context) {
 					})
 					return
 				}
-				channelData = append(channelData, tagChannels...)
+				channelsByTag := make(map[string][]*model.Channel, len(tagValues))
+				for _, channel := range tagChannels {
+					if channel.Tag == nil {
+						continue
+					}
+					channelsByTag[*channel.Tag] = append(channelsByTag[*channel.Tag], channel)
+				}
+				for _, tag := range tagValues {
+					channelData = append(channelData, channelsByTag[tag]...)
+				}
 			}
 		}
 	} else {
