@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -180,6 +181,16 @@ func Logout(c *gin.Context) {
 	})
 }
 
+var (
+	errRegistrationIdentityTaken       = errors.New("registration: identity already taken")
+	errRegistrationIdentityCheckFailed = errors.New("registration: identity check failed")
+)
+
+const (
+	registerIdentityLockTimeout = 5 * time.Second
+	registerIdentityLockTTL     = 30 * time.Second
+)
+
 func Register(c *gin.Context) {
 	if !common.RegisterEnabled {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
@@ -209,36 +220,56 @@ func Register(c *gin.Context) {
 			return
 		}
 	}
-	exist, err := model.CheckUserExistOrDeleted(user.Username, user.Email)
-	if err != nil {
-		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
-		common.SysLog(fmt.Sprintf("CheckUserExistOrDeleted error: %v", err))
-		return
-	}
-	if exist {
-		common.ApiErrorI18n(c, i18n.MsgUserExists)
-		return
+	// 注册的占用检查与落库必须串行：两步之间没有唯一约束兜底，并发同邮箱/同名
+	// 注册能同时通过检查，留下两个共享身份的行（邮箱非唯一索引，后续按邮箱
+	// 重置密码会一次性影响全部同邮箱账户）。锁按邮箱与用户名分别持有，
+	// Redis 下跨实例生效，无 Redis 时退回进程内互斥。
+	lockKeys := []string{"register:username:" + strings.ToLower(user.Username)}
+	if user.Email != "" {
+		lockKeys = append(lockKeys, "register:email:"+strings.ToLower(user.Email))
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
 	inviterId, _ := model.GetUserIdByAffCode(affCode)
-	cleanUser := model.User{
-		Username:    user.Username,
-		Password:    user.Password,
-		DisplayName: user.Username,
-		InviterId:   inviterId,
-		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
-	}
-	if common.EmailVerificationEnabled {
-		cleanUser.Email = user.Email
-	}
-	if err := cleanUser.Insert(inviterId); err != nil {
-		common.ApiError(c, err)
+	registerErr := common.WithKeyLocks(c.Request.Context(), lockKeys, registerIdentityLockTimeout, registerIdentityLockTTL, func() error {
+		exist, err := model.CheckUserExistOrDeleted(user.Username, user.Email)
+		if err != nil {
+			return fmt.Errorf("%w: %v", errRegistrationIdentityCheckFailed, err)
+		}
+		if exist {
+			return errRegistrationIdentityTaken
+		}
+		cleanUser := model.User{
+			Username:    user.Username,
+			Password:    user.Password,
+			DisplayName: user.Username,
+			InviterId:   inviterId,
+			Role:        common.RoleCommonUser, // 明确设置角色为普通用户
+		}
+		if common.EmailVerificationEnabled {
+			cleanUser.Email = user.Email
+		}
+		return cleanUser.Insert(inviterId)
+	})
+	switch {
+	case registerErr == nil:
+	case errors.Is(registerErr, errRegistrationIdentityTaken):
+		common.ApiErrorI18n(c, i18n.MsgUserExists)
+		return
+	case errors.Is(registerErr, errRegistrationIdentityCheckFailed):
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		common.SysLog(registerErr.Error())
+		return
+	case errors.Is(registerErr, common.ErrKeyLockTimeout):
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
+		return
+	default:
+		common.ApiError(c, registerErr)
 		return
 	}
 
 	// 获取插入后的用户ID
 	var insertedUser model.User
-	if err := model.DB.Where("username = ?", cleanUser.Username).First(&insertedUser).Error; err != nil {
+	if err := model.DB.Where("username = ?", user.Username).First(&insertedUser).Error; err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
 		return
 	}
@@ -253,7 +284,7 @@ func Register(c *gin.Context) {
 		// 生成默认令牌
 		token := model.Token{
 			UserId:             insertedUser.Id, // 使用插入后的用户ID
-			Name:               cleanUser.Username + "的初始令牌",
+			Name:               user.Username + "的初始令牌",
 			Key:                key,
 			CreatedTime:        common.GetTimestamp(),
 			AccessedTime:       common.GetTimestamp(),
