@@ -298,3 +298,45 @@
 真实上游渠道协议、浏览器端视觉验证；以及 tag 模式分页、`Register` 邮箱
 check-then-insert、请求层统一超时、会话 cookie 服务端撤销等需要单独立项的行为
 或数据模型变更。
+
+---
+
+## 十、收尾项（2026-11-06）
+
+第九节列出的"留待后续"项按同样的 TDD 流程处理：先写失败测试、确认按预期
+原因失败、最小修复通过；标注"反向验证"的条目做过"去掉修复→测试失败→恢复"
+的验证。提交范围 `0cdf484d5` 至 `855c52d13`：
+
+1. 共享扫描器把截断的最后一个 SSE 帧当完整帧下发 → 自定义 split 函数，
+   输入结束时没有行结束符的最后一行只有是 `[DONE]` 才保留，其余丢弃
+   （SSE 规定文件尾部残留数据必须丢弃）；流结束原因仍判为
+   upstream_transport_interrupted（`0cdf484d5`，反向验证）
+2. 两套前端 axios 实例没有 timeout，挂住的请求无限期悬着 → default 与
+   classic 统一 30s 默认超时；渠道测试/余额/拉模型 120s、classic 全量
+   测试与更新 300s、上游模型与倍率同步 120s 在调用点显式放宽；新增静态
+   契约测试守住实例默认值与各慢端点覆盖点（`fed5a4cdb`）
+3. 会话 Cookie 30 天且无法服务端吊销 → `User.session_epoch` 会话世代：
+   签发时记录、鉴权时比对，密码修改/重置用 SQL 相对更新递增并刷新缓存；
+   绑定回调、Passkey、桌面端 OAuth 绑定等不走 `authHelper` 的路径复用同一
+   判定；上线前的旧会话无该字段按世代 0 处理，不误杀在线用户
+   （`869d2d12a`，反向验证）
+4. tag 模式逐标签查询渠道（page_size 个标签 = page_size 次往返与排序） →
+   `tag IN (...)` 一次查回后按标签页序聚合，组内顺序仍来自同一条 ORDER BY
+   （`855c52d13`，反向验证，查询计数从 6/5 次降到 4/3 次）
+
+本轮同时完成的前置项（不在第九节列表内）：`Register` 邮箱 check-then-insert
+串行化（`62812ab37`，反向验证：无锁时 8/8 并发注册产生重复行）、邮箱验证码
+改 Redis 共享存储（`44b518440`）、JSON 解码接入 encoding/json/v2
+（`6770dce7c`，见 `CR-JSON-V2-DECODE-2026-11-06.md`）。
+
+验证记录（2026-11-06，第 4 项之后）：
+`go test ./controller ./model ./relay/common ./relay/helper ./middleware ./service -count=1`
+六个包全绿（controller 14.9s、model 5.1s、relay/common 0.1s、relay/helper 23.4s、
+middleware 2.7s、service 19.2s）；
+`node --test web/tests/frontendApiTimeout.test.mjs` 3/3 通过；
+`web/default` lint 0 error（22 个既有 warning）、build 成功；`web/classic` build 成功。
+
+仍未覆盖：真实 MySQL/PG/Redis 下的并发改密与会话吊销、多实例缓存一致性、
+真实上游渠道的截断流（本次只用 `httptest` 构造的响应体复现）、浏览器端
+视觉验证。tag 模式仍未限制单个标签下的渠道数量：分页单位是标签而不是渠道，
+要限制需要前端配合显示"还有 N 个渠道"，属产品决策，本轮未做。
