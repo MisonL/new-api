@@ -2,6 +2,7 @@ package helper
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -57,6 +58,44 @@ func getScannerBufferSize() int {
 // the shared scanner; otherwise the override only applies to one code path.
 func GetScannerBufferSize() int {
 	return getScannerBufferSize()
+}
+
+// isStreamDoneLine 判断一行（已去掉行结束符）是否为流终止标记。
+func isStreamDoneLine(line []byte) bool {
+	trimmed := bytes.TrimSpace(line)
+	if bytes.HasPrefix(trimmed, []byte("data:")) {
+		trimmed = bytes.TrimSpace(trimmed[len("data:"):])
+	}
+	return bytes.HasPrefix(trimmed, []byte("[DONE]"))
+}
+
+// scanStreamLines 与 bufio.ScanLines 等价，唯一区别是输入结束时没有行结束符的
+// 最后一行：bufio.ScanLines 仍会把它当作一个 token 返回，而 SSE 规定行必须以
+// 换行结束，文件尾部的残留数据必须丢弃。上游连接中断时最后一行通常是半个
+// JSON 帧，下发它会让客户端拿到解析不了的响应，也会被计数当作一帧有效数据。
+// [DONE] 是完整的终止语义标记，不依赖后续内容，因此单独保留。
+func scanStreamLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, dropTrailingCR(data[0:i]), nil
+	}
+	if atEOF {
+		line := dropTrailingCR(data)
+		if isStreamDoneLine(line) {
+			return len(data), line, nil
+		}
+		return len(data), nil, nil
+	}
+	return 0, nil, nil
+}
+
+func dropTrailingCR(data []byte) []byte {
+	if len(data) > 0 && data[len(data)-1] == '\r' {
+		return data[0 : len(data)-1]
+	}
+	return data
 }
 
 func copyCodexResponsesHeaders(c *gin.Context, resp *http.Response) {
@@ -238,7 +277,7 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 	}()
 
 	scanner.Buffer(make([]byte, InitialScannerBufferSize), getScannerBufferSize())
-	scanner.Split(bufio.ScanLines)
+	scanner.Split(scanStreamLines)
 	copyCodexResponsesHeaders(c, resp)
 	SetEventStreamHeaders(c)
 
