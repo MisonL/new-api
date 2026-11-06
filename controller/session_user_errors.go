@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -34,5 +35,12 @@ func resolveEnabledBindUser(c *gin.Context) (*model.User, error) {
 	if user.Status != common.UserStatusEnabled {
 		return nil, errSessionUserDisabled
 	}
+	// 会话世代落后说明密码已改/重置：绑定回调不走 UserAuth，必须在这里
+	// 用同一套判定拒绝，否则被吊销的会话能继续绑定第三方账号接管账户。
+	if middleware.SessionRevokedByEpoch(session, user.SessionEpoch) {
+		return nil, errSessionRevokedByPasswordChange
+	}
 	return user, nil
 }
+
+var errSessionRevokedByPasswordChange = errors.New("会话已失效，请重新登录")

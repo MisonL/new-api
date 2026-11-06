@@ -56,18 +56,23 @@ type User struct {
 	StripeCustomer  string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt       int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt     int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	// SessionEpoch 是会话世代：签发的会话记住签发时的值，鉴权时与当前值比对。
+	// 密码修改或重置会递增它，使该用户此前在所有设备上签发的会话立即失效。
+	// 不需要在任何响应里出现，json:"-" 避免它进入用户序列化输出。
+	SessionEpoch int64 `json:"-" gorm:"not null;default:0;column:session_epoch"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Role:     user.Role,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
+		Id:           user.Id,
+		Group:        user.Group,
+		Quota:        user.Quota,
+		Role:         user.Role,
+		Status:       user.Status,
+		Username:     user.Username,
+		Setting:      user.Setting,
+		Email:        user.Email,
+		SessionEpoch: user.SessionEpoch,
 	}
 	return cache
 }
@@ -350,7 +355,7 @@ func GetUserIdentityById(id int) (*User, error) {
 		return nil, errors.New("id 为空！")
 	}
 	user := User{}
-	err := DB.Select("id", "username", "role", "status", "group").
+	err := DB.Select("id", "username", "role", "status", "group", "session_epoch").
 		First(&user, "id = ?", id).Error
 	return &user, err
 }
@@ -584,6 +589,21 @@ var billingColumns = []string{
 	"Quota", "UsedQuota", "RequestCount", "AffQuota", "AffCount", "AffHistoryQuota",
 }
 
+// userUpdateOmittedColumns 是 Update 整对象回写时必须跳过的全部列。SessionEpoch
+// 由密码变更用 SQL 相对更新递增：若允许快照回写，并发改密码期间读到的旧快照
+// 会把已递增的世代写回去，等于把刚吊销的会话重新放行。
+var userUpdateOmittedColumns = append(append([]string{}, billingColumns...), "SessionEpoch")
+
+// bumpUserSessionEpoch 递增用户的会话世代，使该用户此前签发的会话全部失效。
+// 用 SQL 相对更新而不是读写快照：并发改密码时两次递增都必须生效。
+func bumpUserSessionEpoch(userId int) error {
+	if userId <= 0 {
+		return nil
+	}
+	return DB.Model(&User{}).Where("id = ?", userId).
+		UpdateColumn("session_epoch", gorm.Expr("session_epoch + 1")).Error
+}
+
 func (user *User) Update(updatePassword bool) error {
 	if user.Id == 0 {
 		return errors.New("user id is empty")
@@ -602,8 +622,13 @@ func (user *User) Update(updatePassword bool) error {
 	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
 	}
-	if err = DB.Omit(billingColumns...).Model(user).Updates(newUser).Error; err != nil {
+	if err = DB.Omit(userUpdateOmittedColumns...).Model(user).Updates(newUser).Error; err != nil {
 		return err
+	}
+	if updatePassword {
+		if err = bumpUserSessionEpoch(user.Id); err != nil {
+			return err
+		}
 	}
 	// Updates 后再读一次，缓存写的是更新后的整行状态，而不是更新前快照。
 	if err = DB.First(user, user.Id).Error; err != nil {
@@ -642,6 +667,11 @@ func (user *User) Edit(updatePassword bool) error {
 	}
 	if err = DB.Model(user).Updates(updates).Error; err != nil {
 		return err
+	}
+	if updatePassword {
+		if err = bumpUserSessionEpoch(user.Id); err != nil {
+			return err
+		}
 	}
 	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
@@ -870,7 +900,19 @@ func ResetUserPasswordByEmail(email string, password string) error {
 	if err != nil {
 		return err
 	}
-	return DB.Model(&User{}).Where("id = ?", users[0].Id).Update("password", hashedPassword).Error
+	if err := DB.Model(&User{}).Where("id = ?", users[0].Id).Update("password", hashedPassword).Error; err != nil {
+		return err
+	}
+	if err := bumpUserSessionEpoch(users[0].Id); err != nil {
+		return err
+	}
+	// 重置密码后必须同步缓存里的世代，否则缓存 TTL 内旧的世代仍会放行
+	// 已吊销的会话。
+	var updated User
+	if err := DB.First(&updated, users[0].Id).Error; err != nil {
+		return err
+	}
+	return updateUserCache(updated)
 }
 
 func IsAdmin(userId int) bool {

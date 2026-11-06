@@ -69,7 +69,8 @@ func Login(c *gin.Context) {
 }
 
 // 会话键。pending_* 是挑战期间等待二次验证的账号，twofa_verified_user_id 记录
-// 当前会话已经为该用户通过过二次验证。
+// 当前会话已经为该用户通过过二次验证。身份相关的键与 middleware 校验侧共享，
+// 定义在 constant 包里，签发与校验不能各写一份字符串。
 const (
 	sessionKeyPendingUsername = "pending_username"
 	sessionKeyPendingUserID   = "pending_user_id"
@@ -144,6 +145,9 @@ func setupLoginWithResult(user *model.User, c *gin.Context) (bool, string) {
 	session.Set("role", user.Role)
 	session.Set("status", user.Status)
 	session.Set("group", user.Group)
+	// 记住签发时的会话世代：密码修改/重置会递增数据库里的值，authHelper
+	// 比对不一致即拒绝这个 30 天 Cookie，实现服务端吊销。
+	session.Set(constant.SessionKeyIDEpoch, user.SessionEpoch)
 	err = session.Save()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)

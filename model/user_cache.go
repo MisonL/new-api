@@ -24,6 +24,9 @@ type UserBase struct {
 	Status   int    `json:"status"`
 	Username string `json:"username"`
 	Setting  string `json:"setting"`
+	// SessionEpoch 参与会话吊销判定，必须随缓存一起回读，否则密码变更后
+	// 在缓存 TTL 内仍会用旧的世代放行被吊销的会话。
+	SessionEpoch int64 `json:"session_epoch"`
 }
 
 func (user *UserBase) WriteContext(c *gin.Context) {
@@ -121,14 +124,15 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 
 	// Create cache object from user data
 	userCache = &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Role:     user.Role,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
+		Id:           user.Id,
+		Group:        user.Group,
+		Quota:        user.Quota,
+		Role:         user.Role,
+		Status:       user.Status,
+		Username:     user.Username,
+		Setting:      user.Setting,
+		Email:        user.Email,
+		SessionEpoch: user.SessionEpoch,
 	}
 
 	return userCache, nil

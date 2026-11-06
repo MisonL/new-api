@@ -45,15 +45,49 @@ func loadSessionUserIdentity(session sessions.Session) (*model.User, error) {
 
 	userCache, err := model.GetUserCache(id)
 	if err == nil && userCache != nil && validUserInfo(userCache.Username, userCache.Role) {
+		if sessionUserEpochStale(session, userCache.SessionEpoch) {
+			return nil, errSessionRevoked
+		}
 		return &model.User{
-			Id:       userCache.Id,
-			Username: userCache.Username,
-			Role:     userCache.Role,
-			Status:   userCache.Status,
-			Group:    userCache.Group,
+			Id:           userCache.Id,
+			Username:     userCache.Username,
+			Role:         userCache.Role,
+			Status:       userCache.Status,
+			Group:        userCache.Group,
+			SessionEpoch: userCache.SessionEpoch,
 		}, nil
 	}
-	return model.GetUserIdentityById(id)
+	identity, err := model.GetUserIdentityById(id)
+	if err != nil {
+		return nil, err
+	}
+	if sessionUserEpochStale(session, identity.SessionEpoch) {
+		return nil, errSessionRevoked
+	}
+	return identity, nil
+}
+
+// errSessionRevoked 表示会话签发的世代落后于用户当前世代：密码已经修改或
+// 重置，这个 Cookie 即使还在有效期内也不得继续使用。
+var errSessionRevoked = errors.New("session revoked by password change")
+
+// sessionUserEpochStale 判断会话记录的世代是否落后于用户当前的会话世代。
+// 密码修改/重置会递增世代，因此旧 Cookie 上记录的世代小于当前值即视为已
+// 吊销。旧会话没有世代字段（上线前签发）按 0 处理；只要用户从未改过密码
+// 世代仍是 0，就不误杀现有在线用户。
+func sessionUserEpochStale(session sessions.Session, currentEpoch int64) bool {
+	stored := int64(0)
+	if raw, ok := session.Get(constant.SessionKeyIDEpoch).(int64); ok {
+		stored = raw
+	}
+	return stored != currentEpoch
+}
+
+// SessionRevokedByEpoch 是给不走 authHelper 的会话路径（绑定回调、Passkey
+// 自助操作等）复用的世代判定：它们直接读会话 id 再查库，必须用与 authHelper
+// 相同的规则拒绝已吊销的会话，否则改密码后旧会话换一条路仍能接管账号。
+func SessionRevokedByEpoch(session sessions.Session, currentEpoch int64) bool {
+	return sessionUserEpochStale(session, currentEpoch)
 }
 
 func syncSessionUserIdentity(session sessions.Session, user *model.User) error {

@@ -13,7 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -115,24 +114,21 @@ func StartDesktopOAuth(c *gin.Context) {
 
 	bindUserID := 0
 	if mode == desktopOAuthModeBind {
-		session := sessions.Default(c)
-		id := session.Get("id")
-		if id == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"success": false,
-				"message": "missing current user session",
-			})
-			return
-		}
-		sessionUserID, ok := id.(int)
-		if !ok || sessionUserID <= 0 {
+		// 与网页端绑定回调同一套会话判定：直接读 session id 的路径必须
+		// 校验账号状态与会话世代，否则改密码后被吊销的会话仍能发起绑定。
+		bindUser, err := resolveEnabledBindUser(c)
+		if err != nil {
+			if errors.Is(err, errSessionUserDisabled) {
+				common.ApiErrorI18n(c, i18n.MsgOAuthUserBanned)
+				return
+			}
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "invalid current user session",
 			})
 			return
 		}
-		bindUserID = sessionUserID
+		bindUserID = bindUser.Id
 	}
 
 	request, err := createDesktopOAuthRequest(providerSlug, mode, bindUserID, c.Query("aff"))

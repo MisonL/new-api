@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	passkeysvc "github.com/QuantumNous/new-api/service/passkey"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -554,6 +555,11 @@ func getSessionUser(c *gin.Context) (*model.User, error) {
 	}
 	if user.Status != common.UserStatusEnabled {
 		return nil, errSessionUserDisabled
+	}
+	// 与 authHelper 相同的会话世代判定：改密码后被吊销的会话不能继续
+	// 注册/覆盖 Passkey，否则等于给旧会话留了绕过密码吊销的接管路径。
+	if middleware.SessionRevokedByEpoch(session, user.SessionEpoch) {
+		return nil, errSessionRevokedByPasswordChange
 	}
 	return user, nil
 }
