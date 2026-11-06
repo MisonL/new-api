@@ -305,7 +305,7 @@ check-then-insert、请求层统一超时、会话 cookie 服务端撤销等需�
 
 第九节列出的"留待后续"项按同样的 TDD 流程处理：先写失败测试、确认按预期
 原因失败、最小修复通过；标注"反向验证"的条目做过"去掉修复→测试失败→恢复"
-的验证。提交范围 `0cdf484d5` 至 `855c52d13`：
+的验证。提交范围 `0cdf484d5` 至 `10474bb1b`：
 
 1. 共享扫描器把截断的最后一个 SSE 帧当完整帧下发 → 自定义 split 函数，
    输入结束时没有行结束符的最后一行只有是 `[DONE]` 才保留，其余丢弃
@@ -323,13 +323,15 @@ check-then-insert、请求层统一超时、会话 cookie 服务端撤销等需�
 4. tag 模式逐标签查询渠道（page_size 个标签 = page_size 次往返与排序） →
    `tag IN (...)` 一次查回后按标签页序聚合，组内顺序仍来自同一条 ORDER BY
    （`855c52d13`，反向验证，查询计数从 6/5 次降到 4/3 次）
+5. 会话世代上线后自助改密会把操作者本人也踢下线 → 改密成功后把新世代写回
+   当前会话，其它设备仍被吊销（`10474bb1b`，反向验证）
 
 本轮同时完成的前置项（不在第九节列表内）：`Register` 邮箱 check-then-insert
 串行化（`62812ab37`，反向验证：无锁时 8/8 并发注册产生重复行）、邮箱验证码
 改 Redis 共享存储（`44b518440`）、JSON 解码接入 encoding/json/v2
 （`6770dce7c`，见 `CR-JSON-V2-DECODE-2026-11-06.md`）。
 
-验证记录（2026-11-06，第 4 项之后）：
+验证记录（2026-11-06，第 5 项之后）：
 `go test ./controller ./model ./relay/common ./relay/helper ./middleware ./service -count=1`
 六个包全绿（controller 14.9s、model 5.1s、relay/common 0.1s、relay/helper 23.4s、
 middleware 2.7s、service 19.2s）；
