@@ -353,3 +353,41 @@ exceeded`）；单独 `-count=5` 重跑通过、之后两次六包整轮全绿�
 灰度注意：会话世代上线前签发的会话没有世代字段，按世代 0 处理。用户在旧实例
 改过密码（世代 > 0）后，滚动升级期间旧实例（不认识该字段）新签发的会话会被
 新实例判为过期；升级完成并重新登录后不再出现。
+
+---
+
+## 十一、依赖与工具链复查（2026-11-06）
+
+第十节之后按"全部优化好"的要求重新实测依赖与漏洞扫描面，只用可验证的
+证据下结论：
+
+1. 两套前端 `bun audit`：default 10 条（2 high）、classic 3 条（1 high）。
+   其中 `follow-redirects@1.16.1`（axios 运行时依赖，high）与
+   `fast-uri@3.1.8`（ajv 链）都在仓库自己的 overrides 里被钉在受影响
+   版本；`body-parser@2.3.0`（high）、`qs`、`minimatch`、`glob` 属于
+   shadcn / eslint / i18next-cli 开发链。已改 override：
+   follow-redirects 1.16.2、fast-uri 3.1.9、body-parser 2.4.0、
+   qs 6.17.1、minimatch 11.0.5、glob 14.0.4（`4f73e0b69`）。
+   复查结果：default 2 条（0 high，1 moderate 1 low）、classic 0 条。
+2. 剩余两条都在 `shadcn` CLI 的开发依赖里，不进产物：`@hono/node-server`
+   修复版是 2.1.3（跨大版本，MCP SDK 的依赖区间不覆盖）；`deepmerge`
+   受影响区间到 4.3.1 而 4.3.1 就是当前最新版，上游没有修复版本。
+3. Go：`GOTOOLCHAIN=go1.27.3 govulncheck ./...`（与 Dockerfile 的
+   `golang:1.27.3` 一致）结果 0 个可达漏洞；3 个模块级告警不在调用链上。
+4. Rust 桌面端：`cargo audit` 扫描 475 个 crate，0 个 vulnerability，
+   6 条 allowed warning（unmaintained 的 zvariant/zbus_names/
+   proc-macro-error、yanked 的 async-executor、glib 0.18.5 unsound）。
+   glib 修复需要跟随 tauri/gtk 大版本升级，未在本次范围内。
+5. GitHub Actions：全部 `uses:` 已按 40 位 commit SHA 固定，无需改动。
+
+验证：default `bun run lint` 0 error、`bun run build` 成功（Safari 兼容
+检查通过）；classic `bun run build` 成功；i18next-cli 在 glob 14 下
+`i18n:status` 正常执行；`node --test web/tests/*.test.mjs` 164/164 通过。
+classic `bun run lint`（prettier --check）报 6 个文件的既有格式问题，
+这些文件本次未改动（提交内容本身未按 prettier 格式化），单独记录。
+
+仍未处理：tag 模式单个标签下的渠道数量没有上限（分页单位是标签，加限制
+需要前端配合显示"还有 N 个渠道"，属产品决策）；生产容器镜像
+`new-api-local:prod-codex-lite-4527d7666-litefix2`（commit `4527d7666`，
+2026-09-08）仍是 dev 的祖先，落后 800 个提交，本系列修复未进生产，发布
+时机需要单独决定。
