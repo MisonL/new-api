@@ -16,10 +16,16 @@ import {
 // Base URL: empty string for same-origin API requests
 const baseURL = ''
 
+// 默认 30s 超时：上游或网关挂住时请求必须有终点，否则页面既拿不到错误
+// 也没有重试机会。确实更慢的端点（渠道测试、拉取模型、上游同步等）在
+// 调用点用 timeout 显式放宽，见 features/channels/api.ts 等。
+export const DEFAULT_API_TIMEOUT_MS = 30_000
+
 // Create axios instance with default config
 export const api = axios.create({
   baseURL,
   withCredentials: true, // Include cookies in cross-origin requests
+  timeout: DEFAULT_API_TIMEOUT_MS,
   headers: {
     'Cache-Control': 'no-store', // Prevent caching
   },

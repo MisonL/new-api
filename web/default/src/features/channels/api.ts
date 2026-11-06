@@ -34,6 +34,11 @@ export interface ExtendedApiConfig extends AxiosRequestConfig {
   disableDuplicate?: boolean
 }
 
+// 渠道操作里有一类会真实等待上游：连通性测试、余额刷新、拉取模型列表。
+// 它们可能远超请求层 30s 的默认超时，统一放到这个更宽的窗口，其余渠道
+// 操作仍用默认值。
+export const CHANNEL_UPSTREAM_TIMEOUT_MS = 120_000
+
 export const channelActionConfig = (
   config: ExtendedApiConfig = {}
 ): ExtendedApiConfig => ({
@@ -385,7 +390,7 @@ export async function testChannel(
 ): Promise<ChannelTestResponse> {
   const res = await api.get(
     `/api/channel/test/${id}`,
-    channelActionConfig({ params })
+    channelActionConfig({ params, timeout: CHANNEL_UPSTREAM_TIMEOUT_MS })
   )
   return res.data
 }
@@ -398,7 +403,7 @@ export async function updateChannelBalance(
 ): Promise<ChannelBalanceResponse> {
   const res = await api.get(
     `/api/channel/update_balance/${id}`,
-    channelActionConfig()
+    channelActionConfig({ timeout: CHANNEL_UPSTREAM_TIMEOUT_MS })
   )
   return res.data
 }
@@ -411,7 +416,7 @@ export async function fetchUpstreamModels(
 ): Promise<FetchModelsResponse> {
   const res = await api.get(
     `/api/channel/fetch_models/${id}`,
-    channelActionConfig()
+    channelActionConfig({ timeout: CHANNEL_UPSTREAM_TIMEOUT_MS })
   )
   return res.data
 }
@@ -727,7 +732,7 @@ export async function testAllChannels(): Promise<{
   success: boolean
   message?: string
 }> {
-  const res = await api.get('/api/channel/test', channelActionConfig())
+  const res = await api.get('/api/channel/test', channelActionConfig({ timeout: CHANNEL_UPSTREAM_TIMEOUT_MS }))
   return res.data
 }
 
@@ -740,7 +745,7 @@ export async function updateAllChannelsBalance(): Promise<{
 }> {
   const res = await api.get(
     '/api/channel/update_balance',
-    channelActionConfig()
+    channelActionConfig({ timeout: CHANNEL_UPSTREAM_TIMEOUT_MS })
   )
   return res.data
 }

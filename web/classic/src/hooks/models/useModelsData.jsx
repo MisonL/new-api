@@ -177,7 +177,9 @@ export const useModelsData = () => {
     try {
       const body = {};
       if (locale) body.locale = locale;
-      const res = await API.post('/api/models/sync_upstream', body);
+      const res = await API.post('/api/models/sync_upstream', body, {
+        timeout: 120_000,
+      });
       const { success, message, data } = res.data || {};
       if (success) {
         const createdModels = data?.created_models || 0;
@@ -230,7 +232,9 @@ export const useModelsData = () => {
     try {
       const body = { overwrite };
       if (locale) body.locale = locale;
-      const res = await API.post('/api/models/sync_upstream', body);
+      const res = await API.post('/api/models/sync_upstream', body, {
+        timeout: 120_000,
+      });
       const { success, message, data } = res.data || {};
       if (success) {
         const createdModels = data?.created_models || 0;

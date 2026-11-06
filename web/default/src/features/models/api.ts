@@ -193,7 +193,9 @@ export async function syncUpstream(params?: {
   source?: SyncSource
   overwrite?: SyncOverwritePayload[]
 }): Promise<SyncUpstreamResponse> {
-  const res = await api.post('/api/models/sync_upstream', params)
+  const res = await api.post('/api/models/sync_upstream', params, {
+    timeout: 120_000,
+  })
   return res.data
 }
 

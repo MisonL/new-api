@@ -31,10 +31,15 @@ import {
   READONLY_FRONTEND_MESSAGE,
 } from '../constants/runtime.constants';
 
+// 默认 30s 超时，理由同 default 前端：挂住的请求必须有终点。慢端点
+// （渠道测试/余额/拉模型、上游同步）在调用点显式放宽 timeout。
+export const DEFAULT_API_TIMEOUT_MS = 30_000;
+
 export let API = axios.create({
   baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
     ? import.meta.env.VITE_REACT_APP_SERVER_URL
     : '',
+  timeout: DEFAULT_API_TIMEOUT_MS,
   headers: {
     'New-API-User': getUserIdFromLocalStorage(),
     'Cache-Control': 'no-store',
@@ -208,6 +213,7 @@ export function updateAPI() {
     baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
       ? import.meta.env.VITE_REACT_APP_SERVER_URL
       : '',
+    timeout: DEFAULT_API_TIMEOUT_MS,
     headers: {
       'New-API-User': getUserIdFromLocalStorage(),
       'Cache-Control': 'no-store',

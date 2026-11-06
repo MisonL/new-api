@@ -228,7 +228,9 @@ export default function UpstreamRatioSync(props) {
     };
 
     try {
-      const res = await API.post('/api/ratio_sync/fetch', payload);
+      const res = await API.post('/api/ratio_sync/fetch', payload, {
+        timeout: 120_000,
+      });
 
       if (!res.data.success) {
         showError(res.data.message || t('后端请求失败'));
