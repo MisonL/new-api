@@ -456,3 +456,67 @@ relaykit**。relaykit 用 `map[string]any` 承载该字段，Go map 在序列化
 上限。加限制需要前端配合显示"还有 N 个渠道"，属产品决策，本轮不加静默
 截断。
 
+## 十三、前端质量门禁转绿（2026-11-07）
+
+第十二节之后复查 `repo-gates.yml` 各步骤，发现两条前端门禁在本地实测为红，
+且 classic 的 eslint 门禁同样是红的。三条都修好并逐条验证。
+
+先说边界：`repo-gates.yml` 只存在于本地分支，`origin/main` 与 `origin/dev`
+的 `.github/workflows/` 下都没有该文件，`gh run list` 里也没有任何 repo-gates
+运行记录。因此这些门禁从未在 CI 真正执行过，本地红灯没有被暴露。是否推送
+以及何时推送由维护者决定，不属本次修改范围。
+
+### 13.1 `web/default` 格式门禁（81 文件）
+
+`bun run format:check`（CI `web/default format` 步骤）退出码 1，报 81 个
+已提交文件不合 `.prettierrc`。
+
+- 不是依赖漂移：prettier 3.9.10、`@trivago/prettier-plugin-sort-imports`
+  6.0.2、`prettier-plugin-tailwindcss` 0.8.1 均与 `bun.lock` 一致；CI 用
+  `--frozen-lockfile` 会装出相同版本。
+- 不是规则变更：`.prettierrc` 自 v1.0（`a42b39760`）起未改。
+- 差异以 sort-imports 按 `importOrder` 重排导入为主，少数是类型联合换行
+  （如 `prompt-input.tsx`）。按引入提交日期看最早 2026-04-28、最多一批 45
+  个在 2026-10-24，属于这些文件提交时未跑格式化。
+
+修复：`prettier --write .`，81 个文件；改动全在 `web/default` 内，且这 81
+个文件此前均无未提交改动，不与并行会话冲突。
+
+### 13.2 `web/classic` 格式与 eslint 门禁（6 + 6）
+
+`bun run lint`（= `prettier . --check`，CI `web/classic format`）退出码 1，
+6 个文件；差异是双引号 vs 单引号、一个多余空行。
+
+`bun run eslint`（CI `web/classic eslint`）退出码 1，6 个 error：
+
+- 5 处是数字分隔符（`30_000` / `120_000` / `300_000`，ES2021 语法）与
+  `ecmaVersion: 2020` 冲突，报 "Identifier directly after number"。这 5 处
+  由本会话的 `fed5a4cdb` 引入（该提交前这 5 个文件的分隔符数量为 0）。配置
+  的 2020 是刻意锁定（`5bf7dcb37` 只为 tests 目录放开到 2022），且 classic
+  其余 src 全部遵守 2020，因此修法是改回纯整数（语义不变），而不是放宽
+  解析器。`web/tests/frontendApiTimeout.test.mjs` 的校验正则
+  `[1-9][\d_]*` 两种写法都接受。
+- 1 处是 `documentCss.js` 许可证头 `support@quantumous.com` 少一个 `n`，
+  由 `252cd6c62` 引入；改为 `quantumnous.com`。
+
+验证：`bun run lint` 与 `bun run eslint` 退出码 0（0 error，5 warning 属既有
+未使用 eslint-disable 提示）；`bun test` 222 通过；`bun run test:node` 164
+通过；`bun run build` 退出码 0。
+
+### 13.3 附带：工具二进制未忽略
+
+`tools/relaykit-dto-compat/relaykit-dto-compat` 是 `go build` 生成、与目录
+同名的二进制，此前未被忽略。`.gitignore` 增加对应规则。
+
+### 13.4 本轮验证汇总
+
+- `web/default`：`format:check` 0、`lint` 0 error、`bun test` 293 通过、
+  `typecheck` 0、`build` 0（Safari 兼容检查通过）。
+- `web/classic`：`lint` 0、`eslint` 0 error、`bun test` 222 通过、
+  `test:node` 164 通过、`build` 0。
+- 其余 repo-gates 步骤本轮实测仍绿：compose healthcheck 契约、dockerfile
+  契约、只读代理契约、bundle 版本契约、双前端 `bun install
+  --frozen-lockfile`（均 no changes）、i18n 覆盖度与 lint 门禁。
+- 后端 Go 代码本轮未改动，未重复跑 Go 测试套件。
+
+
