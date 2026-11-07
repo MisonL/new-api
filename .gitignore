@@ -17,6 +17,8 @@ web/dist
 one-api
 new-api
 /__debug_bin*
+# tools 下各独立 Go module 的 go build 产物（与目录同名）
+tools/relaykit-dto-compat/relaykit-dto-compat
 .DS_Store
 tiktoken_cache
 .eslintcache
