@@ -603,3 +603,92 @@ sync 脚本删除了各语言已空的 `*.untranslated.json`。
 
 
 
+
+## 十五、i18n 译文完成度与占位符完整性（2026-11-08）
+
+### 15.1 发现：既有门禁不检查译文值
+
+仓库已有四道 i18n 门禁，全部只覆盖"键"而不覆盖"值"：
+
+- `web/scripts/i18nCoverageGate.mjs`（classic）：源码用到的键是否在
+  各语言文件中存在。
+- `web/scripts/i18nDefaultCoverageGate.mjs`（web/default）：sources 里的
+  `t('...')` 字面量是否在 6 个语言文件中存在，`static-keys.ts` 是否登记。
+- `web/scripts/i18nLintGate.mjs`（classic）：源码硬编码字符串（基线 62 条）。
+- `bun run i18n:sync`：对本仓库只做"键对齐"，报告 missing/extras。
+
+没有任何一道检查"值是否仍是英文原文"。因此语言文件可以长期保留大量
+英文文案而 CI 全绿。
+
+### 15.2 量化（2026-11-08 实测）
+
+以 `en.json` 为基准，按"值等于基准 + 去掉 {{占位符}} 后至少 3 个拉丁词
++ 至少一个小写开头词 + 非 URL/邮箱/JSON/snake_case/单 token + 不含
+汉字假名"判定：
+
+| 前端 | 语言 | 未翻译整句 |
+| --- | --- | --- |
+| classic | fr | 180 |
+| classic | ru | 179 |
+| classic | ja | 216 |
+| classic | vi | 211 |
+| classic | zh-CN | 4 |
+| classic | zh-TW | 1 |
+| default | fr | 91 |
+| default | ja | 0 |
+| default | vi | 91 |
+
+### 15.3 web/default 的 sync 报告为何显示 0
+
+`web/default/scripts/sync-i18n.mjs` 的 `untranslated` 判定对 fr/vi
+走的是"句子含 `the|and|or|to|with|please` 才怀疑未翻译"的启发式。大量
+未翻译文案（"My Account"、"Redeem Code"、"API Key"、"Search"）不含这些
+词，因此永远不被计入。上一轮"untranslated=0"的结论只能证明启发式没命中，
+不能证明译文完整；本轮改为与 en 逐值相等比对后实测 fr/vi 各 91 条。
+
+### 15.4 修复
+
+- 新增只读门禁 `web/scripts/i18nTranslationCompletenessGate.mjs`，
+  同时覆盖两个前端：
+  - 未翻译整句检测（口径见 15.2）；
+  - 占位符完整性：译文 `{{...}}` 集合必须与基准一致（顺序无关），
+    并检出 `__ PH_n __` 流水线残留。
+  - 需刻意保留英文的条目登记在
+    `web/tests/i18nUntranslatedAllowlist.json`，按 `前端:语言` 分组。
+- 接入 `.github/workflows/repo-gates.yml` 的 `i18n-gate` job；
+  两个前端 `package.json` 增加 `i18n:complete`。
+- 补齐译文：classic fr 180 / ru 179 / ja 216 / vi 211 / zh-CN 4 /
+  zh-TW 1，default fr 91 / vi 91。
+- 修复既有占位符损坏 5 条：
+  - `default/ja` 三条被流水线写成 `__ PH_n __`（`Failed to parse JSON
+    file: {{name}}`、`Model pull failed: {{msg}}`、`Parsed {{count}}
+    service account file(s)`），一条把 `&lt;` 实体丢失
+    （`New API <noreply@example.com>`）。
+  - `classic/fr` 两条 `_one` 复数条目丢失 `{{count}}`
+    （删除所选令牌 / 模型的单数确认文案）。
+
+### 15.5 验证
+
+- `node web/scripts/i18nTranslationCompletenessGate.mjs` 退出码 0
+  （允许清单 3 条，均为 "OpenAI, Anthropic, Google, etc." 这类厂商名
+  枚举，翻译后反而难以辨认）。
+- 反向验证（门禁有效性）：
+  - 把 `classic/ja` 一条译文改回英文原文，退出码 1，点名键
+    `价格计算失败`；
+  - 删除 `classic/ja` 一条译文的 `{{tokens}}` / `{{symbol}}`，
+    退出码 1，点名键并打印期望占位符；
+  - 两处恢复后退出码 0。
+- `bun run i18n:sync`（web/default）六语言 missing/extras/untranslated
+  全 0，未改写任何语言文件。
+- classic 覆盖率门禁通过（7 个语言文件均包含代码用到的全部键）。
+- web/default 覆盖率门禁通过（3793 个字面量键 × 6 语言，550 静态键
+  均已登记）。
+- web/default：`format:check` 0；`eslint` 0 error（22 warning 既有）；
+  `typecheck` 0；`bun test` 293 通过；`build` 0。
+- classic：`prettier` 0；`eslint` 0 error（5 warning 既有）；
+  `bun test` 222 通过；`test:node` 164 通过；`build` 0。
+- `repo-gates.yml` YAML 解析通过。
+
+边界：`repo-gates.yml` 仅本地存在，从未在 GitHub Actions 上真实运行；
+上述验证均为本地执行同一命令得到的结果。译文为机器生成基础上的人工
+校对，未逐条做母语者审校；语言覆盖为 fr/ru/ja/vi/zh-CN/zh-TW 六种。
