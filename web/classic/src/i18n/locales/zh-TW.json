@@ -365,7 +365,7 @@
     "POST": "POST",
     "POST 参数": "POST 引數",
     "Product ID": "Product ID",
-    "Prompt cache hit tokens": "Prompt cache hit tokens",
+    "Prompt cache hit tokens": "提示快取命中 token 數",
     "Prompt tokens": "Prompt tokens",
     "query / fragment 支持浏览器登录；body 仅供后端接口直连": "query / fragment 支援瀏覽器登入；body 僅供後端介面直連",
     "Qwen Code Header Passthrough": "Qwen Code 請求頭透傳",
