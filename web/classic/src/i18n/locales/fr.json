@@ -5453,6 +5453,17 @@
     "默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。": "Par défaut, les requêtes ne sont pas modifiées. Le mode fixe choisit un modèle ; les modes round robin ou aléatoire peuvent choisir plusieurs modèles et les appliquer selon la stratégie.",
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
-    "默认行为": "Comportement par défaut"
+    "默认行为": "Comportement par défaut",
+    "无法发起微信登录，请刷新页面重试": "Impossible de lancer la connexion WeChat, veuillez actualiser la page et réessayer",
+    "无法发起 Telegram 登录，请刷新页面重试": "Impossible de lancer la connexion Telegram, veuillez actualiser la page et réessayer",
+    "无法发起 Telegram 绑定，请刷新页面重试": "Impossible de lancer la liaison Telegram, veuillez actualiser la page et réessayer",
+    "绑定失败，请重试": "Échec de la liaison, veuillez réessayer",
+    "Stripe": "Stripe",
+    "Creem": "Creem",
+    "Waffo": "Waffo",
+    "在浏览器中输入确认码": "Saisissez le code de confirmation dans le navigateur",
+    "完成第三方授权后，请在浏览器页面中输入：": "Après avoir terminé l'autorisation tierce, saisissez-le sur la page du navigateur :",
+    "知道了": "Compris",
+    "= 0": "= 0"
   }
 }

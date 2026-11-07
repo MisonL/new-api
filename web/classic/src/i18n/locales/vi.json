@@ -5489,6 +5489,17 @@
     "默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。": "Mặc định không thay đổi request. Chế độ cố định chọn một mẫu; chế độ luân phiên hoặc ngẫu nhiên có thể chọn nhiều mẫu và áp dụng theo chiến lược.",
     "默认测试模型": "Mô hình kiểm tra mặc định",
     "默认用户消息": "Xin chào",
-    "默认行为": "Hành vi mặc định"
+    "默认行为": "Hành vi mặc định",
+    "无法发起微信登录，请刷新页面重试": "Không thể bắt đầu đăng nhập WeChat, vui lòng làm mới trang và thử lại",
+    "无法发起 Telegram 登录，请刷新页面重试": "Không thể bắt đầu đăng nhập Telegram, vui lòng làm mới trang và thử lại",
+    "无法发起 Telegram 绑定，请刷新页面重试": "Không thể bắt đầu liên kết Telegram, vui lòng làm mới trang và thử lại",
+    "绑定失败，请重试": "Liên kết thất bại, vui lòng thử lại",
+    "Stripe": "Stripe",
+    "Creem": "Creem",
+    "Waffo": "Waffo",
+    "在浏览器中输入确认码": "Nhập mã xác nhận trong trình duyệt",
+    "完成第三方授权后，请在浏览器页面中输入：": "Sau khi hoàn tất ủy quyền bên thứ ba, hãy nhập vào trang trình duyệt:",
+    "知道了": "Đã hiểu",
+    "= 0": "= 0"
   }
 }

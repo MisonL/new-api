@@ -5386,6 +5386,17 @@
     "默认是不修改请求。固定模式选择一个模板；轮询或随机模式可以选择多个模板并按策略使用。": "By default, requests are not changed. Fixed mode selects one template; round robin or random mode can select multiple templates and apply them by strategy.",
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
-    "默认行为": "Default behavior"
+    "默认行为": "Default behavior",
+    "无法发起微信登录，请刷新页面重试": "Failed to start WeChat login, please refresh the page and try again",
+    "无法发起 Telegram 登录，请刷新页面重试": "Failed to start Telegram login, please refresh the page and try again",
+    "无法发起 Telegram 绑定，请刷新页面重试": "Failed to start Telegram binding, please refresh the page and try again",
+    "绑定失败，请重试": "Binding failed, please try again",
+    "Stripe": "Stripe",
+    "Creem": "Creem",
+    "Waffo": "Waffo",
+    "在浏览器中输入确认码": "Enter the confirmation code in the browser",
+    "完成第三方授权后，请在浏览器页面中输入：": "After completing third-party authorization, enter it on the browser page:",
+    "知道了": "Got it",
+    "= 0": "= 0"
   }
 }

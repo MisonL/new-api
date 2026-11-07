@@ -22,6 +22,11 @@ import { defineConfig } from 'i18next-cli';
 /** @type {import('i18next-cli').I18nextToolkitConfig} */
 export default defineConfig({
   locales: ['zh-CN', 'zh-TW', 'en', 'fr', 'ru', 'ja', 'vi'],
+  // 注意：不要用 `i18next-cli extract` 写入本仓库的语言文件。本仓库的文件是
+  // `{"translation": {…}}` 嵌套结构（运行时靠它定位命名空间），而 extract 在
+  // `nsSeparator: false` + 单一默认命名空间下会把键并到顶层，写成扁平结构；
+  // 提交扁平文件会让全部翻译失效。缺失键请手工补齐，用
+  // `web/scripts/i18nCoverageGate.mjs` 或 `bun run i18n:status` 检查覆盖度。
   extract: {
     input: ['src/**/*.{js,jsx,ts,tsx}'],
     ignore: ['src/i18n/**/*'],

@@ -139,13 +139,13 @@ jobs:
       - name: install web/classic deps
         working-directory: web/classic
         run: bun install --frozen-lockfile
-      - name: i18n extract idempotency
+      # 覆盖率检查取代原先的 "extract 幂等性" 步骤。原步骤先跑 extract（把缺失
+      # 键写进工作区）再比对两次 extract 的输出，只证明了 extract 幂等：仓库与
+      # 代码漂移时永远通过（2026-11-06 实测 7 个语言各缺 11 个键，门禁仍全绿）。
+      # 新检查只读，跑 `status <locale>` 判定"代码里用到的键是否都在文件里"。
+      - name: i18n coverage gate
         working-directory: web/classic
-        run: |
-          bun x i18next-cli extract
-          cp src/i18n/locales/zh-CN.json /tmp/zh-CN-first.json
-          bun x i18next-cli extract
-          diff /tmp/zh-CN-first.json src/i18n/locales/zh-CN.json
+        run: node ../scripts/i18nCoverageGate.mjs
       - name: i18n lint gate
         working-directory: web/classic
         run: node ../scripts/i18nLintGate.mjs
