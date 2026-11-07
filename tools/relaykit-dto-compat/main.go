@@ -318,13 +318,15 @@ func reportGroups(r *report) []group {
 	const (
 		wantFieldSet = 33 // types whose field-name sets differ
 		wantTag      = 5
-		wantType     = 6 // excludes interface{}/any spellings, reported separately
-		wantEmbed    = 0
-		wantOrder    = 4 // package-wide; only 2 of them (ClaudeMediaMessage,
+		// 第 57 轮重录（2026-11-07）：本地把 Tool.InputSchema 改为 json.RawMessage
+		// 保序后，该字段由等价拼写组转入类型组，type 6→7、equiv 21→20。
+		wantType  = 7 // excludes interface{}/any spellings, reported separately
+		wantEmbed = 0
+		wantOrder = 4 // package-wide; only 2 of them (ClaudeMediaMessage,
 		// FunctionRequest) are reachable from the 3 golden output roots -- see
 		// the 31st review round in the design doc
 		wantSig   = 12 // all IsStream; NewNotify's interface{}/any is a spelling
-		wantEquiv = 21 // 20 fields + NewNotify's one parameter, in its own group
+		wantEquiv = 20 // 19 fields + NewNotify's one parameter, in its own group
 	)
 	return []group{
 		{"fieldSet", "字段名集合不同", r.fieldSetDiff, wantFieldSet},
