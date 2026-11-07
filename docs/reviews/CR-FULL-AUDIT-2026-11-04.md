@@ -391,3 +391,68 @@ classic `bun run lint`（prettier --check）报 6 个文件的既有格式问题
 `new-api-local:prod-codex-lite-4527d7666-litefix2`（commit `4527d7666`，
 2026-09-08）仍是 dev 的祖先，落后 800 个提交，本系列修复未进生产，发布
 时机需要单独决定。
+
+## 十二、i18n 覆盖度与 relaykit 基线重录（2026-11-07）
+
+第十一节之后又发现两处门禁失效：i18n 门禁对真实漂移永远通过，relaykit
+dto 基线记录与代码现状不符。两处都按 TDD 思路先复现、再修、再反向验证。
+
+### 12.1 classic i18n 门禁对真实漂移永远通过
+
+现象：CI 的 "i18n extract idempotency" 步骤先跑 `i18next-cli extract`（把
+缺失键写进工作区）再比对两次输出，只证明了 extract 幂等；仓库语言文件与
+代码漂移时它永远通过。实测 7 个语言文件各缺 11 个代码中实际使用的键
+（微信/Telegram 登录与绑定、Stripe/Creem/Waffo、浏览器确认码流程等），
+门禁仍全绿。
+
+根因（已用运行时探针证明）：extract 在本仓库的写库结构是**扁平**的。配置
+为 `mergeNamespaces: true` + `nsSeparator: false` + 单一默认命名空间时，
+写入路径把键并到顶层；而运行时 `i18n.js` 用
+`resources: { en: enTranslation }` 加载，需要 `{"translation": {…}}` 嵌套
+结构。实测扁平资源下 `t('绑定成功')` 返回键本身而非译文。因此**不能**把
+extract 的输出提交进仓库，漂移只能靠只读检查发现，修复时手工补语言文件。
+（`nsSeparator: ':'` 也不是可行改法：仓内 100 个键含 ASCII 冒号。）
+
+修复：
+- 7 个 locale JSON 手工补齐 11 键译文，保持嵌套结构与既有字节格式。
+- 新增 `web/scripts/i18nCoverageGate.mjs`：只读跑 `i18next-cli status
+  <locale>`，判定代码使用但文件缺失的键，并交叉核对 config 声明的
+  locales；不写仓库。
+- CI 用新步骤取代原 "extract 幂等性" 步骤；`i18next.config.js` 加注释禁止
+  extract 写入语言文件。
+
+验证：7 个语言 `status` 退出码 0；`i18nCoverageGate.mjs` 退出码 0；
+`i18nLintGate.mjs` 62/62 通过；classic build 退出码 0；prettier 对改动
+文件干净。反向验证：临时删除 zh-TW 的 `知道了` 后门禁退出码 1 并输出
+`✗ 知道了 (absent)`，恢复后 `git diff` 为空。
+
+### 12.2 relaykit dto 兼容基线记录与代码现状不符
+
+现象：`relaykit-dto-compat.sh --strict` 退出码 1。根因是 `Tool.InputSchema`
+的处置未落到基线：本地把该字段改为 `json.RawMessage` 保序实现后，它与
+relaykit 的 `map[string]any` 由"等价拼写"变为"真类型差异"，而基线仍按旧
+口径记 `type=6`/`equiv=21`。
+
+决策（按实际使用场景）：`Tool.InputSchema` **保留本地保序实现，不采用
+relaykit**。relaykit 用 `map[string]any` 承载该字段，Go map 在序列化时
+重排键序，会改变结构化输出的字节顺序；本地的 `json.RawMessage` 原样透传，
+保序。这属"反方向的不兼容：本地领先"，不是本地落后于上游。
+
+修复：基线 `tools/relaykit-dto-compat/main.go` 记为 `wantType=7` /
+`wantEquiv=20`（其余四维不变：`fieldSet=33 tag=5 embed=0 order=4 sig=12`）；
+设计文档 §12.0.8 的全部计数、类别 A/B/C、结论与阶段表同步订正，并新增
+`Tool.InputSchema` 行说明保留理由；CR 文档自述行数订正为 2179。
+
+验证：`KIT_REF=789c97019 bash scripts/relaykit-dto-compat.sh --strict`
+输出 `计数: fieldSet=33 tag=5 type=7 embed=0 order=4 sig=12 equiv=20` 且
+`counts match the recorded expectation`（退出码 0）；`relaykit-gate-selfcheck.py`
+退出码 0（`dto 七维 (33, 5, 7, 0, 4, 12, 20)`，22 处自述计数一致）；
+`relaykit-gate-selfcheck.test.py` 47/47；`relaykit-citation-check.py`
+`--ref 789c97019` 0 失败；`relaykit-doc-structure-check.py` 0 个结构问题。
+
+### 12.3 tag 模式单个标签下的渠道数量上限
+
+维持第十节的判断：tag 模式下分页单位是标签，单个标签下的渠道数量没有
+上限。加限制需要前端配合显示"还有 N 个渠道"，属产品决策，本轮不加静默
+截断。
+
