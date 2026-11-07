@@ -291,7 +291,7 @@ func normalizeClaudeInputSchema(parameters any, toolName string) (json.RawMessag
 // countTopLevelKey 统计 JSON 对象顶层出现指定键的次数。重复键本身就让文档
 // 有歧义（不同解析器取首次或末次），所以补 type 前后都要能发现它。
 func countTopLevelKey(raw json.RawMessage, key string) (int, error) {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder := common.NewJsonDecoderUseNumber(bytes.NewReader(raw))
 	token, err := decoder.Token()
 	if err != nil {
 		return 0, err
