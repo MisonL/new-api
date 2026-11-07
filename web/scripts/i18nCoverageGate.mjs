@@ -1,7 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 // 只读的 i18n 覆盖度门禁：检查代码里用到的每个翻译键是否都已存在于各语言
 // 文件中。此前 CI 的做法是先跑 `i18next-cli extract`（把缺失键写进工作区），
@@ -16,18 +16,20 @@ import { fileURLToPath } from 'node:url';
 // 而不是译文）。因此漂移只能靠这个只读检查发现，修复时手工补语言文件。
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const webRoot = path.resolve(scriptDir, '..');
+const webRoot = path.resolve(scriptDir, "..");
 const currentWorkingDir = process.cwd();
-const classicRoot = fs.existsSync(path.join(currentWorkingDir, 'i18next.config.js'))
+const classicRoot = fs.existsSync(
+  path.join(currentWorkingDir, "i18next.config.js"),
+)
   ? currentWorkingDir
-  : path.join(webRoot, 'classic');
-const localesDir = path.join(classicRoot, 'src', 'i18n', 'locales');
-const isWindows = process.platform === 'win32';
-const bunCommand = isWindows ? 'bun.exe' : 'bun';
+  : path.join(webRoot, "classic");
+const localesDir = path.join(classicRoot, "src", "i18n", "locales");
+const isWindows = process.platform === "win32";
+const bunCommand = isWindows ? "bun.exe" : "bun";
 
 const localeFiles = fs
   .readdirSync(localesDir)
-  .filter((name) => name.endsWith('.json'))
+  .filter((name) => name.endsWith(".json"))
   .sort();
 if (localeFiles.length === 0) {
   console.error(`未在 ${localesDir} 找到语言文件，覆盖度检查无法执行。`);
@@ -35,23 +37,23 @@ if (localeFiles.length === 0) {
 }
 
 const configText = fs.readFileSync(
-  path.join(classicRoot, 'i18next.config.js'),
-  'utf8',
+  path.join(classicRoot, "i18next.config.js"),
+  "utf8",
 );
-const declared = configText.match(/locales:\s*\[([^\]]*)\]/)?.[1] ?? '';
+const declared = configText.match(/locales:\s*\[([^\]]*)\]/)?.[1] ?? "";
 const declaredLocales = [...declared.matchAll(/['"]([^'"]+)['"]/g)].map(
   (match) => `${match[1]}.json`,
 );
 
 const failures = [];
 for (const file of localeFiles) {
-  const locale = file.replace(/\.json$/, '');
-  const result = spawnSync(
-    bunCommand,
-    ['x', 'i18next-cli', 'status', locale],
-    { cwd: classicRoot, encoding: 'utf8', shell: false },
-  );
-  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  const locale = file.replace(/\.json$/, "");
+  const result = spawnSync(bunCommand, ["x", "i18next-cli", "status", locale], {
+    cwd: classicRoot,
+    encoding: "utf8",
+    shell: false,
+  });
+  const output = `${result.stdout || ""}${result.stderr || ""}`;
   const missing =
     result.status !== 0 || /\babsent\b|used in code but absent/i.test(output);
   if (missing) {
@@ -59,7 +61,7 @@ for (const file of localeFiles) {
       .split(/\r?\n/)
       .filter((line) => /absent|Summary/i.test(line))
       .slice(0, 3)
-      .join(' / ');
+      .join(" / ");
     failures.push(`${locale}: ${summary || `退出码 ${result.status}`}`);
   }
 }
@@ -68,16 +70,18 @@ const missingFromConfig = localeFiles.filter(
   (file) => declaredLocales.length > 0 && !declaredLocales.includes(file),
 );
 if (missingFromConfig.length > 0) {
-  failures.push(`i18next.config.js 的 locales 未声明：${missingFromConfig.join(', ')}`);
+  failures.push(
+    `i18next.config.js 的 locales 未声明：${missingFromConfig.join(", ")}`,
+  );
 }
 
 if (failures.length > 0) {
-  console.error('i18n 覆盖度检查失败，以下语言存在代码使用但文件缺失的键：');
+  console.error("i18n 覆盖度检查失败，以下语言存在代码使用但文件缺失的键：");
   for (const failure of failures) {
     console.error(`- ${failure}`);
   }
   console.error(
-    '请在对应语言文件中补齐这些键。不要运行 `i18next-cli extract`：它会把语言文件改写成扁平结构，运行时将失去全部翻译。',
+    "请在对应语言文件中补齐这些键。不要运行 `i18next-cli extract`：它会把语言文件改写成扁平结构，运行时将失去全部翻译。",
   );
   process.exit(1);
 }
