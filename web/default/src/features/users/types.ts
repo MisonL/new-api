@@ -89,12 +89,7 @@ export interface UserFormData {
 }
 
 export type ManageUserAction =
-  | 'promote'
-  | 'demote'
-  | 'enable'
-  | 'disable'
-  | 'delete'
-  | 'add_quota'
+  'promote' | 'demote' | 'enable' | 'disable' | 'delete' | 'add_quota'
 
 export type QuotaAdjustMode = 'add' | 'subtract' | 'override'
 

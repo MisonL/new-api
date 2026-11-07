@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type Table } from '@/lib/table-compat'
 import { Power, PowerOff, Tag, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { type Table } from '@/lib/table-compat'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,

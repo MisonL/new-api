@@ -12,8 +12,7 @@ export type KnownChannelHealthRoutingAction =
   | 'redis_unavailable'
 
 export type ChannelHealthRoutingAction =
-  | KnownChannelHealthRoutingAction
-  | (string & {})
+  KnownChannelHealthRoutingAction | (string & {})
 
 export interface ChannelHealthRoutingEvent {
   group?: string
@@ -58,12 +57,7 @@ export interface ChannelHealthRoutingResult {
 }
 
 export type ChannelHealthRoutingTone =
-  | 'danger'
-  | 'warning'
-  | 'info'
-  | 'success'
-  | 'blue'
-  | 'neutral'
+  'danger' | 'warning' | 'info' | 'success' | 'blue' | 'neutral'
 
 export interface ChannelHealthRoutingResultDisplay {
   label: string

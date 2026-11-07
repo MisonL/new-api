@@ -1,7 +1,7 @@
 import { DropdownMenuTrigger } from '@radix-ui/react-dropdown-menu'
 import { MixerHorizontalIcon } from '@radix-ui/react-icons'
-import { type Table } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
+import { type Table } from '@/lib/table-compat'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,

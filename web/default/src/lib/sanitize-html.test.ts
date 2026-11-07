@@ -22,7 +22,10 @@ test('drops event handler attributes', () => {
 })
 
 test('drops javascript: urls while keeping the anchor text', () => {
-  assert.equal(sanitizeHtml('<a href="javascript:alert(1)">click</a>'), '<a>click</a>')
+  assert.equal(
+    sanitizeHtml('<a href="javascript:alert(1)">click</a>'),
+    '<a>click</a>'
+  )
 })
 
 test('drops iframes', () => {
@@ -39,8 +42,14 @@ test('keeps the markup the admin is expected to write', () => {
     '<img src="https://x/logo.png" width="120" alt="logo">'
   const out = sanitizeHtml(html)
   assert.match(out, /<h2>1\. Acceptance<\/h2>/)
-  assert.match(out, /<a href="mailto:legal@example\.com">legal@example\.com<\/a>/)
-  assert.match(out, /<table><thead><tr><th>A<\/th><\/tr><\/thead><tbody><tr><td>b<\/td><\/tr><\/tbody><\/table>/)
+  assert.match(
+    out,
+    /<a href="mailto:legal@example\.com">legal@example\.com<\/a>/
+  )
+  assert.match(
+    out,
+    /<table><thead><tr><th>A<\/th><\/tr><\/thead><tbody><tr><td>b<\/td><\/tr><\/tbody><\/table>/
+  )
   assert.match(out, /style="color:#666"/)
   assert.match(out, /<img src="https:\/\/x\/logo\.png" width="120" alt="logo">/)
 })
@@ -48,7 +57,8 @@ test('keeps the markup the admin is expected to write', () => {
 test('preserves indentation and blank lines instead of re-flowing them', () => {
   // Indented HTML inside a block element is a Markdown code block, so this
   // content cannot be routed through the Markdown renderer.
-  const html = '<div class="terms">\n\n    <h2>Section</h2>\n\n    <p>Body.</p>\n\n</div>'
+  const html =
+    '<div class="terms">\n\n    <h2>Section</h2>\n\n    <p>Body.</p>\n\n</div>'
   assert.equal(sanitizeHtml(html), html)
 })
 
@@ -62,5 +72,8 @@ test('keeps class attributes so admin CSS selectors still apply', () => {
 })
 
 test('repairs malformed markup rather than dropping it', () => {
-  assert.equal(sanitizeHtml('<p>unclosed <b>bold'), '<p>unclosed <b>bold</b></p>')
+  assert.equal(
+    sanitizeHtml('<p>unclosed <b>bold'),
+    '<p>unclosed <b>bold</b></p>'
+  )
 })

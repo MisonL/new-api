@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { type Table } from '@/lib/table-compat'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { type Table } from '@/lib/table-compat'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

@@ -76,10 +76,7 @@ export type ResponsesRoutingTranslator = (
 ) => string
 
 export type ResponsesRoutingBadgeKind =
-  | 'gateway_compacted'
-  | 'route_recovery'
-  | 'route_failure'
-  | 'request_adapted'
+  'gateway_compacted' | 'route_recovery' | 'route_failure' | 'request_adapted'
 
 export type ResponsesRoutingResultKind =
   | ResponsesRoutingBadgeKind
@@ -93,13 +90,7 @@ export interface ResponsesRoutingResult {
 }
 
 export type ResponsesRoutingResultTone =
-  | 'cyan'
-  | 'orange'
-  | 'red'
-  | 'indigo'
-  | 'violet'
-  | 'green'
-  | 'neutral'
+  'cyan' | 'orange' | 'red' | 'indigo' | 'violet' | 'green' | 'neutral'
 
 export interface ResponsesRoutingResultDisplay {
   label: string

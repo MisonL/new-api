@@ -1,11 +1,6 @@
-import {
-  flexRender,
-  type Cell,
-  type Row,
-  type Table,
-} from '@/lib/table-compat'
 import { Database } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { flexRender, type Cell, type Row, type Table } from '@/lib/table-compat'
 import { cn } from '@/lib/utils'
 import {
   Empty,

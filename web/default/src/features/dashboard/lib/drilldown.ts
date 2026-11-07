@@ -67,8 +67,7 @@ export function getDashboardDimensionDrilldownTarget(options: {
     ? options.dimensionInfo
     : []
   const firstDimension = dimensionInfo[0] as
-    | { data?: Array<{ datum?: unknown }>; value?: unknown }
-    | undefined
+    { data?: Array<{ datum?: unknown }>; value?: unknown } | undefined
   if (!firstDimension) return null
 
   const datumTarget = getDashboardDrilldownTarget({

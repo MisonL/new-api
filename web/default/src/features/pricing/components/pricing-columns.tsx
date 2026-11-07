@@ -1,6 +1,6 @@
-import { type ColumnDef } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { type ColumnDef } from '@/lib/table-compat'
 import {
   Tooltip,
   TooltipContent,

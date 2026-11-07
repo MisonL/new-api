@@ -1,7 +1,7 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
-import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SanitizedHtml } from './sanitized-html'
 

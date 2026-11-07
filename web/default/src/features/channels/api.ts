@@ -732,7 +732,10 @@ export async function testAllChannels(): Promise<{
   success: boolean
   message?: string
 }> {
-  const res = await api.get('/api/channel/test', channelActionConfig({ timeout: CHANNEL_UPSTREAM_TIMEOUT_MS }))
+  const res = await api.get(
+    '/api/channel/test',
+    channelActionConfig({ timeout: CHANNEL_UPSTREAM_TIMEOUT_MS })
+  )
   return res.data
 }
 

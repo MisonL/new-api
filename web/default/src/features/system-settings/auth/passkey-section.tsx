@@ -63,8 +63,7 @@ export function PasskeySection({ defaultValues }: PasskeySectionProps) {
         (defaultValues['passkey.attachment_preference'] as string) === ''
           ? 'none'
           : (defaultValues['passkey.attachment_preference'] as
-              | 'platform'
-              | 'cross-platform'),
+              'platform' | 'cross-platform'),
     }),
     [defaultValues]
   )

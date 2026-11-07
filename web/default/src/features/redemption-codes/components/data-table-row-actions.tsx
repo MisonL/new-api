@@ -1,8 +1,8 @@
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
-import { type Row } from '@/lib/table-compat'
 import { Trash2, Edit, Power, PowerOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { type Row } from '@/lib/table-compat'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,

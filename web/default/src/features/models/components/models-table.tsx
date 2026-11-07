@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
+import { useMediaQuery } from '@/hooks'
+import { useTranslation } from 'react-i18next'
 import {
   flexRender,
   getCoreRowModel,
@@ -8,8 +10,6 @@ import {
   type SortingState,
   type VisibilityState,
 } from '@/lib/table-compat'
-import { useMediaQuery } from '@/hooks'
-import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import {
@@ -317,9 +317,7 @@ export function ModelsTable() {
         )}
       </div>
       <PageFooterPortal>
-        <DataTablePagination
-          table={table}
-        />
+        <DataTablePagination table={table} />
       </PageFooterPortal>
     </>
   )

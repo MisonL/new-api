@@ -1,9 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useMemo } from 'react'
-import type { ColumnDef } from '@/lib/table-compat'
 import { Music } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatTimestampToDate } from '@/lib/format'
+import type { ColumnDef } from '@/lib/table-compat'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DataTableColumnHeader } from '@/components/data-table'

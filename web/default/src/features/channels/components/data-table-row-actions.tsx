@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type Row } from '@/lib/table-compat'
 import {
   ArrowDown,
   ArrowUp,
@@ -22,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { type Row } from '@/lib/table-compat'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,

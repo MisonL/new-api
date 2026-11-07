@@ -52,8 +52,7 @@ export function AccountBindingsTab({
   const [unbinding, setUnbinding] = useState(false)
 
   const customProviders = status?.custom_oauth_providers as
-    | Array<{ id: string; name: string }>
-    | undefined
+    Array<{ id: string; name: string }> | undefined
 
   const fetchCustomBindings = useCallback(async () => {
     if (!customProviders || customProviders.length === 0) return
@@ -160,8 +159,7 @@ export function AccountBindingsTab({
         label: t('GitHub'),
         icon: SiGithub,
         value: (profile as unknown as Record<string, unknown>).github_id as
-          | string
-          | undefined,
+          string | undefined,
         isBound: Boolean(
           (profile as unknown as Record<string, unknown>).github_id
         ),
@@ -177,8 +175,7 @@ export function AccountBindingsTab({
         label: t('Discord'),
         icon: IconDiscord,
         value: (profile as unknown as Record<string, unknown>).discord_id as
-          | string
-          | undefined,
+          string | undefined,
         isBound: Boolean(
           (profile as unknown as Record<string, unknown>).discord_id
         ),
@@ -194,8 +191,7 @@ export function AccountBindingsTab({
         label: t('OIDC'),
         icon: Shield,
         value: (profile as unknown as Record<string, unknown>).oidc_id as
-          | string
-          | undefined,
+          string | undefined,
         isBound: Boolean(
           (profile as unknown as Record<string, unknown>).oidc_id
         ),
@@ -214,8 +210,7 @@ export function AccountBindingsTab({
         label: t('Telegram'),
         icon: Send,
         value: (profile as unknown as Record<string, unknown>).telegram_id as
-          | string
-          | undefined,
+          string | undefined,
         isBound: Boolean(
           (profile as unknown as Record<string, unknown>).telegram_id
         ),
@@ -227,8 +222,7 @@ export function AccountBindingsTab({
         label: t('LinuxDO'),
         icon: SiLinux as React.ComponentType<{ className?: string }>,
         value: (profile as unknown as Record<string, unknown>).linux_do_id as
-          | string
-          | undefined,
+          string | undefined,
         isBound: Boolean(
           (profile as unknown as Record<string, unknown>).linux_do_id
         ),

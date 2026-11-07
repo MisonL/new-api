@@ -1,10 +1,7 @@
 import type { StatusBadgeProps } from '@/components/status-badge'
 
 export type ChannelHealthRuntimeState =
-  | 'cooldown'
-  | 'half_open_probe'
-  | 'awaiting_half_open_probe'
-  | (string & {})
+  'cooldown' | 'half_open_probe' | 'awaiting_half_open_probe' | (string & {})
 
 export type ChannelHealthRuntimeEntry = {
   group: string

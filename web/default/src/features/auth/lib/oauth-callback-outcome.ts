@@ -44,7 +44,10 @@ export function resolveOAuthCallbackOutcome(
       typeof payload.confirm_url === 'string' &&
       payload.confirm_url !== ''
     ) {
-      return { kind: 'desktop_confirm_required', confirmUrl: payload.confirm_url }
+      return {
+        kind: 'desktop_confirm_required',
+        confirmUrl: payload.confirm_url,
+      }
     }
     return { kind: 'desktop_handoff' }
   }

@@ -1,10 +1,7 @@
 export type HeaderProfileMode = 'fixed' | 'round_robin' | 'random'
 export type HeaderProfileScope = 'builtin' | 'user' | 'missing'
 export type HeaderProfileCategory =
-  | 'browser'
-  | 'ai_coding_cli'
-  | 'api_sdk'
-  | 'custom'
+  'browser' | 'ai_coding_cli' | 'api_sdk' | 'custom'
 
 export type HeaderProfileVersionMeta = {
   baseProfileId: string

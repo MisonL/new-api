@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   flexRender,
   getCoreRowModel,
@@ -6,7 +7,6 @@ import {
   useReactTable,
   type PaginationState,
 } from '@/lib/table-compat'
-import { useTranslation } from 'react-i18next'
 import {
   Table,
   TableBody,

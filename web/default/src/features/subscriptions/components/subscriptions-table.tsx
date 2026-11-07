@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useMediaQuery } from '@/hooks'
+import { useTranslation } from 'react-i18next'
 import {
   type SortingState,
   type VisibilityState,
@@ -9,8 +11,6 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@/lib/table-compat'
-import { useMediaQuery } from '@/hooks'
-import { useTranslation } from 'react-i18next'
 import {
   Table,
   TableBody,

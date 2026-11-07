@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
+import { useMediaQuery } from '@/hooks'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import {
   flexRender,
   getCoreRowModel,
   useReactTable,
   type VisibilityState,
 } from '@/lib/table-compat'
-import { useMediaQuery } from '@/hooks'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useRetainedValue } from '@/hooks/use-retained-value'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
@@ -333,9 +333,7 @@ export function DeploymentsTable() {
       </div>
 
       <PageFooterPortal>
-        <DataTablePagination
-          table={table}
-        />
+        <DataTablePagination table={table} />
       </PageFooterPortal>
 
       <LazyMount open={logsOpen && retainedLogsDeploymentId !== null}>

@@ -1,4 +1,6 @@
 import { useState, useMemo, memo, useCallback, useEffect } from 'react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import {
   type ColumnDef,
   type PaginationState,
@@ -11,8 +13,6 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from '@/lib/table-compat'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
   Table,

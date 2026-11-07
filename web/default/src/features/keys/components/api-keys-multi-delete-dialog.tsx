@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { type Table } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { type Table } from '@/lib/table-compat'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { batchDeleteApiKeys } from '../api'
 import { ERROR_MESSAGES } from '../constants'

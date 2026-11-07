@@ -17,10 +17,7 @@ interface SanitizedHtmlProps {
  * and iframes cannot reach the DOM at all.
  */
 export function SanitizedHtml(props: SanitizedHtmlProps): ReactNode {
-  const tree = useMemo(
-    () => sanitizeHtmlTree(props.html),
-    [props.html]
-  )
+  const tree = useMemo(() => sanitizeHtmlTree(props.html), [props.html])
   return (
     <div className={props.className}>
       {toJsxRuntime(tree, { Fragment, jsx, jsxs })}

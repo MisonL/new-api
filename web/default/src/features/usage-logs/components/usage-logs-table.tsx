@@ -1,6 +1,9 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
+import { useMediaQuery } from '@/hooks'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import {
   type ColumnDef,
   flexRender,
@@ -11,9 +14,6 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from '@/lib/table-compat'
-import { useMediaQuery } from '@/hooks'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
@@ -163,8 +163,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
 
     return rows.map((row) => {
       const logType = (row.original as Record<string, unknown>).type as
-        | number
-        | undefined
+        number | undefined
       const tintClass =
         isCommon && logType != null ? (logTypeRowTint[logType] ?? '') : ''
 

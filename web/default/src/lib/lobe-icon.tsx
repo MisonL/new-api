@@ -85,8 +85,7 @@ export function getLobeIcon(
   const segments = trimmedName.split('.')
   const baseKey = segments[0]
   const BaseIcon = (LobeIcons as Record<string, unknown>)[baseKey] as
-    | Record<string, unknown>
-    | undefined
+    Record<string, unknown> | undefined
 
   let IconComponent: React.ComponentType<Record<string, unknown>> | undefined
   let propStartIndex: number
@@ -98,8 +97,7 @@ export function getLobeIcon(
     propStartIndex = 2
   } else {
     IconComponent = (LobeIcons as Record<string, unknown>)[baseKey] as
-      | React.ComponentType<Record<string, unknown>>
-      | undefined
+      React.ComponentType<Record<string, unknown>> | undefined
     propStartIndex = segments.length > 1 && /^[A-Z]/.test(segments[1]) ? 2 : 1
   }
 

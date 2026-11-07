@@ -1,14 +1,8 @@
 export type ResponsesRoutingTraceStage =
-  | 'request_preparation'
-  | 'route_selection'
-  | 'upstream_attempt'
-  | 'recovery'
+  'request_preparation' | 'route_selection' | 'upstream_attempt' | 'recovery'
 
 export type ResponsesRoutingTraceTone =
-  | 'adaptation'
-  | 'failure'
-  | 'neutral'
-  | 'recovery'
+  'adaptation' | 'failure' | 'neutral' | 'recovery'
 
 export interface ResponsesRoutingTraceEvent {
   code: string

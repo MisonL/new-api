@@ -1,7 +1,7 @@
-import { type ColumnDef } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
 import { formatTimestampToDate } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { type ColumnDef } from '@/lib/table-compat'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Tooltip,
@@ -179,11 +179,7 @@ export function useModelsColumns(vendors: Vendor[] = []): ColumnDef<Model>[] {
             label={label}
             variant={
               (config.color === 'error' ? 'danger' : config.color) as
-                | 'neutral'
-                | 'success'
-                | 'warning'
-                | 'danger'
-                | 'info'
+                'neutral' | 'success' | 'warning' | 'danger' | 'info'
             }
             size='sm'
           />
@@ -490,11 +486,7 @@ export function useModelsColumns(vendors: Vendor[] = []): ColumnDef<Model>[] {
               label={config?.label || String(qt)}
               variant={
                 (config?.color === 'error' ? 'danger' : config?.color) as
-                  | 'neutral'
-                  | 'success'
-                  | 'warning'
-                  | 'danger'
-                  | 'info'
+                  'neutral' | 'success' | 'warning' | 'danger' | 'info'
               }
               size='sm'
             />

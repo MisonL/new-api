@@ -1238,12 +1238,7 @@ const buildPassHeadersValueText = (draft: PassHeadersDraft): string => {
 }
 
 type StructuredValueNodeKind =
-  | 'string'
-  | 'number'
-  | 'boolean'
-  | 'null'
-  | 'object'
-  | 'array'
+  'string' | 'number' | 'boolean' | 'null' | 'object' | 'array'
 
 type StructuredObjectEntry = {
   id: string

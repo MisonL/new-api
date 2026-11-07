@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import type { Column, Table } from '@/lib/table-compat'
 import { ArrowDown, ArrowUp, ArrowDownUp, GripVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { Column, Table } from '@/lib/table-compat'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'

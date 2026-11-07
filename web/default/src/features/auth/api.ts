@@ -99,7 +99,9 @@ export async function telegramLoginByParams(
   if (!state) {
     throw new Error(i18next.t('无法发起 Telegram 登录，请刷新页面重试'))
   }
-  const res = await api.get('/api/oauth/telegram/login', { params: { ...params, state } })
+  const res = await api.get('/api/oauth/telegram/login', {
+    params: { ...params, state },
+  })
   return res.data
 }
 

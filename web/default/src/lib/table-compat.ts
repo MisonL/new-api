@@ -1,3 +1,12 @@
+import type {
+  LegacyColumnDef,
+  LegacyRow,
+  LegacyCell,
+  LegacyColumn,
+  LegacyReactTable,
+} from '@tanstack/react-table/legacy'
+import type { RowData } from '@tanstack/table-core'
+
 /**
  * TanStack Table v8 兼容桥。
  *
@@ -36,15 +45,6 @@ export type {
   OnChangeFn,
 } from '@tanstack/table-core'
 
-import type {
-  LegacyColumnDef,
-  LegacyRow,
-  LegacyCell,
-  LegacyColumn,
-  LegacyReactTable,
-} from '@tanstack/react-table/legacy'
-import type { RowData } from '@tanstack/table-core'
-
 /**
  * v8 的泛型参数没有行数据类型约束，调用方常直接传 interface；v9 要求
  * `TData extends RowData`，而 TypeScript 的 interface 不带隐式索引签名，
@@ -69,4 +69,3 @@ export type Column<TData = unknown, TValue = unknown> = LegacyColumn<
   RowDataCompat<TData>,
   TValue
 >
-

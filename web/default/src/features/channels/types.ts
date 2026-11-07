@@ -74,10 +74,7 @@ export interface ChannelSettings {
 }
 
 export type ResponsesCompactMode =
-  | 'auto'
-  | 'native'
-  | 'synthetic_summary'
-  | 'disabled'
+  'auto' | 'native' | 'synthetic_summary' | 'disabled'
 
 export type ResponsesUpstreamProfile =
   | ''

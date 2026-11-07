@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react'
-import { type Table } from '@/lib/table-compat'
 import { Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { type Table } from '@/lib/table-compat'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,

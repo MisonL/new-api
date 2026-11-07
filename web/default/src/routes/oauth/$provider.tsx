@@ -10,6 +10,7 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 import { api, getSelf } from '@/lib/api'
+import { OAUTH_INTENT_STORAGE_KEY } from '@/lib/oauth'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
@@ -18,7 +19,6 @@ import {
   resolveOAuthCallbackOutcome,
 } from '@/features/auth/lib/oauth-callback-outcome'
 import { normalizeLoginRedirectTarget } from '@/features/auth/lib/redirect-target'
-import { OAUTH_INTENT_STORAGE_KEY } from '@/lib/oauth'
 
 // 回调页曾经用 window.opener 判断绑定/登录，这要求弹窗保留对打开者的
 // 引用——正是 noopener 要去掉的东西。改读打开前写入的意图标记；标记缺失

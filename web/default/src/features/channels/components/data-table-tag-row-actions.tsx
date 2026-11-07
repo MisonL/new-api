@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { type Row } from '@/lib/table-compat'
 import { MoreHorizontal, Power, PowerOff, Pencil, Edit } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { type Row } from '@/lib/table-compat'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,

@@ -73,7 +73,9 @@ type LogRetentionFieldName =
   `log_retention_setting.${LogRetentionSettingKey & string}`
 
 export type LogRetentionFormValues = {
-  [K in LogRetentionSettingKey as `log_retention_setting.${K & string}`]: LogRetentionSettingValues[K]
+  [
+    K in LogRetentionSettingKey as `log_retention_setting.${K & string}`
+  ]: LogRetentionSettingValues[K]
 }
 
 type LogRetentionSectionProps = {

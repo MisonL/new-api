@@ -1,7 +1,7 @@
+import type { Root } from 'hast'
 import { fromHtml } from 'hast-util-from-html'
 import { sanitize } from 'hast-util-sanitize'
 import { toHtml } from 'hast-util-to-html'
-import type { Root } from 'hast'
 import { sanitizeSchema } from './sanitize-schema'
 
 /**

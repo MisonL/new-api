@@ -101,11 +101,7 @@ export function getChartColor(index: number): string {
  * Announcement status types
  */
 export type AnnouncementType =
-  | 'default'
-  | 'ongoing'
-  | 'success'
-  | 'warning'
-  | 'error'
+  'default' | 'ongoing' | 'success' | 'warning' | 'error'
 
 /**
  * Announcement status color mapping

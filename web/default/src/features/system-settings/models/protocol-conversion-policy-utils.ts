@@ -64,12 +64,10 @@ export type ProtocolRuleTemplate =
   | typeof TEMPLATE_BIDIRECTIONAL
 
 export type ProtocolRuleDirection =
-  | typeof TEMPLATE_CHAT_TO_RESPONSES
-  | typeof TEMPLATE_RESPONSES_TO_CHAT
+  typeof TEMPLATE_CHAT_TO_RESPONSES | typeof TEMPLATE_RESPONSES_TO_CHAT
 
 export type ProtocolDirectionFilter =
-  | typeof PROTOCOL_FILTER_ALL
-  | ProtocolRuleDirection
+  typeof PROTOCOL_FILTER_ALL | ProtocolRuleDirection
 
 export type ProtocolRuleStateFilter =
   | typeof PROTOCOL_FILTER_ALL

@@ -75,17 +75,13 @@ const AUTH_SECTIONS = [
           'passkey.allow_insecure_origin':
             settings['passkey.allow_insecure_origin'],
           'passkey.user_verification': settings['passkey.user_verification'] as
-            | 'required'
-            | 'preferred'
-            | 'discouraged',
+            'required' | 'preferred' | 'discouraged',
           'passkey.attachment_preference': (settings[
             'passkey.attachment_preference'
           ] === ''
             ? 'none'
             : settings['passkey.attachment_preference']) as
-            | 'none'
-            | 'platform'
-            | 'cross-platform',
+            'none' | 'platform' | 'cross-platform',
         }}
       />
     ),

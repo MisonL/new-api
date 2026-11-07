@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import type { ColumnDef } from '@/lib/table-compat'
 import {
   Blend,
   FileText,
@@ -20,6 +19,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatTimestampToDate } from '@/lib/format'
+import type { ColumnDef } from '@/lib/table-compat'
 import { DataTableColumnHeader } from '@/components/data-table'
 import { LazyMount } from '@/components/lazy-mount'
 import { StatusBadge } from '@/components/status-badge'

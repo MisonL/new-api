@@ -1,6 +1,6 @@
-import { type Row } from '@/lib/table-compat'
 import { MoreHorizontal, Pencil, Power, PowerOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { type Row } from '@/lib/table-compat'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,

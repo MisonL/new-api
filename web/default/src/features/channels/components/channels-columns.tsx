@@ -1,7 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ColumnDef } from '@/lib/table-compat'
 import {
   AlertTriangle,
   ChevronDown,
@@ -18,6 +17,7 @@ import {
   formatQuota as formatQuotaValue,
 } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { type ColumnDef } from '@/lib/table-compat'
 import { cn, truncateText } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'

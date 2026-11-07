@@ -1,6 +1,6 @@
-import { type ColumnDef } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { type ColumnDef } from '@/lib/table-compat'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Tooltip,

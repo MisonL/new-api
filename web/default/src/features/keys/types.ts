@@ -81,8 +81,4 @@ export interface ApiKeyFormData {
 // ============================================================================
 
 export type ApiKeysDialogType =
-  | 'create'
-  | 'update'
-  | 'delete'
-  | 'batch-delete'
-  | 'cc-switch'
+  'create' | 'update' | 'delete' | 'batch-delete' | 'cc-switch'

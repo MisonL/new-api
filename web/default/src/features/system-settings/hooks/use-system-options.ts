@@ -10,8 +10,7 @@ export function useSystemOptions() {
 }
 
 type ParseResult<T> =
-  | { success: true; value: T }
-  | { success: false; error: string; fallback: T }
+  { success: true; value: T } | { success: false; error: string; fallback: T }
 
 function parseOptionValueSafe<T>(
   value: string,

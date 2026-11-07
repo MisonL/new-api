@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useState } from 'react'
+import { Loader2, Search } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import {
   flexRender,
   getCoreRowModel,
   getPaginationRowModel,
   useReactTable,
 } from '@/lib/table-compat'
-import { Loader2, Search } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
 import { Input } from '@/components/ui/input'
 import {
   Select,

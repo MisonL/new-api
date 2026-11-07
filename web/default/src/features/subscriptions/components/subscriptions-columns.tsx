@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { type ColumnDef } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
+import { type ColumnDef } from '@/lib/table-compat'
 import { DataTableColumnHeader } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'

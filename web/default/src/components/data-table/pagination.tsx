@@ -4,8 +4,8 @@ import {
   DoubleArrowLeftIcon,
   DoubleArrowRightIcon,
 } from '@radix-ui/react-icons'
-import { type Table } from '@/lib/table-compat'
 import { useTranslation } from 'react-i18next'
+import { type Table } from '@/lib/table-compat'
 import { cn, getPageNumbers } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {

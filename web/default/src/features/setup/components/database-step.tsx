@@ -54,8 +54,7 @@ export function DatabaseStep({ status }: DatabaseStepProps) {
   const electronApi =
     typeof window !== 'undefined'
       ? ((window as unknown as Record<string, unknown>)?.electron as
-          | Record<string, unknown>
-          | undefined)
+          Record<string, unknown> | undefined)
       : undefined
   const isElectron = Boolean(electronApi?.isElectron)
   const electronDataDir = electronApi?.dataDir as string | undefined
