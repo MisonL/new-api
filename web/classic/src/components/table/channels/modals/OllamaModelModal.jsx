@@ -231,7 +231,7 @@ const OllamaModelModal = ({
 
           const res = await API.post('/api/channel/fetch_models', payload, {
             skipErrorHandler: true,
-            timeout: 120_000,
+            timeout: 120000,
           });
 
           if (res?.data?.success) {
@@ -254,7 +254,7 @@ const OllamaModelModal = ({
         try {
           const res = await API.get(`/api/channel/fetch_models/${channelId}`, {
             skipErrorHandler: true,
-            timeout: 120_000,
+            timeout: 120000,
           });
 
           if (res?.data?.success) {

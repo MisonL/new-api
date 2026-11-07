@@ -178,7 +178,7 @@ export const useModelsData = () => {
       const body = {};
       if (locale) body.locale = locale;
       const res = await API.post('/api/models/sync_upstream', body, {
-        timeout: 120_000,
+        timeout: 120000,
       });
       const { success, message, data } = res.data || {};
       if (success) {
@@ -233,7 +233,7 @@ export const useModelsData = () => {
       const body = { overwrite };
       if (locale) body.locale = locale;
       const res = await API.post('/api/models/sync_upstream', body, {
-        timeout: 120_000,
+        timeout: 120000,
       });
       const { success, message, data } = res.data || {};
       if (success) {

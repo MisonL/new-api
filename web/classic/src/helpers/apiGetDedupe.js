@@ -33,7 +33,7 @@ export function installGetDeduplication(instance) {
   const inFlightGetRequests = new Map();
 
   const genKey = (url, config = {}) => {
-    const params = config.params ? JSON.stringify(config.params) : "{}";
+    const params = config.params ? JSON.stringify(config.params) : '{}';
     return `${url}?${params}`;
   };
 

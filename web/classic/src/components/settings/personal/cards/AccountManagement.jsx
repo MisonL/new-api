@@ -531,7 +531,11 @@ const AccountManagement = ({
                       <TelegramLoginButton
                         dataOnauth={onTelegramBindClicked}
                         botName={status.telegram_bot_name}
-                        className={telegramBinding ? 'pointer-events-none opacity-60' : ''}
+                        className={
+                          telegramBinding
+                            ? 'pointer-events-none opacity-60'
+                            : ''
+                        }
                       />
                     </div>
                   </div>

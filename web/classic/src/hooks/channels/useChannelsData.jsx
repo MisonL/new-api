@@ -915,7 +915,7 @@ export const useChannelsData = () => {
 
   // Channel operations
   const testAllChannels = async () => {
-    const res = await API.get(`/api/channel/test`, { timeout: 300_000 });
+    const res = await API.get(`/api/channel/test`, { timeout: 300000 });
     const { success, message } = res.data;
     if (success) {
       showInfo(t('已成功开始测试所有已启用通道，请刷新页面查看结果。'));
@@ -939,7 +939,7 @@ export const useChannelsData = () => {
 
   const updateAllChannelsBalance = async () => {
     const res = await API.get(`/api/channel/update_balance`, {
-      timeout: 300_000,
+      timeout: 300000,
     });
     const { success, message } = res.data;
     if (success) {
@@ -964,7 +964,7 @@ export const useChannelsData = () => {
     }
 
     const res = await API.get(`/api/channel/update_balance/${record.id}/`, {
-      timeout: 120_000,
+      timeout: 120000,
     });
     const {
       success,

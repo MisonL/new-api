@@ -67,7 +67,6 @@ export function getLogo() {
 // 模块加载失败（白屏），解析失败一律降级成未登录。实现见 userStorage.js。
 export { getUserIdFromLocalStorage } from './userStorage';
 
-
 export function getFooterHTML() {
   return localStorage.getItem('footer_html');
 }

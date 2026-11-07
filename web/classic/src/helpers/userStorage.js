@@ -29,7 +29,7 @@ For commercial licensing, please contact support@quantumnous.com
 export function getUserIdFromLocalStorage(storage = globalThis.localStorage) {
   let raw;
   try {
-    raw = storage ? storage.getItem("user") : null;
+    raw = storage ? storage.getItem('user') : null;
   } catch {
     return -1;
   }

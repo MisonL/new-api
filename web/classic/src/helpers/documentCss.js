@@ -14,7 +14,7 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-For commercial licensing, please contact support@quantumous.com
+For commercial licensing, please contact support@quantumnous.com
 */
 
 // DocumentRenderer 会把管理员 HTML 里的 <style> 原样注入 document.head，
@@ -34,15 +34,15 @@ const DANGEROUS_RULES = [
 ];
 
 export function sanitizeDocumentCss(raw, maxLength = 65536) {
-  if (typeof raw !== "string" || raw.trim() === "") {
-    return "";
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return '';
   }
   let css = raw
-    .replace(SCRIPT_BLOCKS, "")
-    .replace(STYLE_BREAKOUT, "")
-    .replace(ANGLE_BRACKET_MARKUP, "");
+    .replace(SCRIPT_BLOCKS, '')
+    .replace(STYLE_BREAKOUT, '')
+    .replace(ANGLE_BRACKET_MARKUP, '');
   for (const pattern of DANGEROUS_RULES) {
-    css = css.replace(pattern, "");
+    css = css.replace(pattern, '');
   }
   if (css.length > maxLength) {
     css = css.slice(0, maxLength);

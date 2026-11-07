@@ -229,7 +229,7 @@ export default function UpstreamRatioSync(props) {
 
     try {
       const res = await API.post('/api/ratio_sync/fetch', payload, {
-        timeout: 120_000,
+        timeout: 120000,
       });
 
       if (!res.data.success) {

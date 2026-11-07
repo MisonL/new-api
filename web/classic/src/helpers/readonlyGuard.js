@@ -163,7 +163,7 @@ export function isReadonlyBlockedRequest(method, url, baseOrigin) {
 //
 // The decision callback is injected rather than imported so this module keeps
 // zero runtime dependencies and the patch itself is unit testable.
-const XHR_GUARD_MARK = Symbol.for("new-api.readonly-xhr-guard");
+const XHR_GUARD_MARK = Symbol.for('new-api.readonly-xhr-guard');
 
 export function installReadonlyXHRGuard({
   isBlocked,
@@ -173,13 +173,13 @@ export function installReadonlyXHRGuard({
   if (!enabled) {
     return;
   }
-  if (typeof globalThis.XMLHttpRequest !== "function") {
+  if (typeof globalThis.XMLHttpRequest !== 'function') {
     return;
   }
 
   const proto = globalThis.XMLHttpRequest.prototype;
   const originalOpen = proto.open;
-  if (typeof originalOpen !== "function" || originalOpen[XHR_GUARD_MARK]) {
+  if (typeof originalOpen !== 'function' || originalOpen[XHR_GUARD_MARK]) {
     return;
   }
 
