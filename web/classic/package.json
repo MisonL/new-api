@@ -66,7 +66,8 @@
     "i18n:lint:raw": "bun x i18next-cli lint",
     "i18n:lint": "node ../scripts/i18nLintGate.mjs",
     "i18n:lint:update-baseline": "node ../scripts/i18nLintGate.mjs --write-baseline",
-    "i18n:coverage": "node ../scripts/i18nCoverageGate.mjs"
+    "i18n:coverage": "node ../scripts/i18nCoverageGate.mjs",
+    "i18n:complete": "node ../scripts/i18nTranslationCompletenessGate.mjs"
   },
   "eslintConfig": {
     "extends": [

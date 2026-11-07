@@ -1,0 +1,7 @@
+{
+  "default:fr": [
+    "gpt-4, claude-3-opus, etc.",
+    "OpenAI, Anthropic, etc.",
+    "OpenAI, Anthropic, Google, etc."
+  ]
+}

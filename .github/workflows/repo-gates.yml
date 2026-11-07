@@ -149,6 +149,12 @@ jobs:
       - name: i18n lint gate
         working-directory: web/classic
         run: node ../scripts/i18nLintGate.mjs
+      # 完成度检查只读，覆盖两个前端：值仍原样等于 en 且形如英文句子的条目、
+      # 以及译文占位符与基准不一致的条目。2026-11-08 实测补齐前 classic
+      # fr/ru/ja/vi 各 176/175/215/210 条、web/default fr/vi 各 94/91 条。
+      - name: i18n translation completeness gate
+        working-directory: web
+        run: node scripts/i18nTranslationCompletenessGate.mjs
       # web/default 没有提取器，sync-i18n.mjs 只对齐语言文件、从不扫描源码；
       # 2026-11-07 实测 3 个代码在用的键在 6 个语言文件里全部缺失仍无人发现。
       # 该检查只读，扫 t('...') 字面量并校验 static-keys.ts 的登记是否落到 en.json。
