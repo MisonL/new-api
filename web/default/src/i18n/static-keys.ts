@@ -1,5 +1,7 @@
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
+// Enforced by scripts/i18nDefaultCoverageGate.mjs: every entry here must exist
+// in en.json (the fallback locale), so a registered-but-missing key fails CI.
 export const STATIC_I18N_KEYS = [
   // Header navigation
   'Home',

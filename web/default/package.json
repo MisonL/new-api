@@ -16,6 +16,7 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "i18n:sync": "node scripts/sync-i18n.mjs",
+    "i18n:coverage": "node ../scripts/i18nDefaultCoverageGate.mjs",
     "knip": "knip"
   },
   "dependencies": {

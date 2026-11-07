@@ -149,6 +149,12 @@ jobs:
       - name: i18n lint gate
         working-directory: web/classic
         run: node ../scripts/i18nLintGate.mjs
+      # web/default 没有提取器，sync-i18n.mjs 只对齐语言文件、从不扫描源码；
+      # 2026-11-07 实测 3 个代码在用的键在 6 个语言文件里全部缺失仍无人发现。
+      # 该检查只读，扫 t('...') 字面量并校验 static-keys.ts 的登记是否落到 en.json。
+      - name: web/default i18n coverage gate
+        working-directory: web/default
+        run: node ../scripts/i18nDefaultCoverageGate.mjs
 
   operational-contracts:
     runs-on: ubuntu-latest
