@@ -4822,7 +4822,7 @@
     "Ping interval must be shorter than the grace period.": "Ping interval must be shorter than the grace period.",
     "Playground settings": "Playground settings",
     "Please authorize via the Telegram widget": "Please authorize via the Telegram widget",
-    "Please use WeChat\\'s \"Scan QR Code\" feature to complete the binding process.": "Please use WeChat\\'s \"Scan QR Code\" feature to complete the binding process.",
+    "Please use WeChat's \"Scan QR Code\" feature to complete the binding process.": "Please use WeChat's \"Scan QR Code\" feature to complete the binding process.",
     "Preview updated": "Preview updated",
     "Probe interval (milliseconds)": "Probe interval (milliseconds)",
     "Random mode picks one selected template per request.": "Random mode picks one selected template per request.",
@@ -4946,6 +4946,9 @@
     "Frequency penalty": "Frequency penalty",
     "Presence penalty": "Presence penalty",
     "Max tokens": "Max tokens",
-    "Seed": "Seed"
+    "Seed": "Seed",
+    "无法发起微信登录，请刷新页面重试": "Unable to start WeChat login. Please refresh the page and try again.",
+    "无法发起 Telegram 登录，请刷新页面重试": "Unable to start Telegram login. Please refresh the page and try again.",
+    "无法发起 Telegram 绑定，请刷新页面重试": "Unable to start Telegram binding. Please refresh the page and try again."
   }
 }
