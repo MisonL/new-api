@@ -519,4 +519,87 @@ relaykit**。relaykit 用 `map[string]any` 承载该字段，Go map 在序列化
   --frozen-lockfile`（均 no changes）、i18n 覆盖度与 lint 门禁。
 - 后端 Go 代码本轮未改动，未重复跑 Go 测试套件。
 
+## 十四、web/default 本地化与后端 JSON 规则（2026-11-07）
+
+第十三节之后，对 web/default 的 i18n 与后端 `encoding/json` 规则执行情况做
+了专项核查。四条问题里三条属实并按 TDD 修复，一条经复核后修正了口径。
+
+### 14.1 web/default 无"代码→语言文件"覆盖度门禁（属实）
+
+第十三节给 web/classic 补了覆盖度门禁，但那只覆盖 classic。web/default
+既没有提取器（`package.json` 只有 `i18next` / `react-i18next`），
+`scripts/sync-i18n.mjs` 也只做语言文件之间的对齐，从不扫描源码。结果是
+"代码用了但语言文件没有"这类漂移完全不可见。
+
+实测缺口：`src/features/auth/api.ts` 第 85、100、118 行用
+`i18next.t()` 使用了三个中文键（微信登录、Telegram 登录、Telegram 绑定
+的失败提示），在 en / zh / ja / ru / fr / vi 六个文件里全部不存在。
+六个调用点都在 `catch` 里丢弃原错误、改用已翻译的通用文案，所以当前
+不会显示给用户，属潜伏缺陷；但只要有一个调用方改为展示 `error.message`，
+非中文用户就会看到原始中文。
+
+另有第四处：`Please use WeChat\'s "Scan QR Code" ...`。语言文件里该键
+被写成带一个真实反斜杠的 `WeChat\'s`，而代码里的运行时键是 `WeChat's`，
+两者永不匹配，这条提示在所有语言下都原样显示键字符串。由 `b47c444fd`
+引入。普通 grep 由于转义看起来"存在"，只有按运行时语义比对才能发现。
+
+修复：新增只读门禁 `web/scripts/i18nDefaultCoverageGate.mjs`，扫
+`src` 下 `t('...')` / `i18next.t('...')` 字面量键（跳过注释行、处理转义
+引号），要求 6 个语言文件都有；同时校验 `static-keys.ts` 的 550 个键都在
+`en.json`。CI 的 i18n-gate job 增加对应步骤。四个缺失键按 6 个语言补齐
+真实译文（不是留英文靠 fallback）。
+
+反向验证：删除 zh 的在用键后退出码 1 并输出文件名与调用点；向
+`static-keys.ts` 插入不存在的键后退出码 1 并点名该键；恢复后均通过。
+
+### 14.2 static-keys.ts 是死代码（属实，已接线）
+
+`web/default/src/i18n/static-keys.ts` 共 629 行、550 个键，文件注释称用于
+"不被正则捕获的动态键"，但全仓没有任何引用，也没有提取器读取它。而这
+550 个键确实都存在 en.json，所以内容本身没有错，缺的是执行机制。
+
+修复：14.1 的门禁把它纳入校验，并在文件头注明由谁读取。现在"登记了但
+语言文件里没有"会让 CI 失败。
+
+### 14.3 未翻译文案（属实，已全部翻译）
+
+sync 报告的未翻译条数：zh 260、ja 270、ru 269、fr 57、vi 57，并集 270 个
+键。抽查确认这些是"值与英文相同"的真实未翻译文案（`Add image URL`、
+`Capacity`、`All groups` 等），且全部在源码中有使用点。
+
+修复：逐语言补齐 913 条译文（含占位符 `{{count}}` / `{{name}}` /
+`{{amount}}` / `{{page}}` / `{{index}}` / `{{userGroup}}` 原样保留）。
+翻译后 `_sync-report.json` 六个语言 missing=0 extras=0 untranslated=0，
+sync 脚本删除了各语言已空的 `*.untranslated.json`。
+
+剩余与英文同值的约 90 至 340 条/语言，是品牌名、产品名、URL、技术术语
+（OpenAI、Claude、Stripe、API SDK 等），属刻意保留，不计入未翻译。
+
+### 14.4 后端直接调用 encoding/json（口径修正：活代码仅 1 处）
+
+先前报告"7 处违规"，复核后修正：
+
+- `dto/openai_request.go` 的 6 处全部位于标注 `// old code` 的块注释
+  （941-1112 行）内，不是可执行代码，因此不算违规。该块已被新实现取代，
+  本轮直接删除（git 历史可追溯）。
+- `relay/channel/claude/relay-claude.go:294` 的 `json.NewDecoder` 是唯一
+  活代码违规，改为 `common.NewJsonDecoderUseNumber`。该函数只比较 `string`
+  与 `json.Delim`，数字走默认分支，`UseNumber` 不改变行为；写法与仓库其余
+  6 处一致。
+
+复核后全仓业务代码（排除 common/pkg/tools 与测试）已无直接
+`json.Marshal` / `Unmarshal` / `NewDecoder` / `NewEncoder` 调用，仅剩注释
+中的文字引用。
+
+### 14.5 本轮验证汇总
+
+- 前端：`i18nDefaultCoverageGate` 0；`bun run i18n:sync` 六语言
+  missing/extras/untranslated 全 0；`typecheck` 0；`format:check` 0；
+  `eslint` 0 error（22 warning 既有）；`bun test` 293 通过；`build` 0。
+- 后端：`go build ./...` 通过；`go vet ./dto ./relay/channel/claude`
+  通过；`go test ./dto ./relay/channel/claude ./relay/channel/task/...`
+  全部 ok。
+- workflow YAML 解析通过。
+
+
 
