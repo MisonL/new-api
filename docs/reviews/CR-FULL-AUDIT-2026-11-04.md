@@ -775,3 +775,39 @@ default fr 120 / vi 108 / zh 17 / ru 9 / ja 7。抽样逐条确认了源码引�
 边界：译文为机器生成后的人工校对，未做母语者审校；单 token 值仍
 可能残留英文，见 16.2；`sync-i18n.mjs` 的 fr/vi 启发式未改动，
 其报告仍只作键对齐参考。
+
+## 十七、隔离开发环境同步到 HEAD（2026-11-08）
+
+排查时发现两个容器都落后于 HEAD：
+
+- 隔离开发容器 `new-api-dev-isolated-new-api-1` 构建于 `3491864`
+  （2026-11-04），落后 HEAD 88 个提交，其中 53 个是 Go 提交
+  （会话吊销、订阅预扣、渠道状态锁等修复都不在其中）。
+- 生产容器 `new-api` 仍是 `4527d7666`（2026-09-08），落后 817 个提交，
+  且是 HEAD 的祖先。发布时间另定，本轮不动。
+
+开发环境按 AGENTS.md 重建：
+
+1. `scripts/build-docker-local.sh new-api-local:dev` 第一次在
+   `go mod download` 阶段超时（`dial tcp 198.18.2.3:443: i/o timeout`）。
+   客户端环境变量 `HTTPS_PROXY` 不会自动进入 BuildKit，必须显式传
+   `--build-arg HTTP_PROXY/HTTPS_PROXY=http://host.docker.internal:7890`。
+2. 带 build-arg 重试成功，镜像标签 `new-api-local:dev`
+   （`sha256:7b9ad6e9150c`），VCS_REF 为 `9658d5ad5-dirty`——工作区有
+   另一个会话未提交的 `EditChannelModal.jsx` 与 `setting/sensitive_test.go`，
+   镜像因此带 dirty 标记，Go 二进制内容不受这两个文件影响。
+3. `docker compose -f deploy/compose/dev-isolated.yml --env-file
+   deploy/env/dev-isolated.env up -d --no-deps --force-recreate new-api`
+   重建容器。
+
+验证：
+
+- 容器 `healthy`；`/new-api --build-info` 输出
+  `commit=9658d5ad5930ef3504f62f257a6b8a4027d28a17-dirty`，与 HEAD
+  `9658d5ad5` 一致。
+- `curl -fsS http://127.0.0.1:3001/api/status` 返回 200 与正常 JSON。
+- 旧镜像已被替换清除；`docker system df` 的 Build Cache 为 0，无需
+  额外清理；本项目的容器、卷、网络均在使用中，无残留。
+
+边界：生产尚未更新；dev 镜像带 dirty 标记，若要得到严格等于 HEAD 的
+镜像，需要等并行会话提交或清理后进行干净构建。
