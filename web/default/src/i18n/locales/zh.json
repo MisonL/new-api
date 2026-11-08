@@ -3040,7 +3040,7 @@
     "Quota Settings": "额度设置",
     "Quota Types": "配额类型",
     "Quota Warning Threshold": "配额警告阈值",
-    "Quota:": "Quota:",
+    "Quota:": "额度：",
     "Qwen Code Header Passthrough": "Qwen Code 请求头透传",
     "Random": "随机",
     "Randomly select a key from the pool for each request": "每次请求从池中随机选择一个密钥",
