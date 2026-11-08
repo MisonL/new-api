@@ -575,6 +575,10 @@ sync 脚本删除了各语言已空的 `*.untranslated.json`。
 剩余与英文同值的约 90 至 340 条/语言，是品牌名、产品名、URL、技术术语
 （OpenAI、Claude、Stripe、API SDK 等），属刻意保留，不计入未翻译。
 
+（2026-11-08 复查更正：该结论不准确。复核发现其中混有 `Download Logs`、
+`Join Channel`、`Pay Method Name`、`Gift Codes` 等普通界面文案，已在
+第十六节按新口径补齐。）
+
 ### 14.4 后端直接调用 encoding/json（口径修正：活代码仅 1 处）
 
 先前报告"7 处违规"，复核后修正：
@@ -692,3 +696,82 @@ sync 脚本删除了各语言已空的 `*.untranslated.json`。
 边界：`repo-gates.yml` 仅本地存在，从未在 GitHub Actions 上真实运行；
 上述验证均为本地执行同一命令得到的结果。译文为机器生成基础上的人工
 校对，未逐条做母语者审校；语言覆盖为 fr/ru/ja/vi/zh-CN/zh-TW 六种。
+
+## 十六、翻译完成度口径收紧与短标签补齐（2026-11-08）
+
+### 16.1 上一版门禁的盲区
+
+第十五节的门禁只统计"去掉占位符后至少 3 个拉丁词、且至少一个词小写
+开头"的值。复核发现这放过了两类用户可见文案：
+
+- 两个词以内的标签：`All groups`、`Gift Codes`、`Download Logs`；
+- 全 Title Case 的标签：`Header Profile Applied`、`Change Deployment Name`、
+  `Total Available Hardware Resources`。
+
+实测（值与该语言 en.json 相同、含拉丁字母、排除 URL/JSON/标识符）：
+classic fr 188 / ja 222 / ru 179 / vi 221 / zh-CN 39 / zh-TW 38；
+default fr 120 / vi 108 / zh 17 / ru 9 / ja 7。抽样逐条确认了源码引用，
+`Pay Method Name` 等条目在中文界面同样显示英文。
+
+`web/default/scripts/sync-i18n.mjs` 的 `untranslated` 判定对 fr/vi 只匹配
+`the|and|or|to|with|please`，同一批条目也不会出现在 sync 报告里，两套
+工具都显示 0。
+
+### 16.2 门禁口径
+
+`web/scripts/i18nTranslationCompletenessGate.mjs` 改为：
+
+- 值等于基准值、去掉 `{{占位符}}` 后仍含拉丁字母，且不是 URL、邮箱、
+  JSON 片段、snake_case、单 token 标识符，即判为未翻译；
+- 占位符集合与基准不一致、或出现 `__ PH_n __` 残留，仍然判失败；
+- 豁免清单改为按基准值匹配，分两层：
+  - `shared`：两个前端共用，79 条，品牌/产品名（OpenAI、Claude、Baidu、
+    Telegram…）、协议字段（Client ID、Base URL、Token Endpoint…）、
+    时区标识（UTC+8 Singapore…）；
+  - `前端:语言`：只对特定语言豁免，16 条。法语中 `1 minute`、
+    `10 / page`、`EUR (Euro)`、`Top {{count}}` 与英文同形且是正确
+    法语，登记在 `classic:fr` / `default:fr`。
+
+边界：单 token 值不计入。`Create`、`Start` 这类单词标签与 `gpt-4o`、
+`bps`、`GET`、`true` 等品牌/型号/枚举无法静态区分，要覆盖需要一份
+极大的豁免清单，本轮明确不做。
+
+### 16.3 补齐
+
+按新口径补齐 842 条：
+
+| 前端 | 语言 | 条数 |
+| --- | --- | --- |
+| classic | fr | 149 |
+| classic | ja | 174 |
+| classic | ru | 155 |
+| classic | vi | 166 |
+| classic | zh-CN | 3 |
+| classic | zh-TW | 3 |
+| default | fr | 96 |
+| default | vi | 95 |
+| default | zh | 1 |
+
+译文保留全部 `{{...}}` 占位符；写回前逐条校验键集合、占位符集合、
+非空且不等于英文原文。中文条目按源串回填（`Pay Method Name` 等）。
+
+### 16.4 验证
+
+- `node web/scripts/i18nTranslationCompletenessGate.mjs` 退出码 0
+  （允许清单 95 条）。
+- 反向验证：
+  - 把 `classic/ja` 两条译文改回英文，退出码 1，点名
+    `下载日志 -> Download Logs` 与 `价格计算中... -> Calculating price...`；
+  - 删除 `classic/fr` 一条译文的 `{{ratio}}`，退出码 1，打印期望占位符；
+  - 两处恢复后退出码 0。
+- `bun run i18n:sync`（web/default）六语言 missing/extras/untranslated
+  全 0，未改写语言文件。
+- 两个前端的覆盖率门禁 0；classic i18n lint 62/62 基线，新增 0。
+- web/default：`format:check` 0；`eslint` 0 error（22 warning 既有）；
+  `typecheck` 0；`bun test` 293 通过；`build` 0。
+- classic：`prettier` 0；`eslint` 0 error（5 warning 既有）；
+  `bun test` 222 通过；`test:node` 164 通过；`build` 0。
+
+边界：译文为机器生成后的人工校对，未做母语者审校；单 token 值仍
+可能残留英文，见 16.2；`sync-i18n.mjs` 的 fr/vi 启发式未改动，
+其报告仍只作键对齐参考。
