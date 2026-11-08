@@ -7,15 +7,24 @@ import { fileURLToPath } from "node:url";
 // 既有的门禁只保证"键存在"（i18nCoverageGate / i18nDefaultCoverageGate），
 // 不保证"值被翻译过"。classic 的 i18nLintGate 查的是源码里的硬编码字符串。
 // 结果是 fr/ru/ja/vi 长期停留在一两百条英文文案上而无人发现
-// （2026-11-08 实测 classic fr 176 / ru 175 / ja 215 / vi 210，
-// web/default fr 94 / vi 91）。
+// （2026-11-08 实测补齐前 classic fr 180 / ru 179 / ja 216 / vi 211，
+// web/default fr 91 / vi 91；第二轮又发现短标签仍有 120 条级别缺口）。
 //
-// 判定口径刻意偏保守，只把"看起来是英文句子"的条目算作未翻译：
-//   - 去掉 {{占位符}} 后至少还剩 3 个拉丁词；
-//   - 至少有一个小写开头的词（全大写的缩写或品牌名不算）；
-//   - 排除 URL、邮箱、JSON/数组片段、单 token、snake_case 标识符。
-// 品牌名与专有名词默认会被上面的规则排除；确实需要保留英文的句子登记在
-// web/tests/i18nUntranslatedAllowlist.json，按 "前端:语言" 分组。
+// 判定口径：值等于基准值、去掉 {{占位符}} 后仍含拉丁字母，且不是
+// URL、邮箱、JSON/数组片段、snake_case 或单 token 标识符，即算未翻译。
+// 上一版只查"3 个词以上且含小写开头的句子"，漏掉了两词以内的标签
+// （All groups、Gift Codes）和全 Title Case 的标签
+// （Header Profile Applied、Change Deployment Name）。
+//
+// 品牌名、协议字段名、时区标识等确实应保留英文的文案登记在
+// web/tests/i18nUntranslatedAllowlist.json：
+//   - "shared"：两个前端所有语言共用；
+//   - "前端:语言"：只对特定语言豁免（例如法语中与英文同形的词）。
+// 清单按基准值匹配，因为译文缺口的判据是"值"而不是键。
+//
+// 边界：单 token 值不计入。Create、Start 这类单词标签与 gpt-4o、bps、
+// GET、true 等品牌/型号/枚举无法静态区分，要靠一份极大的豁免清单才
+// 能安全覆盖，本轮未做。
 //
 // 本脚本不写入任何文件。
 
@@ -50,7 +59,7 @@ function stripPlaceholders(value) {
   return value.replace(PLACEHOLDER, " ");
 }
 
-function looksLikeEnglishSentence(value) {
+function looksUntranslated(value) {
   if (typeof value !== "string") return false;
   const raw = value.trim();
   if (raw.length === 0) return false;
@@ -61,16 +70,16 @@ function looksLikeEnglishSentence(value) {
   if (/[\w.+-]+@[\w-]+\.[\w.]+/.test(raw)) return false;
   // Example/domain placeholders such as "example.com&#10;blocked-site.com".
   if (/example\.(com|org)|&#10;/.test(raw)) return false;
-  // Identifiers and single tokens.
+  // Identifiers and single tokens (bps, GET, gpt-4o, /v1, 100%).
   if (/[a-z]+_[a-z]+/.test(raw)) return false;
   if (/^[\w./-]+$/.test(raw)) return false;
 
-  const text = stripPlaceholders(raw);
-  const words = text.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
-  if (words.length < 3) return false;
-  // All-caps tokens and CamelCase brand names do not count as prose.
-  const lowerStart = words.filter((word) => /^[a-z]/.test(word));
-  return lowerStart.length > 0;
+  // Anything left that carries Latin letters is user-visible prose or a
+  // label: "Download Logs", "Gift Codes", "Header Profile Applied",
+  // "Type *", "Key: {{value}}".
+  const words =
+    stripPlaceholders(raw).match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+  return words.length > 0;
 }
 
 function readTranslation(file) {
@@ -105,11 +114,12 @@ for (const front of FRONTS) {
   for (const file of localeFiles) {
     const locale = file.replace(/\.json$/, "");
     const translations = readTranslation(path.join(front.localesDir, file));
-    const allowed = new Set(
-      allowlist[`${front.name}:${locale}`] ??
+    const allowed = new Set([
+      ...(allowlist.shared ?? []),
+      ...(allowlist[`${front.name}:${locale}`] ??
         allowlist[`${front.name}:*`] ??
-        [],
-    );
+        []),
+    ]);
     const untranslated = [];
     const placeholderIssues = [];
     for (const [key, baseValue] of Object.entries(base)) {
@@ -132,16 +142,16 @@ for (const front of FRONTS) {
       }
 
       if (value !== baseValue) continue;
-      if (!looksLikeEnglishSentence(baseValue)) continue;
-      if (allowed.has(key)) continue;
-      untranslated.push(key);
+      if (!looksUntranslated(baseValue)) continue;
+      if (allowed.has(baseValue)) continue;
+      untranslated.push(`${JSON.stringify(key)} -> ${JSON.stringify(baseValue)}`);
     }
     if (untranslated.length > 0) {
       failures.push(
-        `${front.name}/${locale}: ${untranslated.length} 条与 ${front.baseLocale} 相同且形如英文句子`,
+        `${front.name}/${locale}: ${untranslated.length} 条与 ${front.baseLocale} 相同`,
       );
-      for (const key of untranslated.slice(0, 12)) {
-        failures.push(`    ${JSON.stringify(key)}`);
+      for (const line of untranslated.slice(0, 12)) {
+        failures.push(`    ${line}`);
       }
       if (untranslated.length > 12) {
         failures.push(`    ... 另有 ${untranslated.length - 12} 条`);
@@ -175,6 +185,6 @@ const allowlistCount = Object.values(allowlist).reduce(
   0,
 );
 console.log(
-  `翻译完成度检查通过：${FRONTS.length} 个前端的所有语言均无未翻译英文句子（允许清单 ${allowlistCount} 条）。`,
+  `翻译完成度检查通过：${FRONTS.length} 个前端的所有语言均无未翻译的多词文案（允许清单 ${allowlistCount} 条，单 token 值除外）。`,
 );
 process.exit(0);
