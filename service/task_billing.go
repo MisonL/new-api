@@ -362,8 +362,29 @@ func resolveTaskGroupRatio(task *model.Task) float64 {
 // RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
 // 当任务成功且返回了 totalTokens 时，根据模型倍率和分组倍率重新计算实际扣费额度，
 // 与预扣费的差额进行补扣或退还。支持钱包和订阅计费来源。
+//
+// 只有 totalTokens、没有输入/输出拆分时，无法区分输出 token 的价格：任务模型
+// 普遍给输出定价数倍于输入，整体按输入价重算会系统性少收。因此这里不再估算，
+// 而是要求调用方提供拆分（见 RecalculateTaskQuotaByTokensWithUsage）；确实拿不到
+// 拆分时保持预扣额度不变，不能拿一个偏低的金额覆盖已按真实单价预扣的结果。
 func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) error {
 	if totalTokens <= 0 {
+		return nil
+	}
+	reason := fmt.Sprintf("token重算跳过：仅有 totalTokens=%d，缺少输入/输出拆分，保留预扣额度", totalTokens)
+	common.SysLog("task billing: " + reason)
+	return nil
+}
+
+// RecalculateTaskQuotaByTokensWithUsage 按输入/输出拆分重新计费：
+// inputTokens * modelRatio + outputTokens * modelRatio * completionRatio，
+// 再乘分组倍率与其它倍率。这是任务终态唯一应走的重算路径。
+func RecalculateTaskQuotaByTokensWithUsage(ctx context.Context, task *model.Task, inputTokens, outputTokens int) error {
+	if inputTokens < 0 || outputTokens < 0 {
+		return nil
+	}
+	total := inputTokens + outputTokens
+	if total <= 0 {
 		return nil
 	}
 
@@ -397,9 +418,16 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		}
 	}
 
-	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier
-	actualQuota := common.SafeQuotaIntFromFloat64(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
+	// 输出 token 按完成倍率计价；GetCompletionRatio 对未配置的模型返回默认值。
+	completionRatio := ratio_setting.GetCompletionRatio(modelName)
+	if completionRatio <= 0 {
+		completionRatio = 1
+	}
 
-	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
+	weightedTokens := float64(inputTokens) + float64(outputTokens)*completionRatio
+	actualQuota := common.SafeQuotaIntFromFloat64(weightedTokens * modelRatio * finalGroupRatio * otherMultiplier)
+
+	reason := fmt.Sprintf("token重算：in=%d, out=%d, completionRatio=%.2f, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f",
+		inputTokens, outputTokens, completionRatio, modelRatio, finalGroupRatio, otherMultiplier)
 	return RecalculateTaskQuota(ctx, task, actualQuota, reason)
 }

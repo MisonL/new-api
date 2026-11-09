@@ -43,7 +43,7 @@ func TestRecalculateTaskQuotaByTokensUsesUserGroupSpecialRatio(t *testing.T) {
 	require.NoError(t, model.DB.Create(task).Error)
 
 	// vip 用户走 default 组的专属倍率是 0.5：1000 tokens * 1 * 0.5 = 500。
-	RecalculateTaskQuotaByTokens(nil, task, 1000)
+	RecalculateTaskQuotaByTokensWithUsage(nil, task, 1000, 0)
 
 	require.Equal(t, 500, task.Quota,
 		"重算必须使用 (用户分组, 使用分组) 查询专属倍率；按 (default, default) 查不中会回落到 1.0 并多扣")
@@ -84,7 +84,7 @@ func TestRecalculateTaskQuotaByTokensPrefersFrozenGroupRatio(t *testing.T) {
 	}
 	require.NoError(t, model.DB.Create(task).Error)
 
-	RecalculateTaskQuotaByTokens(nil, task, 1000)
+	RecalculateTaskQuotaByTokensWithUsage(nil, task, 1000, 0)
 
 	require.Equal(t, 500, task.Quota,
 		"重算必须沿用提交时冻结的分组倍率，不能按当前配置重新解析")

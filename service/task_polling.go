@@ -2081,9 +2081,12 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 	if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
 		return RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整")
 	}
-	// 2. 回退到 token 重算
-	if taskResult.TotalTokens > 0 {
-		return RecalculateTaskQuotaByTokens(ctx, task, taskResult.TotalTokens)
+	// 2. 回退到 token 重算。TaskInfo 只给 total 时无法区分输入/输出单价，
+	//    此时保持预扣额度不变，不能整体按输入价重算而少收输出 token。
+	if taskResult.TotalTokens > 0 && taskResult.CompletionTokens > 0 &&
+		taskResult.CompletionTokens <= taskResult.TotalTokens {
+		return RecalculateTaskQuotaByTokensWithUsage(ctx, task,
+			taskResult.TotalTokens-taskResult.CompletionTokens, taskResult.CompletionTokens)
 	}
 	// 3. 无调整，保持预扣额度
 	return nil
