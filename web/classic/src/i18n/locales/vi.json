@@ -3895,7 +3895,7 @@
     "移除 Bedrock 不兼容的 tools.*.custom.input_examples 字段。": "Xóa trường tools.*.custom.input_examples không tương thích với Bedrock.",
     "移除 functionResponse.id 字段": "Xóa trường functionResponse.id",
     "移除 One API 的版权标识必须首先获得授权，项目维护需要花费大量精力，如果本项目对你有意义，请主动支持本项目": "Việc xóa dấu bản quyền One API trước tiên phải được ủy quyền. Việc bảo trì dự án đòi hỏi rất nhiều nỗ lực. Nếu dự án này có ý nghĩa với bạn, vui lòng chủ động ủng hộ dự án này.",
-    "移除上游不接受的 image_generation 工具对象。": "Remove image_generation tool objects rejected by an upstream.",
+    "移除上游不接受的 image_generation 工具对象。": "Xóa các đối tượng công cụ image_generation bị thượng nguồn từ chối.",
     "移除请求头模板": "Xóa mẫu header",
     "移除请求头模板 {{name}}": "Xóa mẫu header {{name}}",
     "空": "Trống",

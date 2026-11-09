@@ -3949,7 +3949,7 @@
     "移除 Bedrock 不兼容的 tools.*.custom.input_examples 字段。": "Supprimer le champ tools.*.custom.input_examples incompatible avec Bedrock.",
     "移除 functionResponse.id 字段": "Supprimer le champ functionResponse.id",
     "移除 One API 的版权标识必须首先获得授权，项目维护需要花费大量精力，如果本项目对你有意义，请主动支持本项目": "La suppression de la marque de copyright de One API doit d'abord être autorisée. La maintenance du projet demande beaucoup d'efforts. Si ce projet a du sens pour vous, veuillez le soutenir activement.",
-    "移除上游不接受的 image_generation 工具对象。": "Remove image_generation tool objects rejected by an upstream.",
+    "移除上游不接受的 image_generation 工具对象。": "Supprimer les objets de l'outil image_generation rejetés par l'amont.",
     "移除请求头模板": "Supprimer le modèle d'en-têtes",
     "移除请求头模板 {{name}}": "Supprimer le modèle d'en-têtes {{name}}",
     "空": "Vide",
