@@ -198,6 +198,11 @@ type RelayInfo struct {
 	SubscriptionPlanTitle string
 	// RequestId is used for idempotent pre-consume/refund
 	RequestId string
+	// BillingAttemptKey is the idempotency key of the current billing session.
+	// It normally equals RequestId. Bootstrap recovery refunds the previous
+	// pre-consume and rebuilds the session for the same RelayInfo; a refunded
+	// key can never be pre-consumed again, so the retry must use a new key.
+	BillingAttemptKey string
 	// UpstreamRequestId is the request ID returned by the upstream provider.
 	UpstreamRequestId     string
 	UpstreamRequestPath   string
@@ -369,6 +374,9 @@ func (info *RelayInfo) ResetBillingMetadata(c *gin.Context) {
 	info.SubscriptionPlanTitle = ""
 	info.SubscriptionAmountTotal = 0
 	info.SubscriptionAmountUsedAfterPreConsume = 0
+	// 上一轮的订阅预扣已被退款并标记为 refunded，同一幂等键不能再预扣。
+	// 重建计费会话前换用新键；RequestId 本身保持原值供日志与审计关联。
+	info.BillingAttemptKey = info.RequestId + "-" + common.GetRandomString(8)
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
@@ -716,12 +724,13 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	info := &RelayInfo{
 		Request: request,
 
-		RequestId:  reqId,
-		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
-		UsingGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
-		UserGroup:  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
-		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
-		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
+		RequestId:         reqId,
+		BillingAttemptKey: reqId,
+		UserId:            common.GetContextKeyInt(c, constant.ContextKeyUserId),
+		UsingGroup:        common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		UserGroup:         common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+		UserQuota:         common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
+		UserEmail:         common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 
