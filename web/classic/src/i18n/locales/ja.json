@@ -1718,7 +1718,7 @@
     "在等待恢复期间发送 : PING，帮助客户端保持连接。": "Sends : PING while waiting for recovery to help clients keep the connection alive.",
     "在置顶列表中上移": "ピン留めリストで上へ移動",
     "在置顶列表中下移": "ピン留めリストで下へ移動",
-    "在该时间窗口内持续探测可用渠道，超时后返回真实错误。": "Continuously probes available channels within this window and returns the real error after timeout.",
+    "在该时间窗口内持续探测可用渠道，超时后返回真实错误。": "このウィンドウ内で利用可能なチャネルを継続的にプローブし、タイムアウト後に実際のエラーを返します。",
     "在默认列表基础上新增一个分组": "デフォルトリストに新しいグループを追加",
     "场景：站点提供两个价格档位，用户可以按需选择": "シナリオ：サイトが2つの料金プランを提供し、ユーザーが選択可能",
     "场景：站点有 standard 和 premium 两个用户可选分组。希望 vip 用户额外看到 exclusive 分组，同时不再看到 standard 分组": "シナリオ：standardとpremiumが選択可能。vipユーザーにexclusiveを追加し、standardを非表示にしたい",

@@ -55,6 +55,9 @@ const PLACEHOLDER = /\{\{[^}]*\}\}/g;
 // English words like "API Key".
 const NON_LATIN_SCRIPT = /[぀-ヿ㐀-䶿一-鿿豈-﫿]/;
 
+// Latin-script locales (fr, vi) legitimately use Latin letters, so a value is
+// judged by sentence shape below instead of the script alone.
+
 function stripPlaceholders(value) {
   return value.replace(PLACEHOLDER, " ");
 }
@@ -122,6 +125,45 @@ const failures = [];
 const PLACEHOLDER_ALL = /\{\{[^}]*\}\}/g;
 const PLACEHOLDER_ARTIFACT = /__\s*PH_\d+\s*__/;
 
+// Values that are rewritten but whose body is still an English sentence:
+// "Only configured combinations are overridden. Unconfigured combinations
+// still use the token group's base ratio." These pass the equality check
+// because the text differs from the base, yet a fr/ru/vi user still reads
+// English. The signal is English function words together with a high overlap
+// Measured 2026-11-09 on the whole catalog: catches every known case while
+// ignoring real French/Russian/Vietnamese prose and path-only examples.
+const ENGLISH_FUNCTION_WORDS =
+  /\b(the|and|is|are|will|when|with|this|that|for|from|not|you|your|have|has|can|should|if|of|to|in|on|by|it|all|any|be|was|were|but|or|as|at|which|their|they|more|only|used|use|using|configure|configured|selected|available|default|new|set|see|same|without|check|append|add|delete|confirm|enabled|enabling|creating|created)\b/gi;
+const ENGLISH_SENTENCE_MIN_WORDS = 6;
+const ENGLISH_FUNCTION_WORD_MIN_HITS = 2;
+const ENGLISH_FUNCTION_WORD_RATIO = 0.25;
+const ENGLISH_BASE_WORD_OVERLAP = 0.55;
+// Any letter outside basic Latin means the value really is in another
+// language (Cyrillic, kana, Han, accented French/Vietnamese). Technical
+// identifiers embedded in Cyrillic prose are not evidence of English.
+const NON_LATIN_LETTER = /(?![a-zA-Z])\p{L}/u;
+
+function looksLikeEnglishSentenceBody(value, baseValue) {
+  if (NON_LATIN_LETTER.test(value)) return false;
+  const plain = stripPlaceholders(value);
+  const words = plain.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+  if (words.length < ENGLISH_SENTENCE_MIN_WORDS) return false;
+  const hits = (plain.match(ENGLISH_FUNCTION_WORDS) ?? []).length;
+  if (
+    hits < ENGLISH_FUNCTION_WORD_MIN_HITS ||
+    hits / words.length < ENGLISH_FUNCTION_WORD_RATIO
+  ) {
+    return false;
+  }
+  const baseWords = new Set(
+    (stripPlaceholders(baseValue).match(/[A-Za-z][A-Za-z'-]*/g) ?? []).map((w) =>
+      w.toLowerCase(),
+    ),
+  );
+  const overlap = words.filter((w) => baseWords.has(w.toLowerCase())).length;
+  return overlap / words.length >= ENGLISH_BASE_WORD_OVERLAP;
+}
+
 for (const front of FRONTS) {
   const base = readTranslation(
     path.join(front.localesDir, `${front.baseLocale}.json`),
@@ -164,10 +206,16 @@ for (const front of FRONTS) {
         continue;
       }
 
-      if (value !== baseValue) continue;
-      if (!looksUntranslated(baseValue)) continue;
-      if (allowed.has(baseValue)) continue;
-      untranslated.push(`${JSON.stringify(key)} -> ${JSON.stringify(baseValue)}`);
+      if (value === baseValue) {
+        if (!looksUntranslated(baseValue)) continue;
+        if (allowed.has(baseValue)) continue;
+        untranslated.push(`${JSON.stringify(key)} -> ${JSON.stringify(baseValue)}`);
+        continue;
+      }
+      // Rewritten but still English prose: the equality check cannot see it.
+      if (!allowed.has(baseValue) && looksLikeEnglishSentenceBody(value, baseValue)) {
+        untranslated.push(`${JSON.stringify(key)} -> ${JSON.stringify(value)}`);
+      }
     }
     if (untranslated.length > 0) {
       failures.push(

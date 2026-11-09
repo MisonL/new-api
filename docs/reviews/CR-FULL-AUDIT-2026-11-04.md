@@ -958,3 +958,73 @@ default 的五个非英文语言里共 40 条（`{{count}} logs deleted`、
 
 单 token 标签仍不覆盖（`Create`、`Start`、`Processing` 与 `gpt-4o`、
 `bps`、`true` 无法静态区分）；本轮只保证"多词英文句子"零残留。
+
+---
+
+## 二十一、门禁漏判之二：改写过但仍为英文的句子（2026-11-09）
+
+### 21.1 发现
+
+第二十节补完后，门禁只判"值等于基准"。抽查 classic 的 fr/ru/vi 发现
+另一类残留：译文值与 `en.json` 不同，但仍是英文句子，例如
+
+- `"When token group is set to auto, groups are selected in order of priority"`
+  （基准为 `"When the token group is set to auto, the system selects
+  available groups in list order; earlier entries have higher priority."`）；
+- `"Without rules, all users see the same dropdown:"`
+  （基准为 `"When no rules are configured, all users see the same dropdown:"`）；
+- `"Confirm delete this group?"`（基准为 `"Delete this group?"`）。
+
+这是翻译流水线"顺手改写英文"的产物：删冠词、换代词、微调大小写。
+因为值不等于基准，完成度门禁完全看不见。
+
+### 21.2 判定口径的三次迭代
+
+1. 只看英文功能词占比（≥0.35）：实测在 fr 上产生大量误报，因为法语
+   也含大量拉丁字母，且 `Create and Manage Groups` 之类标签同样命中。
+2. 改为"功能词占比 ≥0.25 且与基准词重合 ≥0.55"，并先排除含非 ASCII
+   字母的值。全量扫描 66 条命中，逐条核对**全部是真实英文残留**，
+   零误报。
+3. 增加下限（至少 6 个英文词、至少 2 个功能词命中），排除
+   `ex. : /var/cache/new-api` 这类只剩路径加前缀的短片段，以及
+   俄文真译文中夹带 `enabled=true`、`ttl_hours=0` 的情况。
+
+产物为 `looksLikeEnglishSentenceBody(value, baseValue)`：只检查
+`value !== baseValue` 的条目，豁免清单按基准值匹配。
+
+### 21.3 补齐范围
+
+- 第一轮：classic fr/ru/vi 各 21 条、classic ja 1 条、default ja 1 条、
+  default vi 1 条，共 67 条改写英文句子补为对应语言译文。
+- 收紧后新暴露：classic fr/ru/vi 各 11 条、default vi 1 条，共 34 条，
+  同样补齐。
+- 合计 67 + 34 = 101 条。所有写回都按原始文本逐行替换，未用 `JSON.stringify`
+  整体序列化；`web/default` 六个语言文件的混淆键
+  `footer.newapi.projectAttributionSuffix` 逐文件核对仍为转义形式。
+
+### 21.4 验证（本轮实跑）
+
+- `cd web && node scripts/i18nTranslationCompletenessGate.mjs`
+  退出码 0，输出"允许清单 96 条"。
+- 反向验证：将 `classic/fr` 的 `暂无分组，点击下方按钮添加` 从
+  `"Aucun groupe pour le moment..."` 改为
+  `"No groups at the moment. Click the button below to add one."`，
+  门禁退出码 1 并准确点名该键；恢复后退出码 0。
+  （第一次用 `There are no groups at all right now in this view.` 做变异体
+  未被拦截：它与基准词重合率为 0，本就不是"改写英文"形态。改用具
+  高词重合的变异体后验证通过。）
+- `node --test tests/i18nStructuredValues.test.mjs`：3 通过 / 0 失败。
+- `web/default` 六个语言文件的 canary 转义键逐文件核对为 `true`；
+  classic 的 fr/ru/vi/ja 在 HEAD 中本来就没有该键，未作比较基准。
+- 阴性样本：新规则在全部 10 个语言文件、约 5.5 万条"值不等于基准"
+  的现有译文上无命中，即零误报。
+
+### 21.5 边界
+
+该规则针对"英文原句被小幅改写"这一类残留，不覆盖：
+
+- 用完全不同的英文措辞重写（词重合率低）；
+- 少于 6 个英文词的短标签；
+- 单 token 值（第二十节已说明）。
+
+这三类仍需人工抽查或扩充豁免清单，本轮未扩大口径以免误伤真译文。

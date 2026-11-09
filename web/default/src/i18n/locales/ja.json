@@ -341,7 +341,7 @@
     "API key from the provider": "プロバイダからのAPIキー",
     "API key is required": "APIキーが必要です",
     "API Key mode (does not support batch creation)": "APIキー モード（一括作成には対応していません）",
-    "API Key mode: use APIKey|Region": "APIキーモード: use APIKey | Region",
+    "API Key mode: use APIKey|Region": "APIキーモード: APIKey | Region を使用",
     "API Key updated successfully": "APIキーが正常に更新されました",
     "API Keys": "APIキー",
     "API Private Key": "API 秘密鍵",
