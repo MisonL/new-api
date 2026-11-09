@@ -78,9 +78,16 @@ func SecureVerificationRequired() gin.HandlerFunc {
 }
 
 func clearSecureVerificationSession(session sessions.Session) {
+	ClearSecureVerificationState(session)
+	_ = session.Save()
+}
+
+// ClearSecureVerificationState 只删除验证标记，不保存会话。
+// 登录签发路径随后会统一调用 session.Save()，若这里再保存一次，
+// 响应会带两个同名的 Set-Cookie，客户端可能取到缺少后续字段的那个。
+func ClearSecureVerificationState(session sessions.Session) {
 	session.Delete(SecureVerificationSessionKey)
 	session.Delete(secureVerificationMethodSessionKey)
-	_ = session.Save()
 }
 
 // OptionalSecureVerification 可选的安全验证中间件

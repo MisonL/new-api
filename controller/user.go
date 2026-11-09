@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -145,6 +146,10 @@ func setupLoginWithResult(user *model.User, c *gin.Context) (bool, string) {
 	session.Set("role", user.Role)
 	session.Set("status", user.Status)
 	session.Set("group", user.Group)
+	// step-up 验证状态是会话级凭证，不绑定用户。同一浏览器换账号登录时
+	// 必须清除，否则 B 会继承 A 在 300 秒内的安全验证，直接放行
+	// 取渠道密钥这类敏感操作。
+	middleware.ClearSecureVerificationState(session)
 	// 记住签发时的会话世代：密码修改/重置会递增数据库里的值，authHelper
 	// 比对不一致即拒绝这个 30 天 Cookie，实现服务端吊销。
 	session.Set(constant.SessionKeyIDEpoch, user.SessionEpoch)
