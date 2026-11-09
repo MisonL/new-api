@@ -1102,3 +1102,76 @@ HEAD~1:<file>` 与 `git show <commit>:<file>` 逐键比较新旧值，统计
 lint、完成度门禁（两前端）、default 覆盖度；`web/tests/*.test.mjs`
 （含 `i18nStructuredValues.test.mjs`）由 `bun run test:node` 执行，该命令
 在 `frontend-checks` 中接线。本轮无需改动。
+
+---
+
+## 二十三、多代理审查复核与修复（2026-11-09）
+
+### 23.1 过程
+
+六个只读审查代理（后端、前端、部署与开发环境、计费与中继、安全与依赖，外加 Codex 独立复审）
+并行审查当前源码与隔离开发环境，共报出 10 条 P1。主会话逐条回到代码复核，
+**8 条被推翻**，2 条成立；另有 3 条 P2 经复核后修复或确认无需修改。
+
+### 23.2 推翻的结论（附依据）
+
+- 只读代理 nginx 缺 `js_import`：模板 0 处该指令，`nginx:1.29-alpine` 下 `nginx -t` 通过。
+- 只读守卫漏掉 `/api/user/self/token`：真实路由是 `selfRoute := userRoute.Group("/")`
+  加 `/token`，即 `/api/user/token`，实测返回 401。
+- `topup/self`、`checkin` 是写接口：`GetUserTopUps`、`GetCheckinStatus` 只读。
+- Claude→OpenAI 转换重复计费：日志 430437 与 429442 的 prompt/completion/cache 相同、
+  quota 同为 3113，差异只在转换链。
+- 订阅失败漏退 1：预扣 `PreConsumed=1`，`RefundSubscriptionPreConsume` 退 `-1`，净额为 0。
+- `extraReserved` 重复退款：`Reserve` 同步抬高 `amount`，退款已全额。
+- PG 索引需加表前缀、各语言 `_one`/`_other` 错位：代理自查后自行推翻。
+- 任务计费重试计数不落库：`RestoreSnapshot` 写回的是已自增的内存 `PrivateData`。
+
+### 23.3 修复
+
+**1. 任务终态按 token 重算漏乘 completionRatio（`service/task_billing.go`）**
+
+原实现 `totalTokens × modelRatio × groupRatio` 完全不含 `CompletionRatio`，输出 token
+按输入价计费。改为：
+
+- 新增 `RecalculateTaskQuotaByTokensWithUsage(ctx, task, inputTokens, outputTokens)`，
+  计价口径为 `input + output × completionRatio`。
+- `RecalculateTaskQuotaByTokens(ctx, task, totalTokens)` 保留但不再估算：只给总量、
+  拿不到拆分时保持预扣额度并记日志，不再用一个偏低金额覆盖真实预扣。
+- `service/task_polling.go` 终态结算改用 `TotalTokens - CompletionTokens` 作为输入、
+  `CompletionTokens` 作为输出；缺 `CompletionTokens` 时保持预扣。
+
+测试：`service/task_billing_completion_ratio_test.go`、
+`service/task_billing_split_settle_test.go`；两个用例都做过反向验证（回退修复后变红）。
+
+**2. 开发环境 redis 端口回归文档口径（`deploy/env/dev-isolated.env`）**
+
+运行中的 redis 曾映射到 6381，与 `docker-compose.dev.yml` 的 legacy 栈默认 6381 冲突，
+而 `compose-healthcheck-contract.py` 与 env 示例都声明 isolated=6380。
+Redis 当前 DBSIZE=0（无缓存需保留），已改回 6380 并重建 redis 容器，
+`compose-healthcheck-contract.py` / `.test.py` 均通过。
+
+**3. 换账号登录继承 step-up 验证状态（`controller/user.go`、`middleware/secure_verification.go`）**
+
+`setupLoginWithResult` 签发会话时不清除 `secure_verified_at` / `secure_verified_method`，
+同一浏览器内 B 登录后可在 300 秒内继承 A 的安全验证，直接访问取渠道密钥等敏感动作。
+新增 `middleware.ClearSecureVerificationState(session)`（只删除、不保存，避免与登录路径的
+`session.Save()` 产生两个 Set-Cookie），在会话字段写入后、保存前调用。
+
+测试：`controller/secure_verification_login_test.go`，反向验证过（修复前 `verified_at=1` 残留）。
+首版实现误调用了会自行保存的 `ClearSecureVerification`，导致
+`TestSetupLoginRecordsSessionEpoch` 变红，已改为无副作用的变体。
+
+### 23.4 未修改并说明理由
+
+- 管理员限流豁免读会话角色快照（`middleware/rate-limit.go`）：代码注释已明确这是有界
+  取舍（下一次经 UserAuth 的请求会刷新），且该中间件在 UserAuth 之前执行，无法依赖
+  已回读的用户记录。改动会让豁免在每次请求都打一次用户缓存，不符合其设计意图。
+- OAuth 注册不校验 `email_verified`、`X-Forwarded-Proto` 无条件信任：属配置与环境
+  边界，需要产品决策，未在本轮改动。
+
+### 23.5 验证
+
+- `go vet ./controller ./middleware ./service` 退出码 0。
+- `go test ./controller ./middleware ./service` 全部 ok。
+- `python3 -I scripts/compose-healthcheck-contract.py` 与 `.test.py` 通过。
+- 隔离开发环境：redis 回到 6380 且 healthy，new-api 保持 healthy，`/api/status` 200。
