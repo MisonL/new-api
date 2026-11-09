@@ -109,6 +109,9 @@ func (s *BillingSession) Refund(c *gin.Context) {
 			common.SysLog("error refunding billing source: " + err.Error())
 			recordRefundFailure(s.relayInfo.UserId, s.relayInfo.RequestId, funding.Source(), s.preConsumedQuota, s.relayInfo.TokenId, err)
 		}
+		// 补充预扣不写入预扣记录，其发生时间晚于预扣记录，无法用预扣记录的
+		// 创建时间判断周期归属；这里保持直接回滚，跨周期的补充预扣退款仍是
+		// 已知的窄窗口边界。
 		if extraReserved > 0 && funding.Source() == BillingSourceSubscription && subscriptionId > 0 {
 			if err := model.PostConsumeUserSubscriptionDelta(subscriptionId, -int64(extraReserved)); err != nil {
 				common.SysLog("error refunding subscription extra reserved quota: " + err.Error())
@@ -400,10 +403,16 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		if subConsume <= 0 {
 			subConsume = 1
 		}
+		// BillingAttemptKey 由 NewRelayInfo 初始化为 RequestId，bootstrap 恢复
+		// 重建会话时轮换；为空时回退到 RequestId，保持手工构造 RelayInfo 的旧行为。
+		billingRequestId := relayInfo.BillingAttemptKey
+		if billingRequestId == "" {
+			billingRequestId = relayInfo.RequestId
+		}
 		session := &BillingSession{
 			relayInfo: relayInfo,
 			funding: &SubscriptionFunding{
-				requestId: relayInfo.RequestId,
+				requestId: billingRequestId,
 				userId:    relayInfo.UserId,
 				modelName: relayInfo.OriginModelName,
 				amount:    subConsume,

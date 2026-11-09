@@ -1316,7 +1316,26 @@ func SettleUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
 	return applyUserSubscriptionDelta(userSubscriptionId, delta, true)
 }
 
+// SettleUserSubscriptionDeltaForRequest 是 SettleUserSubscriptionDelta 的
+// requestId 感知版本，用于请求终态结算与异步任务差额结算。跨周期的负向
+// 差额按退款同样处理：重置已经把这个周期的预扣从用量口径里抹掉，再回落
+// 只会冲掉新周期的真实用量。跨周期的正向差额仍须落账。
+func SettleUserSubscriptionDeltaForRequest(requestId string, userSubscriptionId int, delta int64) error {
+	return applyUserSubscriptionDeltaForRequest(requestId, userSubscriptionId, delta, true)
+}
+
+// PostConsumeUserSubscriptionDeltaForRequest 是 PostConsumeUserSubscriptionDelta
+// 的 requestId 感知版本，用于请求失败退款与异步任务退款。跨周期语义同上：
+// 只结束差额，不调整新周期用量。
+func PostConsumeUserSubscriptionDeltaForRequest(requestId string, userSubscriptionId int, delta int64) error {
+	return applyUserSubscriptionDeltaForRequest(requestId, userSubscriptionId, delta, false)
+}
+
 func applyUserSubscriptionDelta(userSubscriptionId int, delta int64, allowOverage bool) error {
+	return applyUserSubscriptionDeltaForRequest("", userSubscriptionId, delta, allowOverage)
+}
+
+func applyUserSubscriptionDeltaForRequest(requestId string, userSubscriptionId int, delta int64, allowOverage bool) error {
 	if userSubscriptionId <= 0 {
 		return errors.New("invalid userSubscriptionId")
 	}
@@ -1324,8 +1343,35 @@ func applyUserSubscriptionDelta(userSubscriptionId int, delta int64, allowOverag
 		return nil
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if delta < 0 && requestId != "" {
+			crossPeriod, err := preConsumeRecordPrecedesLastResetTx(tx, requestId, userSubscriptionId)
+			if err != nil {
+				return err
+			}
+			if crossPeriod {
+				return nil
+			}
+		}
 		return applyUserSubscriptionDeltaTx(tx, userSubscriptionId, delta, allowOverage)
 	})
+}
+
+// preConsumeRecordPrecedesLastResetTx 判断该请求的订阅预扣是否发生在订阅最近一次
+// 周期重置之前。没有任何预扣记录时视为同周期（保持原行为）。
+func preConsumeRecordPrecedesLastResetTx(tx *gorm.DB, requestId string, userSubscriptionId int) (bool, error) {
+	var record SubscriptionPreConsumeRecord
+	err := tx.Where("request_id = ?", requestId).Limit(1).Find(&record).Error
+	if err != nil {
+		return false, err
+	}
+	if record.Id == 0 || record.Status != "consumed" || record.UserSubscriptionId != userSubscriptionId {
+		return false, nil
+	}
+	var sub UserSubscription
+	if err := tx.Select("last_reset_time").Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
+		return false, err
+	}
+	return sub.LastResetTime > record.CreatedAt, nil
 }
 
 // postConsumeUserSubscriptionDeltaTx applies the delta on the caller's
