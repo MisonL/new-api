@@ -1247,3 +1247,104 @@ false 后，两个跨周期用例变红；回退任务接线后，服务层两�
 边界：以上是单元与包级测试，未在真实 MySQL/PostgreSQL 上复跑订阅结算链路；
 跨周期守卫使用的时间字段（`CreatedAt`、`LastResetTime`）均为 unix 秒，
 三库同构，未见方言差异。
+
+## 二十五、多代理全维度复审（2026-11-10）
+
+### 25.1 方法与环境基线
+
+六个只读审查代理分别覆盖计费与中继、认证与安全、前端、部署与隔离开发环境、
+数据模型与三库兼容、运行时黑盒实测；Codex 独立复审两次（全维度一次受 40 分钟
+上限截断，窄范围一次完成）。全部结论由主会话回到代码或运行环境逐条复核后才
+采用，误报与"结论正确但严重度虚高"的条目已剔除。
+
+基线：HEAD 起于 79c1cfebe；审查期间提交了本轮修复，最终 HEAD 见 25.6。
+隔离开发环境 new-api-dev-isolated 三容器 healthy，new-api 映射 127.0.0.1:3001，
+运行镜像 commit 799d828fc。
+
+### 25.2 已修复
+
+| 提交 | 问题 | 证据 |
+| --- | --- | --- |
+| 0fcd78123 | 跨周期守卫先读 `LastResetTime` 再加锁，重置可能插在两步之间；`taskAdjustFunding` 无条件解引用 `BillingContext`，历史任务行会空指针崩溃 | `model/subscription.go` 新增 `lockSubscriptionLastResetTime`；`service/task_billing.go:95-105` |
+| 5d74d6e94 | 换账号登录只清 `secure_verified_at/method`，`secure_passkey_ready_at` 残留；B 可不提交 WebAuthn 断言直接 step-up | `middleware/secure_verification.go:88-98`、`controller/secure_verification.go:20` |
+| 051786500 | `RELAY_TIMEOUT=0`（默认）时 client 无整体超时，流式扫描器超时又在收到响应后才启动；上游不发响应头会长期占用连接 | `service/http_client.go` 共享与代理 Transport 设置 `ResponseHeaderTimeout`，新增 `RELAY_RESPONSE_HEADER_TIMEOUT`（默认 300 秒，0 关闭） |
+| 80d001b94 | 旧版 `/oauth` 回调页对缺失/伪造 provider 仍 `getSelf` 并 `setUser`，诱饵链接可把已有会话塞进未参与的流程 | `web/default/src/routes/(auth)/oauth.tsx` 限已知回调 provider，wechat 仍要求 code |
+| 1e0c5e826 | responses compact 迁移标记用 `Save`，双 master 同时启动时后写入者撞主键阻断启动 | `model/main.go` 改为 `ON CONFLICT DO NOTHING`，与 retryStatusCodes 迁移对齐 |
+| f713e8ef1 | 补充无计费上下文的任务结算回归测试 | `service/task_billing_cross_period_test.go` |
+
+验证：`go vet ./controller ./model ./relay/common ./service` 退出码 0；
+`go test ./controller ./model ./service -count=1` 全部 ok；
+`bunx eslint "src/routes/(auth)/oauth.tsx"` 无输出、`bunx tsc -b` 退出码 0；
+`python3 -I scripts/compose-healthcheck-contract.py` 三段 passed。
+
+### 25.3 复核成立但本轮未修
+
+1. **任务终态先落库后结算的崩溃窗口（P1）**：`service/task_polling.go:1759-1793`
+   先 CAS 提交终态，再 `settleTaskBillingOnComplete` / `RefundTaskQuota`；轮询
+   与超时清扫都排除终态（`model/task.go:1140,1170`），没有持久化的待结算标记。
+   进程在两步之间崩溃即永久丢失这一笔差额。error 路径会 `RevertTaskTerminalTransition`
+   重试，崩溃路径不会。修法需要"终态+待结算"原子落库与幂等补偿扫描。
+2. **MJ 任务行缺订阅计费元数据（P2）**：`controller/midjourney.go` /
+   `relay/mjproxy_handler.go` 未写 `BillingSource`/`SubscriptionId`/`BillingContext`，
+   `taskIsSubscription` 为 false，订阅扣费的任务失败退款会退回钱包
+   （`service/task_billing.go:95-105`）。
+3. **订阅预扣幂等重复命中的用量语义（P2）**：`model/subscription.go:1072-1080,1118-1133`
+   把 `AmountUsedBefore/After` 都设成本周期累计值，新预扣路径用的是预扣前后值；
+   订阅额度通知与日志剩余额度因此偏低。
+4. **`/api/verification` 邮箱枚举（P2）**：`controller/misc.go:436-442` 未认证即可
+   区分邮箱是否注册；限流只降速不消除 oracle。
+5. **桌面端 OAuth 确认 Cookie 的 Secure 不识别代理 TLS（P2）**：
+   `controller/oauth_desktop_confirm.go:162-172` 用 `c.Request.TLS != nil`，与
+   `middleware/secure_session_cookie.go` 的 `X-Forwarded-Proto` 判定不一致。
+6. **桌面端 sidecar 未 `env_clear()`（P2）**：`desktop/tauri-app/src-tauri/src/runtime.rs:96-114`
+   只覆盖已知变量，宿主 `TRUSTED_PROXIES`、限流、代理变量等会继承。
+7. **`TRUSTED_PROXIES=auto` 在容器内信任整个网段（P2）**：
+   `common/trusted_proxies.go:96-108` + `deploy/compose/dev-isolated.yml:66`，
+   经端口映射的客户端源地址是网关 IP（属容器网段），其 `X-Forwarded-For` 被采信，
+   按 IP 的登录/全局限流可伪造绕过；dev 端口只绑 loopback，生产 env 为空是已记录
+   决策。默认值本身建议改为不信任网段。
+8. **无效 Bearer 返回 200 + success:false（P2）**：`middleware/auth.go:147-179`；
+   无凭证与缺失 `New-Api-User` 均 401，仅令牌无效走 200，监控按状态码判断会误判。
+9. **生产 compose 未暴露 `LOG_RETENTION_DAYS`（P2 运维）**：每进程一个
+   `oneapi-*.log`，默认不清理；隔离环境设 7 天。
+10. **桌面端 release workflow 未显式 `GOEXPERIMENT=greenteagc`（P3）**：
+    Dockerfile 设置了，release.yml 四处 `go build` 未设；本机 go1.27.3 默认已开启，
+    属一致性建议。
+
+### 25.4 复核后推翻的结论
+
+- **"任务按次计费的 `AdjustBillingOnSubmit` 差额未结算、失败时多退"（代理判 P0）**：
+  `controller/relay.go:3891` 用 `result.Quota`（即重算后的 finalQuota）调用
+  `SettleBilling`，`delta = finalQuota - 预扣` 已把差额计入；任务失败时全额退回
+  （预扣+差额）正是失败任务应有的结果。
+- **"gzip 请求体绕过匿名请求体上限"**：`/api` 组只挂了 `gzip.Gzip`，没有
+  `WithDecompressFn`，handler 收到的是压缩字节。实测 6MB 明文 413、压缩后 200，
+  响应体为 `Invalid parameters`，不存在解压放大。
+- **"OPTIONS 返回 204 且无 CORS 头"**：实测 `OPTIONS /api/zzz` 返回 404。
+- **"/api/setup 并发可创建第二个 root 并改写 ServerAddress"**：`users.aff_code`
+  唯一索引让第二次创建直接失败，且失败发生在写任何选项之前；去掉拟议守卫做反向
+  验证，用例仍通过，说明该用例不能证明风险。已撤回改动。
+- **"MySQL 上 models.model_name 无唯一约束、库中已有同名行"**：`meta_unique_migration.go`
+  的 MySQL 分支建生成列 + `CREATE UNIQUE INDEX`；开发 PG 上
+  `uk_model_name ... WHERE deleted_at IS NULL` 存在，同名组均为软删行。
+- **"渠道查看密钥是 GET、只读守卫没拦"**：路由是 `POST /channel/:id/key`
+  （`router/api-router.go:266`），前端请求层按方法拦截。
+- **部署代理的 entrypoint P1**：virtiofs 下探测以 `su-exec 1000` 真实写入为准，
+  失败会先告警再执行；当前目录实测可写，未发现失效路径。
+
+### 25.5 依赖与 CI
+
+- `govulncheck`（GOTOOLCHAIN=go1.27.3）：可达漏洞 0，模块中 3 条不在调用链。
+- `bun audit --production`：web/default 593 包、web/classic 661 包均无漏洞；
+  全量 audit 的 2 条（`@hono/node-server`、`deepmerge`）在 devDependency
+  `shadcn` 链路，不进入产物。
+- `cargo audit`（desktop）：无 RUSTSEC 漏洞，6 条 unmaintained/yanked 警告
+  （zbus/zvariant 家族、glib unsound、async-executor yanked），均为 Tauri 传递依赖。
+- 全部 GitHub Actions 均以 40 位 SHA 固定（含 dtolnay/rust-toolchain）。
+
+### 25.6 Codex 复审
+
+全维度 Codex 在 40 分钟上限内未产出报告（stdout 33,937 行后仍在分析）；
+窄范围 Codex 完成并给出三问结论：Q1 任务结算崩溃窗口（判 P1，本报告采纳但
+降为 P1 窄窗口）、Q2 首响应无期限（已按修法实现 `ResponseHeaderTimeout`）、
+Q3 Bearer 200 仅为语义不一致（与本报告一致）。两次运行都未修改仓库。
