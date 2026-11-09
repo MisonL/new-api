@@ -901,3 +901,60 @@ default fr 120 / vi 108 / zh 17 / ru 9 / ja 7。抽样逐条确认了源码引�
 （非标识符）、classic ja 将 `socks5` 写作 `SOCKS5`（协议名大小写
 不敏感，检查器按大小写不敏感比较）。单 token 标签与豁免清单中
 允许翻译的品牌（fr 的 `API Key` -> `Clé API`）不在本检查范围。
+
+## 二十、完成度门禁的两条漏判与补齐（2026-11-09）
+
+### 20.1 发现
+
+继续排查单 token 时发现两类**完整英文句子**一直没被门禁报出：
+
+| 文案 | 被放行的原因 |
+| --- | --- |
+| `{{count}} logs deleted` | 原规则 `^[{[":]` 把以 `{{` 开头的句子当成 JSON 片段 |
+| `{{count}} API entries deleted. Click "Save Settings" to apply.` | 同上 |
+| `Remove image_generation tool objects rejected by an upstream.` | 原规则 `[a-z]+_[a-z]+` 命中标识符就整条跳过 |
+
+后一条在 classic 的 fr/ja/ru/vi 四个语言里都是英文原文；前一类在
+default 的五个非英文语言里共 40 条（`{{count}} logs deleted`、
+`{{count}} templates, used in order`、删除确认等）。用户在界面上会
+直接看到英文句子。
+
+单 token 排查时还发现 `default/ja` 的 `AccessKey / SecretAccessKey`
+被写成 `AccessKey/SecretAccessKey`（丢了空格），属同类流水线损伤。
+
+### 20.2 门禁修改
+
+`looksUntranslated` 改为：
+
+1. 先剥掉 `{{占位符}}`，再对剩余文本判定，避免"以 `{{` 开头"被误判为 JSON；
+2. 在剩余文本中剥离 snake_case 标识符、路径、URL、邮箱，再判断剩下的是否
+   还有至少两个英文词；
+3. 整体是单个标识符（`gpt-3.5-turbo`、`checkout.session.completed`、
+   `AIGC2D`）或这类标识符的 `a / b` 组合时，不算未翻译；
+4. 只有多词剩余才报，单词剩余（`s`、`min`、`bps`、`GET`）视为单位/状态/品牌。
+
+豁免清单新增两条纯键名映射说明
+（`header:session_id -> json:prompt_cache_key` 及其反向）。
+
+### 20.3 验证
+
+- 修改前门禁在 default 上报告 8-10 条/语言、classic 1-2 条/语言；
+  第一版收紧过火（把 `{{count}} min`、`bps` 也报出来），调整"单词不报"
+  后只剩真实问题。
+- 补齐 40 条后门禁退出码 0（允许清单 96 条）。
+- 反向验证：把 `default/vi` 一条恢复成英文，门禁退出码 1 并点名；
+  恢复后退出码 0。
+- `bun run test:node` 167/167；classic prettier 0；default prettier 0；
+  两个覆盖率门禁 0；`i18n:sync` 六语言全 0；default 六个语言文件的
+  混淆键转义逐文件核对完好。
+
+### 20.4 过程记录
+
+写回时先用 `JSON.stringify` 整体序列化，把 sync 脚本刻意混淆的
+`footer.newapi...` 键还原成了明文（与第十七、十八节同类事故）。
+已从 HEAD 恢复全部语言文件，改为逐行值替换重做，diff 只包含预期改动。
+
+### 20.5 边界
+
+单 token 标签仍不覆盖（`Create`、`Start`、`Processing` 与 `gpt-4o`、
+`bps`、`true` 无法静态区分）；本轮只保证"多词英文句子"零残留。
