@@ -998,7 +998,15 @@ default 的五个非英文语言里共 40 条（`{{count}} logs deleted`、
   default vi 1 条，共 67 条改写英文句子补为对应语言译文。
 - 收紧后新暴露：classic fr/ru/vi 各 11 条、default vi 1 条，共 34 条，
   同样补齐。
-- 合计 67 + 34 = 101 条。所有写回都按原始文本逐行替换，未用 `JSON.stringify`
+- 两轮合计 101 条。**更正**：提交 `9f1f82a52` 的提交信息与本文初版
+  此处都写作"101 条"，但按逐键 diff 复核，该提交实际改动 **120 条**：
+  classic fr/ru/vi 各 37 条（33 条改写英文句子 + 4 条 Title Case 短
+  标签）、classic ja 1 条、default ja 1 条、default vi 7 条。差额来自
+  classic 三语中另有 18 条无功能词、但长度 ≥6 词且全 Title Case 的
+  短标签（`Create and Manage Groups`、`Confirm delete this group?` 等），
+  同样是改写英文，被新规则一并捕获。翻译内容正确，门禁零误报，只有
+  计数口径写错。
+- 所有写回都按原始文本逐行替换，未用 `JSON.stringify`
   整体序列化；`web/default` 六个语言文件的混淆键
   `footer.newapi.projectAttributionSuffix` 逐文件核对仍为转义形式。
 
@@ -1016,8 +1024,9 @@ default 的五个非英文语言里共 40 条（`{{count}} logs deleted`、
 - `node --test tests/i18nStructuredValues.test.mjs`：3 通过 / 0 失败。
 - `web/default` 六个语言文件的 canary 转义键逐文件核对为 `true`；
   classic 的 fr/ru/vi/ja 在 HEAD 中本来就没有该键，未作比较基准。
-- 阴性样本：新规则在全部 10 个语言文件、约 5.5 万条"值不等于基准"
-  的现有译文上无命中，即零误报。
+- 阴性样本：新规则在全部 10 个语言文件、**55332 条**"值不等于基准"
+  的现有译文上无命中，即零误报（首轮在 66 条候选上报命中并逐条核对，
+  第二轮在补齐后的全量上复核，两次均零误报）。
 
 ### 21.5 边界
 
@@ -1028,3 +1037,68 @@ default 的五个非英文语言里共 40 条（`{{count}} logs deleted`、
 - 单 token 值（第二十节已说明）。
 
 这三类仍需人工抽查或扩充豁免清单，本轮未扩大口径以免误伤真译文。
+
+---
+
+## 二十二、本轮收尾清理（2026-11-09）
+
+### 22.1 提交计数更正
+
+见 §21.3：`9f1f82a52` 的提交信息写作 101 条，逐键 diff 复核为 120 条。
+提交历史不改写，以本文为准。验证方式：对每个 locale 文件分别 `git show
+HEAD~1:<file>` 与 `git show <commit>:<file>` 逐键比较新旧值，统计
+`before[key] !== after[key]` 的键数，合计 120。
+
+### 22.2 classic 孤儿键清理
+
+对 fr/ja/ru/vi/zh-TW 以 `en.json ∪ zh-CN.json` 为基准、按 i18next 复数
+规则剥离 `_one/_few/_many/_other` 后缀后，非复数孤儿键共 171 个。逐键
+在 `web/classic/src` 的 490 个源码文件里做一次全量字符串包含检查
+（一次读入 4.5 MB 语料，含单双引号两种形式），并核对
+`web/classic/src/constants/i18nDynamicKeys.js` 的运行时动态键登记表：
+
+- 删除 9 个确认死键（fr 2、ja 2、ru 2、zh-TW 2、vi 1）：
+  - `Responses 流启动恢复仅作用于 ...`（旧短版本，键已改长为含
+    "只有已在渠道设置中启用该功能的渠道才会参与保护窗口。"的版本，
+    长版本在全部 7 个语言文件里都有译文）；
+  - `不勾选用户可选`（`GroupRatioSettings.jsx:617` 实际使用的是
+    `假设再加两个分组 default 和 vip，但不勾选用户可选：`）；
+  - `/api/option/`（源码里是 `API.get('/api/option/')` 的路径常量，
+    从未作为翻译键使用）。
+- 保留 vi 的 163 个孤儿键（`模型列表`、`正在使用`、`清理` 等）：均为
+  2026-04-28 `a42b39760` 引入，在 en/zh-CN/fr/ru/ja 中均不存在，源码
+  与 `i18nDynamicKeys.js` 都零引用。**本轮不删除**：无法证明它们将来
+  不会被重新启用，且删除属于数据裁剪而非翻译正确性问题，留待单独决策。
+
+验证：`node --check` 各 JSON 通过，classic prettier `--check` 通过。
+
+### 22.3 测试质量修正
+
+`web/tests/i18nStructuredValues.test.mjs`：
+
+- 第 90 行 `typeof baseValue !== "string" || typeof baseValue !== "string"`
+  重复判断同一变量，改为单个判断。
+- 测试名 `structured i18n values stay byte-identical to the base locale`
+  与实现不符（实现是结构比较，允许显示名本地化），改为
+  `structured i18n values keep the same JSON shape as the base locale`。
+
+### 22.4 其它核对（未改动）
+
+- `web/default/src/i18n/locales/_reports/_sync-report.json` 是 `bun run
+  i18n:sync` 的生成产物，被 `.agents/skills/i18n-translate/SKILL.md`
+  的工作流读取。**不加入 .gitignore**：skill 依赖它在仓库中的位置，
+  且该文件当前六语言全部 `missing=0 extras=0 untranslated=0`，无污染。
+- `web/default/scripts/sync-i18n.mjs` 第 160-179 行的
+  `isLikelyUntranslated` 对 fr/vi 使用 `the|and|or|to|with|please`
+  弱启发式，会漏掉纯 Title Case 的改写英文。这是 sync 脚本辅助报告的
+  局限，不是翻译正确性问题；完成度门禁已覆盖这一类，本轮不改。
+- 三处为源码 `t()` 字面量但 en/zh-CN 均缺失的键
+  （`Responses 流...首包前阶段...`、`不勾选用户可选`、
+  `/api/option/`）**不是基准缺失**：它们本身就是历史死键，上一节已删除。
+
+### 22.5 CI 接线核对
+
+`.github/workflows/repo-gates.yml` 已包含：classic 覆盖度、classic
+lint、完成度门禁（两前端）、default 覆盖度；`web/tests/*.test.mjs`
+（含 `i18nStructuredValues.test.mjs`）由 `bun run test:node` 执行，该命令
+在 `frontend-checks` 中接线。本轮无需改动。

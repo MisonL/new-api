@@ -79,7 +79,7 @@ function normalizeJson(value) {
   }
 }
 
-test("structured i18n values stay byte-identical to the base locale", () => {
+test("structured i18n values keep the same JSON shape as the base locale", () => {
   const mismatches = [];
   for (const [front, dir] of FRONTS) {
     const base = loadTranslation(dir, "en");
@@ -87,8 +87,7 @@ test("structured i18n values stay byte-identical to the base locale", () => {
       const locale = file.replace(/\.json$/, "");
       const target = loadTranslation(dir, locale);
       for (const [key, baseValue] of Object.entries(base)) {
-        if (typeof baseValue !== "string" || typeof baseValue !== "string")
-          continue;
+        if (typeof baseValue !== "string") continue;
         const value = target[key];
         if (typeof value !== "string") continue;
         if (!isStructuredExample(baseValue)) continue;
