@@ -190,6 +190,10 @@ func initConstantEnv() {
 	constant.StreamScannerMaxBufferMB = GetEnvOrDefault("STREAM_SCANNER_MAX_BUFFER_MB", 128)
 	// MaxRequestBodyMB 请求体最大大小（解压后），用于防止超大请求/zip bomb导致内存暴涨
 	constant.MaxRequestBodyMB = GetEnvOrDefault("MAX_REQUEST_BODY_MB", 128)
+	// RelayResponseHeaderTimeout 共享中继 Transport 等待上游响应头的上限（秒）。
+	// RELAY_TIMEOUT=0 时 client 没有整体超时，流式扫描器的超时又要等响应到达才
+	// 开始，没有这个上限时上游接受连接后不发响应会永久占用连接；0 表示不设。
+	constant.RelayResponseHeaderTimeout = GetEnvOrDefaultAllowZero("RELAY_RESPONSE_HEADER_TIMEOUT", 300)
 	// AnonymousRequestBodyLimitKB 未鉴权端点（登录、注册、支付回调等）的请求体上限（KB）；0 表示关闭该上限
 	constant.AnonymousRequestBodyLimitKB = GetEnvOrDefaultAllowZero("ANONYMOUS_REQUEST_BODY_LIMIT_KB", 512)
 	// ForceStreamOption 覆盖请求参数，强制返回usage信息

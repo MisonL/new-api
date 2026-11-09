@@ -10,6 +10,9 @@ var GetMediaToken bool
 var GetMediaTokenNotStream bool
 var UpdateTask bool
 var MaxRequestBodyMB int
+
+// RelayResponseHeaderTimeout 共享中继 Transport 等待上游响应头的秒数；0 表示不设
+var RelayResponseHeaderTimeout int
 var AnonymousRequestBodyLimitKB int
 var AzureDefaultAPIVersion string
 var NotifyLimitCount int

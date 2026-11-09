@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"golang.org/x/net/proxy"
@@ -366,16 +367,33 @@ func checkRedirectWithRemoteDNSMode(req *http.Request, via []*http.Request, remo
 	return nil
 }
 
-func InitHttpClient() {
+// newRelayTransport 构造共享中继 Transport。
+// ResponseHeaderTimeout 只限制等待响应头的时间，不会切断已经开始的流；
+// RELAY_TIMEOUT=0（默认）时 client 没有整体超时，没有这个上限的话，上游
+// 接受连接后迟迟不发响应头会让请求一直挂住。
+func newRelayTransport() *http.Transport {
 	transport := &http.Transport{
 		MaxIdleConns:        common.RelayMaxIdleConns,
 		MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
 		ForceAttemptHTTP2:   true,
 		Proxy:               http.ProxyFromEnvironment, // Support HTTP_PROXY, HTTPS_PROXY, NO_PROXY env vars
 	}
+	applyRelayResponseHeaderTimeout(transport)
 	if common.TLSInsecureSkipVerify {
 		transport.TLSClientConfig = common.InsecureTLSConfig
 	}
+	return transport
+}
+
+func applyRelayResponseHeaderTimeout(transport *http.Transport) {
+	if transport == nil || constant.RelayResponseHeaderTimeout <= 0 {
+		return
+	}
+	transport.ResponseHeaderTimeout = time.Duration(constant.RelayResponseHeaderTimeout) * time.Second
+}
+
+func InitHttpClient() {
+	transport := newRelayTransport()
 
 	if common.RelayTimeout == 0 {
 		httpClient = &http.Client{
@@ -444,6 +462,7 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 			ForceAttemptHTTP2:   true,
 			Proxy:               http.ProxyURL(parsedURL),
 		}
+		applyRelayResponseHeaderTimeout(transport)
 		if common.TLSInsecureSkipVerify {
 			transport.TLSClientConfig = common.InsecureTLSConfig
 		}
@@ -511,6 +530,7 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 				}
 			},
 		}
+		applyRelayResponseHeaderTimeout(transport)
 		if common.TLSInsecureSkipVerify {
 			transport.TLSClientConfig = common.InsecureTLSConfig
 		}
