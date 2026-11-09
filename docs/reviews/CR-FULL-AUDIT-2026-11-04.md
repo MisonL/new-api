@@ -860,3 +860,44 @@ default fr 120 / vi 108 / zh 17 / ru 9 / ja 7。抽样逐条确认了源码引�
 - `docs/reviews/archive/CR-MAIN-PAYMENT-SECURITY-GAP-2026-04-19.md` 中 17 个
   相对链接（`../../controller/...`）解析到 `docs/controller`，属归档文档的
   既有断链，未改动历史记录。
+
+## 十九、技术标识符守护与 ja 型号修复（2026-11-09）
+
+### 19.1 发现
+
+`default/ja` 有三处型号/版本号被翻译流水线插入空格：
+
+| 基准 | ja |
+| --- | --- |
+| `Baidu V2` | `Baidu V 2` |
+| `Zhipu V4` | `Zhipu V 4` |
+| `e.g., OpenAI GPT-4 Production` | `例： OpenAI GPT -4 Production` |
+
+三者都是品牌/型号名，不应翻译。完成度门禁只因"值已不等于基准"而放行；
+第十八节的结构化样例测试只覆盖 JSON/数组形式，也不覆盖这类值。
+
+### 19.2 修复与门禁
+
+- `web/tests/i18nStructuredValues.test.mjs` 增加"技术标识符保留"检查：
+  - token 规则：至少一段用 `-`/`_`/`.` 连接的字母数字组合（`GPT-4`、
+    `gpt-4o`、`us-central1`），或字母后接数字的单元（`V2`、`V4`）；
+  - 只检查正文，先剔除 URL 与路径（本地化时改写示例 URL 是刻意的）；
+  - 排除 `non-2xx` 这类英文惯用语与 `xx` 结尾的占位。
+- 修复 ja 三条。
+
+### 19.3 验证
+
+- 修复前测试 3 条中 1 条失败，精确点名上述 3 处，无其它误报；
+  修复后 3/3 通过。
+- 反向验证：把 `default/ru` 的 `GPT-4` 改成 `GPT -4`，测试变为
+  2 通过 1 失败；恢复后 3/3。
+- `bun run test:node`（web/classic）167/167；
+  完成度门禁退出码 0；`i18n:sync` 六语言全 0；
+  default 六个语言文件的混淆键转义完好。
+
+### 19.4 边界
+
+扫描时另见两处属可接受差异，未改：`non-2xx` 各语言译成自然短语
+（非标识符）、classic ja 将 `socks5` 写作 `SOCKS5`（协议名大小写
+不敏感，检查器按大小写不敏感比较）。单 token 标签与豁免清单中
+允许翻译的品牌（fr 的 `API Key` -> `Clé API`）不在本检查范围。
