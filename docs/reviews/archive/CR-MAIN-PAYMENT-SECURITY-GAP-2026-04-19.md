@@ -45,8 +45,8 @@
 
 位置：
 
-- [controller/topup_stripe.go](../../controller/topup_stripe.go)
-- [model/topup.go](../../model/topup.go)
+- [controller/topup_stripe.go](../../../controller/topup_stripe.go)
+- [model/topup.go](../../../model/topup.go)
 
 ### 2. 订阅支付存在同构串单风险，已收口
 
@@ -64,10 +64,10 @@
 
 位置：
 
-- [model/subscription_payment_guard.go](../../model/subscription_payment_guard.go)（`CompleteSubscriptionOrderWithPaymentMethod` 与 `ExpireSubscriptionOrderWithPaymentMethod` 是当前带支付方式约束的入口；原 `model/payment_method_guard.go` 的职责已并入本文件，该文件当前不存在）
-- [controller/topup_stripe.go](../../controller/topup_stripe.go)
-- [controller/topup_creem.go](../../controller/topup_creem.go)
-- [controller/subscription_payment_epay.go](../../controller/subscription_payment_epay.go)
+- [model/subscription_payment_guard.go](../../../model/subscription_payment_guard.go)（`CompleteSubscriptionOrderWithPaymentMethod` 与 `ExpireSubscriptionOrderWithPaymentMethod` 是当前带支付方式约束的入口；原 `model/payment_method_guard.go` 的职责已并入本文件，该文件当前不存在）
+- [controller/topup_stripe.go](../../../controller/topup_stripe.go)
+- [controller/topup_creem.go](../../../controller/topup_creem.go)
+- [controller/subscription_payment_epay.go](../../../controller/subscription_payment_epay.go)
 
 ### 3. Waffo 失败回调存在跨渠道状态污染风险，已收口
 
@@ -83,8 +83,8 @@
 
 位置：
 
-- [model/topup_payment_guard.go](../../model/topup_payment_guard.go)
-- [controller/topup_waffo.go](../../controller/topup_waffo.go)
+- [model/topup_payment_guard.go](../../../model/topup_payment_guard.go)
+- [controller/topup_waffo.go](../../../controller/topup_waffo.go)
 
 ### 4. Stripe 过期回调存在跨渠道状态污染风险，已收口
 
@@ -99,8 +99,8 @@
 
 位置：
 
-- [controller/topup_stripe.go](../../controller/topup_stripe.go)
-- [model/topup_payment_guard.go](../../model/topup_payment_guard.go)
+- [controller/topup_stripe.go](../../../controller/topup_stripe.go)
+- [model/topup_payment_guard.go](../../../model/topup_payment_guard.go)
 
 ### 5. Creem 存在空 secret fail-open 风险，已收口
 
@@ -117,16 +117,16 @@
 
 位置：
 
-- [controller/topup_creem.go](../../controller/topup_creem.go)
-- [controller/subscription_payment_creem.go](../../controller/subscription_payment_creem.go)
+- [controller/topup_creem.go](../../../controller/topup_creem.go)
+- [controller/subscription_payment_creem.go](../../../controller/subscription_payment_creem.go)
 
 ## 新增测试
 
-- [controller/topup_stripe_security_test.go](../../controller/topup_stripe_security_test.go)
-- [controller/topup_creem_security_test.go](../../controller/topup_creem_security_test.go)
-- [model/topup_payment_security_test.go](../../model/topup_payment_security_test.go)
-- [model/topup_payment_guard_test.go](../../model/topup_payment_guard_test.go)
-- [model/subscription_payment_guard_test.go](../../model/subscription_payment_guard_test.go)
+- [controller/topup_stripe_security_test.go](../../../controller/topup_stripe_security_test.go)
+- [controller/topup_creem_security_test.go](../../../controller/topup_creem_security_test.go)
+- [model/topup_payment_security_test.go](../../../model/topup_payment_security_test.go)
+- [model/topup_payment_guard_test.go](../../../model/topup_payment_guard_test.go)
+- [model/subscription_payment_guard_test.go](../../../model/subscription_payment_guard_test.go)
 
 ## 验证
 
