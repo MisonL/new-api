@@ -55,6 +55,9 @@ func TestSetupLoginClearsSecureVerificationState(t *testing.T) {
 		session := sessions.Default(c)
 		session.Set(middleware.SecureVerificationSessionKey, int64(1))
 		session.Set("secure_verified_method", "passkey")
+		// passkey 预验证标记也是会话级凭据：A 完成 WebAuthn 断言后未消费，
+		// B 登录后必须拿不到它，否则可以不提交断言直接完成 step-up。
+		session.Set(middleware.SecurePasskeyReadySessionKey, int64(1))
 		session.Set("id", 999) // 另一个用户留下的会话
 		if err := session.Save(); err != nil {
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -69,10 +72,12 @@ func TestSetupLoginClearsSecureVerificationState(t *testing.T) {
 		session := sessions.Default(c)
 		verifiedAt := session.Get(middleware.SecureVerificationSessionKey)
 		verifiedMethod := session.Get("secure_verified_method")
+		passkeyReady := session.Get(middleware.SecurePasskeyReadySessionKey)
 		sessionID := session.Get("id")
 		c.JSON(http.StatusOK, gin.H{
 			"verified_at":     verifiedAt,
 			"verified_method": verifiedMethod,
+			"passkey_ready":   passkeyReady,
 			"id":              sessionID,
 		})
 	})
@@ -102,5 +107,6 @@ func TestSetupLoginClearsSecureVerificationState(t *testing.T) {
 
 	require.Nil(t, payload["verified_at"], "登录后不得保留上一个用户的 secure_verified_at")
 	require.Nil(t, payload["verified_method"], "登录后不得保留上一个用户的 secure_verified_method")
+	require.Nil(t, payload["passkey_ready"], "登录后不得保留上一个用户的 passkey 预验证标记")
 	require.EqualValues(t, user.Id, payload["id"], "会话应切换到新登录的用户")
 }

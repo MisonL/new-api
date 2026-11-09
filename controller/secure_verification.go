@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -18,7 +19,8 @@ const (
 	secureVerificationMethod2FA        = "2fa"
 	secureVerificationMethodPasskey    = "passkey"
 	// PasskeyReadySessionKey means WebAuthn finished and /api/verify can finalize step-up verification.
-	PasskeyReadySessionKey = "secure_passkey_ready_at"
+	// 由 middleware 统一定义，登录切换时与其它 step-up 标记一起清除。
+	PasskeyReadySessionKey = middleware.SecurePasskeyReadySessionKey
 	// SecureVerificationTimeout 验证有效期（秒）
 	SecureVerificationTimeout = 300 // 5分钟
 	// PasskeyReadyTimeout passkey ready 标记有效期（秒）

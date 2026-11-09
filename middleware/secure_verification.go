@@ -12,6 +12,9 @@ const (
 	// SecureVerificationSessionKey 安全验证的 session key（与 controller 保持一致）
 	SecureVerificationSessionKey       = "secure_verified_at"
 	secureVerificationMethodSessionKey = "secure_verified_method"
+	// SecurePasskeyReadySessionKey 是 WebAuthn 断言完成、等待 /api/verify 收尾的
+	// 会话级标记。controller 直接引用本常量，避免两处字面量漂移。
+	SecurePasskeyReadySessionKey = "secure_passkey_ready_at"
 	// SecureVerificationTimeout 验证有效期（秒）
 	SecureVerificationTimeout = 300 // 5分钟
 )
@@ -88,6 +91,9 @@ func clearSecureVerificationSession(session sessions.Session) {
 func ClearSecureVerificationState(session sessions.Session) {
 	session.Delete(SecureVerificationSessionKey)
 	session.Delete(secureVerificationMethodSessionKey)
+	// passkey 预验证标记同样属于会话而不是用户：登录换账号后若残留，
+	// 新用户可以在不提交任何 WebAuthn 断言的情况下消费旧标记完成 step-up。
+	session.Delete(SecurePasskeyReadySessionKey)
 }
 
 // OptionalSecureVerification 可选的安全验证中间件
