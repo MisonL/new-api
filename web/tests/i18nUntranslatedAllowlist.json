@@ -30,6 +30,8 @@
     "GitHub Client ID",
     "GitHub Client Secret",
     "GitHub ID",
+    "header:session_id -> json:prompt_cache_key",
+    "json:prompt_cache_key -> header:session_id",
     "iFlytek Spark",
     "Linux DO Client ID",
     "Linux DO Client Secret",

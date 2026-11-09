@@ -64,22 +64,45 @@ function looksUntranslated(value) {
   const raw = value.trim();
   if (raw.length === 0) return false;
   if (NON_LATIN_SCRIPT.test(raw)) return false;
-  // URLs, JSON / array snippets, quoted payloads, emails.
-  if (/^[{[":]/.test(raw)) return false;
+  // URLs, emails and example domains are configuration, not prose.
   if (raw.includes("://") || /\bhttps?\./i.test(raw)) return false;
   if (/[\w.+-]+@[\w-]+\.[\w.]+/.test(raw)) return false;
-  // Example/domain placeholders such as "example.com&#10;blocked-site.com".
   if (/example\.(com|org)|&#10;/.test(raw)) return false;
-  // Identifiers and single tokens (bps, GET, gpt-4o, /v1, 100%).
-  if (/[a-z]+_[a-z]+/.test(raw)) return false;
-  if (/^[\w./-]+$/.test(raw)) return false;
 
-  // Anything left that carries Latin letters is user-visible prose or a
-  // label: "Download Logs", "Gift Codes", "Header Profile Applied",
-  // "Type *", "Key: {{value}}".
-  const words =
-    stripPlaceholders(raw).match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
-  return words.length > 0;
+  // Strip placeholders before classifying the remainder. A sentence that
+  // merely starts with "{{count}}" is prose, not a JSON snippet; checking the
+  // raw prefix used to let "{{count}} logs deleted" through as JSON-like.
+  const text = stripPlaceholders(raw).trim();
+  if (text.length === 0) return false;
+  // A single dotted/dashed identifier (gpt-3.5-turbo, checkout.session.completed,
+  // AIGC2D) or a "a / b" pair of such identifiers is a value, not prose.
+  const segments = text.split(/[\s/]+/).filter(Boolean);
+  if (segments.length > 0 && segments.every((s) => /^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(s))) {
+    if (segments.length === 1) return false;
+    // "a / b"-style pairs: no word of ordinary sentence length in prose order.
+    if (segments.every((s) => !/^[A-Z][a-z]{2,}$/.test(s))) return false;
+  }
+
+  // Strip inline identifiers and code-ish fragments (snake_case names,
+  // paths, key=value hints) and judge what is left: "Remove
+  // image_generation tool objects rejected by an upstream." is prose with
+  // an identifier in it, not an identifier.
+  const prose = text
+    .replace(/[A-Za-z0-9_.-]*_[A-Za-z0-9_.-]+/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*/g, " ")
+    .replace(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/g, " ")
+    .trim();
+
+  // Only a bare JSON/array payload or a quoted fragment is configuration.
+  if (/^[\[{]/.test(prose) && !/^[\[{][^\]}]*[A-Za-z][A-Za-z'-]*\s[A-Za-z]{2,}/.test(prose)) {
+    return false;
+  }
+  if (/^"/.test(prose) && !/\s[A-Za-z]{3,}/.test(prose)) return false;
+  const words = prose.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+  // A lone word is a unit, status or brand ("s", "min", "bps", "GET");
+  // only multi-word remains count as an untranslated label or sentence.
+  return words.length > 1;
 }
 
 function readTranslation(file) {
