@@ -146,3 +146,27 @@ func TestTaskRefundWithoutBillingContextDoesNotPanic(t *testing.T) {
 	require.NoError(t, model.DB.Select("amount_used").Where("id = ?", subID).First(&sub).Error)
 	require.Equal(t, int64(200), sub.AmountUsed, "无上下文的退款按原行为直接回落")
 }
+
+// 反向对照：有预扣记录但任务缺 BillingContext 时没有键可回查，
+// 退化为原行为（同周期回落），而不是 panic 或跳过结算。
+func TestTaskFinalSettlementWithoutBillingContextAppliesWithinPeriod(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, subID = 45, 45, 45, 45
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-task-nil-settle", 100000)
+	seedChannel(t, channelID)
+	seedSubscription(t, subID, userID, 100000, 1000)
+
+	task := makeTask(userID, channelID, 4000, tokenID, BillingSourceSubscription, subID)
+	task.PrivateData.BillingContext = nil
+
+	require.NotPanics(t, func() {
+		require.NoError(t, RecalculateTaskQuota(ctx, task, 1000, "nil context settle probe"))
+	})
+
+	var sub model.UserSubscription
+	require.NoError(t, model.DB.Select("amount_used").Where("id = ?", subID).First(&sub).Error)
+	require.Equal(t, int64(0), sub.AmountUsed)
+}
