@@ -1342,36 +1342,56 @@ func applyUserSubscriptionDeltaForRequest(requestId string, userSubscriptionId i
 	if delta == 0 {
 		return nil
 	}
+	preConsumeCreatedAt, hasRecord, err := preConsumeRecordCreatedAt(requestId, userSubscriptionId)
+	if err != nil {
+		return err
+	}
 	return DB.Transaction(func(tx *gorm.DB) error {
-		if delta < 0 && requestId != "" {
-			crossPeriod, err := preConsumeRecordPrecedesLastResetTx(tx, requestId, userSubscriptionId)
+		crossPeriod := false
+		if delta < 0 && hasRecord {
+			// 重置事务同样持有该行锁。周期归属必须在加锁读之后判定：
+			// 先读 LastResetTime、再加锁更新，重置可能插在两步之间。
+			lockedReset, err := lockSubscriptionLastResetTime(tx, userSubscriptionId)
 			if err != nil {
 				return err
 			}
-			if crossPeriod {
-				return nil
-			}
+			crossPeriod = lockedReset > preConsumeCreatedAt
+		}
+		if crossPeriod {
+			return nil
 		}
 		return applyUserSubscriptionDeltaTx(tx, userSubscriptionId, delta, allowOverage)
 	})
 }
 
-// preConsumeRecordPrecedesLastResetTx 判断该请求的订阅预扣是否发生在订阅最近一次
-// 周期重置之前。没有任何预扣记录时视为同周期（保持原行为）。
-func preConsumeRecordPrecedesLastResetTx(tx *gorm.DB, requestId string, userSubscriptionId int) (bool, error) {
+// preConsumeRecordCreatedAt 读取该请求预扣记录的创建时间。没有记录、记录已退款
+// 或不属于该订阅时 hasRecord 为 false，调用方保持不带跨周期守卫的原行为。
+func preConsumeRecordCreatedAt(requestId string, userSubscriptionId int) (createdAt int64, hasRecord bool, err error) {
+	if requestId == "" {
+		return 0, false, nil
+	}
 	var record SubscriptionPreConsumeRecord
-	err := tx.Where("request_id = ?", requestId).Limit(1).Find(&record).Error
+	err = DB.Where("request_id = ?", requestId).Limit(1).Find(&record).Error
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 	if record.Id == 0 || record.Status != "consumed" || record.UserSubscriptionId != userSubscriptionId {
-		return false, nil
+		return 0, false, nil
 	}
+	return record.CreatedAt, true, nil
+}
+
+// lockSubscriptionLastResetTime 在事务内加行锁读取订阅的最近重置时间，
+// 与周期重置的事务串行化。
+func lockSubscriptionLastResetTime(tx *gorm.DB, userSubscriptionId int) (int64, error) {
 	var sub UserSubscription
-	if err := tx.Select("last_reset_time").Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
-		return false, err
+	if err := forUpdate(tx).
+		Select("id", "last_reset_time").
+		Where("id = ?", userSubscriptionId).
+		First(&sub).Error; err != nil {
+		return 0, err
 	}
-	return sub.LastResetTime > record.CreatedAt, nil
+	return sub.LastResetTime, nil
 }
 
 // postConsumeUserSubscriptionDeltaTx applies the delta on the caller's

@@ -121,3 +121,28 @@ func TestTaskFinalSettlementAppliesWithinOnePeriod(t *testing.T) {
 	require.NoError(t, model.DB.Select("amount_used").Where("id = ?", subID).First(&sub).Error)
 	require.Equal(t, int64(0), sub.AmountUsed, "同周期差额必须回落：1000-1000=0")
 }
+
+// 历史任务行可能没有 BillingContext（旧版本写入、或缺字段的私有数据）。
+// 退款/结算路径必须先判空：无上下文时退化为不带跨周期守卫的调整，而不是
+// 在轮询 goroutine 里空指针崩溃，让这笔任务永远无法结清。
+func TestTaskRefundWithoutBillingContextDoesNotPanic(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, subID = 44, 44, 44, 44
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-task-nil-context", 100000)
+	seedChannel(t, channelID)
+	seedSubscription(t, subID, userID, 100000, 500)
+
+	task := makeTask(userID, channelID, 300, tokenID, BillingSourceSubscription, subID)
+	task.PrivateData.BillingContext = nil
+
+	require.NotPanics(t, func() {
+		require.NoError(t, RefundTaskQuota(ctx, task, "nil billing context probe"))
+	})
+
+	var sub model.UserSubscription
+	require.NoError(t, model.DB.Select("amount_used").Where("id = ?", subID).First(&sub).Error)
+	require.Equal(t, int64(200), sub.AmountUsed, "无上下文的退款按原行为直接回落")
+}

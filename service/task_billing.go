@@ -94,7 +94,12 @@ func taskIsSubscription(task *model.Task) bool {
 // 否则整笔差额被拒，这次执行就成了免费。退款与预扣路径保持严格拒绝。
 func taskAdjustFunding(task *model.Task, delta int, allowSubscriptionOverage bool) error {
 	if taskIsSubscription(task) {
-		requestId := task.PrivateData.BillingContext.RequestId
+		// 没有计费上下文的历史任务行没有可回查的预扣键，退化为不带跨周期
+		// 守卫的调整，不能在这里空指针崩溃导致任务永远无法结清。
+		requestId := ""
+		if task.PrivateData.BillingContext != nil {
+			requestId = task.PrivateData.BillingContext.RequestId
+		}
 		if allowSubscriptionOverage {
 			return model.SettleUserSubscriptionDeltaForRequest(requestId, task.PrivateData.SubscriptionId, int64(delta))
 		}
