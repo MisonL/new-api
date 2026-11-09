@@ -1175,3 +1175,76 @@ Redis 当前 DBSIZE=0（无缓存需保留），已改回 6380 并重建 redis �
 - `go test ./controller ./middleware ./service` 全部 ok。
 - `python3 -I scripts/compose-healthcheck-contract.py` 与 `.test.py` 通过。
 - 隔离开发环境：redis 回到 6380 且 healthy，new-api 保持 healthy，`/api/status` 200。
+
+## 二十四、Codex 独立复审发现的两条订阅计费缺陷（2026-11-09）
+
+Codex 复审仍在长时间运行中，过程中先给出三条待复核判断。逐条回到代码复核后，
+两条成立并已修复，一条确认为有界取舍。以下结论均经单元测试与反向验证。
+
+### 24.1 订阅跨周期的负向结算和任务退款会冲掉新周期用量（92534ef4a）
+
+预扣记录（`subscription_pre_consume_records`）属于发起请求时的订阅周期。
+`RefundSubscriptionPreConsume` 早已有跨周期守卫（`sub.LastResetTime >
+record.CreatedAt` 时只结束记录），但同一类负向调整的另外两条路径没有：
+
+- `SubscriptionFunding.Settle` → `SettleUserSubscriptionDelta`：请求终态结算，
+  `delta = 实际 - 预扣`。预扣在周期 1、请求跨越周期重置后结束，负 delta 直接
+  落到周期 2，冲掉新周期真实用量（负值再被夹到 0）。
+- `taskAdjustFunding` 的任务差额结算与 `RefundTaskQuota`：异步任务在提交时
+  预扣、在轮询期间结算，跨周期窗口比同步请求更宽。
+
+修复：新增 `SettleUserSubscriptionDeltaForRequest` /
+`PostConsumeUserSubscriptionDeltaForRequest`，负 delta 时查询预扣记录的
+`CreatedAt` 并与订阅 `LastResetTime` 比较，跨周期只结束差额；正向 delta
+（真实超额消耗）仍照常落账，没有预扣记录时保持原行为。同步结算、请求退款、
+任务差额结算/退款全部改用该变体；任务行在 `TaskBillingContext.RequestId`
+中持久化提交时的预扣键（`BillingAttemptKey`，见 24.2），供轮询阶段回查。
+
+未改动的同类路径：`Reserve` 的补充预扣（`extraReserved`）与回滚。补充预扣
+发生在预扣之后且不写记录，用预扣记录时间做守卫会误伤「重置发生在预扣与
+补充预扣之间」的合法同周期退款，因此保持直接回滚，记为有界边界。
+
+测试：`model/subscription_settle_cross_period_test.go`（5 例：跨周期负向
+结算/退款被丢弃、同周期照常、跨周期正向落账、无记录保持原行为）、
+`service/task_billing_cross_period_test.go`（3 例）。反向验证：让守卫恒为
+false 后，两个跨周期用例变红；回退任务接线后，服务层两例变红（量被冲成 0）。
+
+### 24.2 responses bootstrap 恢复重建订阅预扣时复用幂等键（1c8fc83a8、799d828fc）
+
+`PreConsumeUserSubscription` 对同一 `requestId` 的已退款记录直接报错
+`subscription pre-consume already refunded`。bootstrap 恢复在
+`releaseBootstrapRecoveryBilling` 中退还上一轮预扣后，沿同一 `RelayInfo`
+重建计费会话，`SubscriptionFunding.requestId` 仍取 `relayInfo.RequestId`，
+订阅用户的恢复重试必然失败。
+
+修复：`RelayInfo` 新增 `BillingAttemptKey`（初始化为 `RequestId`）；
+`ResetBillingMetadata`（仅 bootstrap 恢复调用）在退还旧预扣后轮换为
+`RequestId + "-" + 随机 8 位`，保留前缀供日志关联；`SubscriptionFunding`
+改用该键，任务行持久化的也是该键。
+
+测试：`service/billing_retry_request_id_test.go`。首例走生产链路
+（`NewBillingSession` → 退款 → `ResetBillingMetadata` → 再次
+`NewBillingSession`），修复前第二次预扣报 already refunded；次例守卫
+「已退款键不得再预扣」的语义。
+
+### 24.3 复核后不修改：token 缓存旧状态覆盖竞态
+
+`GetTokenByKey` 在 DB 回源后异步 `cacheSetToken`，若管理员恰在此时把令牌
+改为禁用并写缓存，回源协程可能用陈旧快照覆盖新状态。影响上界是缓存 TTL
+（`SYNC_FREQUENCY`，默认 60 秒），与既有缓存语义一致；彻底修复需要版本号
+或 CAS，代价大于收益。记为已知有界边界。
+
+### 24.4 验证
+
+全部命令在本轮实际运行并读取输出：
+
+- `go build ./...` 退出码 0（92534ef4a、1c8fc83a8 之后）。
+- `go vet ./controller ./model ./relay/common ./service` 退出码 0（799d828fc 之后）。
+- `go test ./controller ./service ./model ./relay/common -count=1` 全部 ok
+  （799d828fc 之后，两次运行均退出码 0）。
+- `go test ./... -count=1` 退出码 0（799d828fc 之前的一轮；之后只改了任务行
+  键的来源一行，由上面四个相关包覆盖）。
+
+边界：以上是单元与包级测试，未在真实 MySQL/PostgreSQL 上复跑订阅结算链路；
+跨周期守卫使用的时间字段（`CreatedAt`、`LastResetTime`）均为 unix 秒，
+三库同构，未见方言差异。
