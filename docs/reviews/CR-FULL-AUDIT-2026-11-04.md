@@ -1259,7 +1259,7 @@ false 后，两个跨周期用例变红；回退任务接线后，服务层两�
 
 基线：HEAD 起于 79c1cfebe；审查期间提交了 25.2 表中的修复。
 隔离开发环境 new-api-dev-isolated 三容器 healthy，new-api 映射 127.0.0.1:3001，
-运行镜像 commit 799d828fc。
+运行镜像在复审结束后已按最终代码重建（commit ffee6e75b），三容器 healthy，`/api/status` 200。
 
 ### 25.2 已修复
 
