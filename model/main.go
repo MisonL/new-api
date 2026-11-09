@@ -703,7 +703,10 @@ func migrateResponsesCompactModeAutoWithMarker(markerKey string, openAIOnly bool
 			Key:   markerKey,
 			Value: "done",
 		}
-		if err := tx.Save(&marker).Error; err != nil {
+		// 与 retryStatusCodes 迁移一致：两个 master 同时启动时都可能先读到
+		// "无标记"再进事务，后写入者若以主键冲突报错，runDBMigration 会阻断
+		// 整个进程启动。标记写入必须是幂等的。
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&marker).Error; err != nil {
 			return err
 		}
 		common.SysLog(fmt.Sprintf("responses compact auto migration finished: marker=%s updated_channels=%d reset_invalid_settings=%d", markerKey, updated, resetInvalid))
