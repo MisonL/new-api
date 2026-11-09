@@ -811,3 +811,52 @@ default fr 120 / vi 108 / zh 17 / ru 9 / ja 7。抽样逐条确认了源码引�
 
 边界：生产尚未更新；dev 镜像带 dirty 标记，若要得到严格等于 HEAD 的
 镜像，需要等并行会话提交或清理后进行干净构建。
+
+## 十八、结构化样例守护与 ja 样例修复（2026-11-08）
+
+### 18.1 发现
+
+`default/ja` 有两条可直接复制进表单的 JSON 样例被翻译流水线改写：
+
+- `"default": "us-central1", "claude-3-5-sonnet-20240620": "europe-west1"`
+  → `"default ":" us - central 1 ", "claude -3-5 - sonnet -20240620 ": " europe - west 1 "`
+- `{"original-model": "replacement-model"}`
+  → `{" original - model ":" replacement - model "}`
+
+两条键都在源码中真实使用（`channel-mutate-drawer.tsx` 的 region 输入、
+`model-mapping-editor.tsx` 的 placeholder）。用户照抄示例会得到非法 JSON。
+追溯为 2026-04-28 的 `a42b39760`（v1.0 前端首发）引入，非本轮产生。
+
+同时发现豁免清单里的 `"ID:"` 已失效：classic 中实际值是 `"ID: "`（尾随空格），
+该条目不再匹配任何基准值。
+
+### 18.2 修复
+
+- 新增 `web/tests/i18nStructuredValues.test.mjs`：
+  - JSON / 数组 / `"key": "value"` 形式的样例值必须与基准结构等价：
+    键集合、数组长度、叶子类型一致；允许样例内部的显示名本地化
+    （zh 把示例里的 `Alipay` 保留为 `支付宝`），但破坏语法或改键名即失败。
+  - 豁免清单的每条必须仍能匹配某个 en.json 的值，失效条目即失败。
+- 恢复 ja 的两条样例为基准原文（这两条本就是 JSON，不需要翻译）。
+- 删除失效的 `"ID:"` 豁免项。
+- 该测试随 `web/classic` 的 `test:node` 进入 CI。
+
+### 18.3 验证
+
+- 修复前测试 2 条中 1 条失败（捕获 ja 两条样例）；修复后 2/2 通过。
+- 反向验证：把 `default/ru` 的一条样例改坏，测试变为 1 通过 1 失败；
+  恢复后再次 2/2 通过。
+- `node --test web/tests/i18nStructuredValues.test.mjs` 2/2；
+  `bun run test:node`（web/classic）166/166；
+  `node web/scripts/i18nTranslationCompletenessGate.mjs` 退出码 0；
+  `bun run i18n:sync` 六语言 missing/extras/untranslated 全 0。
+- 所有 default 语言文件保留 sync 脚本的混淆键转义
+  （`footer.newapi.projectAttributionSuffix`），逐文件核对通过。
+
+### 18.4 边界
+
+- `en.json` 中还有约 162 个键在源码中无直接字符串引用（多为 `_one`/`_other`
+  复数变体与动态拼接键），无法用静态扫描区分死键与动态键，未清理也未设门禁。
+- `docs/reviews/archive/CR-MAIN-PAYMENT-SECURITY-GAP-2026-04-19.md` 中 17 个
+  相对链接（`../../controller/...`）解析到 `docs/controller`，属归档文档的
+  既有断链，未改动历史记录。
