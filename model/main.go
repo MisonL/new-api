@@ -2,10 +2,13 @@ package model
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -364,7 +367,7 @@ func InitDB() (err error) {
 		if common.UsingMySQL {
 			//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
 		}
-		err = runDBMigration("main", DB, false, migrateDB)
+		err = runDBMigration("main", DB, os.Getenv("SQL_DSN"), false, migrateDB)
 		return err
 	} else {
 		common.FatalLog(err)
@@ -403,7 +406,7 @@ func InitLogDB() (err error) {
 		if !common.IsMasterNode {
 			return nil
 		}
-		err = runDBMigration("log", LOG_DB, true, migrateLOGDB)
+		err = runDBMigration("log", LOG_DB, os.Getenv("LOG_SQL_DSN"), true, migrateLOGDB)
 		return err
 	} else {
 		common.FatalLog(err)
@@ -411,7 +414,7 @@ func InitLogDB() (err error) {
 	return err
 }
 
-func runDBMigration(name string, db *gorm.DB, isLog bool, migrate func() error) error {
+func runDBMigration(name string, db *gorm.DB, dsn string, isLog bool, migrate func() error) error {
 	start := time.Now()
 	common.SysLog("database migration started: " + name)
 	previousLogger := db.Config.Logger
@@ -420,7 +423,7 @@ func runDBMigration(name string, db *gorm.DB, isLog bool, migrate func() error) 
 		db.Config.Logger = previousLogger
 	}()
 
-	release, acquired, lockErr := acquireMigrationLock(db, isLog)
+	release, acquired, lockErr := acquireMigrationLock(db, dsn, isLog)
 	if lockErr != nil {
 		return fmt.Errorf("failed to acquire migration lock: %w", lockErr)
 	}
@@ -458,7 +461,9 @@ func runDBMigration(name string, db *gorm.DB, isLog bool, migrate func() error) 
 //     instead (SQLite deployments are single-process in practice).
 //
 // acquired=false means another master owns the lock; lockErr is a real error.
-func acquireMigrationLock(db *gorm.DB, isLog bool) (release func(), acquired bool, lockErr error) {
+func acquireMigrationLock(db *gorm.DB, dsn string, isLog bool) (release func(), acquired bool, lockErr error) {
+	advisoryKey := migrationAdvisoryLockKeyFor(dsn)
+	lockName := migrationLockNameFor(dsn)
 	switch migrationDialect(isLog) {
 	case migrationDialectPostgreSQL:
 		sqlDB, err := db.DB()
@@ -470,7 +475,7 @@ func acquireMigrationLock(db *gorm.DB, isLog bool) (release func(), acquired boo
 			return nil, false, err
 		}
 		var got bool
-		if err := conn.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock($1)", migrationAdvisoryLockKey).Scan(&got); err != nil {
+		if err := conn.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock($1)", advisoryKey).Scan(&got); err != nil {
 			_ = conn.Close()
 			return nil, false, err
 		}
@@ -479,7 +484,7 @@ func acquireMigrationLock(db *gorm.DB, isLog bool) (release func(), acquired boo
 			return func() {}, false, nil
 		}
 		return func() {
-			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", migrationAdvisoryLockKey)
+			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", advisoryKey)
 			_ = conn.Close()
 		}, true, nil
 	case migrationDialectMySQL:
@@ -492,7 +497,7 @@ func acquireMigrationLock(db *gorm.DB, isLog bool) (release func(), acquired boo
 			return nil, false, err
 		}
 		var got *int
-		if err := conn.QueryRowContext(context.Background(), "SELECT GET_LOCK(?, 0)", migrationLockName).Scan(&got); err != nil {
+		if err := conn.QueryRowContext(context.Background(), "SELECT GET_LOCK(?, 0)", lockName).Scan(&got); err != nil {
 			_ = conn.Close()
 			return nil, false, err
 		}
@@ -501,7 +506,7 @@ func acquireMigrationLock(db *gorm.DB, isLog bool) (release func(), acquired boo
 			return func() {}, false, nil
 		}
 		return func() {
-			_, _ = conn.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", migrationLockName)
+			_, _ = conn.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", lockName)
 			_ = conn.Close()
 		}, true, nil
 	default:
@@ -512,9 +517,42 @@ func acquireMigrationLock(db *gorm.DB, isLog bool) (release func(), acquired boo
 }
 
 const (
-	migrationAdvisoryLockKey int64  = 0x6e6577617069 // "newapi"
-	migrationLockName        string = "new-api:migration"
+	migrationBaseLockName = "new-api:migration"
 )
+
+// migrationLockIdentity derives a stable per-database identifier from the
+// target DSN. The main and log databases can be different same-engine
+// instances; sharing one lock key across them lets two processes each hold one
+// lock while waiting for the other, a deterministic startup deadlock. Secrets
+// in the DSN are stripped before hashing so the identifier never encodes
+// credentials.
+func migrationLockIdentity(dsn string) string {
+	if sanitized, err := url.Parse(dsn); err == nil && sanitized.Host != "" {
+		sanitized.User = nil
+		dsn = sanitized.String()
+	}
+	sum := sha256.Sum256([]byte(dsn))
+	return hex.EncodeToString(sum[:8])
+}
+
+func migrationAdvisoryLockKeyFor(dsn string) int64 {
+	sum := sha256.Sum256([]byte(migrationLockIdentity(dsn)))
+	var key int64
+	for i := 0; i < 8; i++ {
+		key = key<<8 | int64(sum[i])
+	}
+	if key < 0 {
+		key = -key
+	}
+	if key == 0 {
+		key = 1
+	}
+	return key
+}
+
+func migrationLockNameFor(dsn string) string {
+	return migrationBaseLockName + ":" + migrationLockIdentity(dsn)
+}
 
 const (
 	migrationDialectPostgreSQL = "postgres"
