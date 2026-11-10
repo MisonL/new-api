@@ -592,7 +592,12 @@ var billingColumns = []string{
 // userUpdateOmittedColumns 是 Update 整对象回写时必须跳过的全部列。SessionEpoch
 // 由密码变更用 SQL 相对更新递增：若允许快照回写，并发改密码期间读到的旧快照
 // 会把已递增的世代写回去，等于把刚吊销的会话重新放行。
-var userUpdateOmittedColumns = append(append([]string{}, billingColumns...), "SessionEpoch")
+//
+// Password 同理必须跳过，但理由不同：Update 的入参是调用方自己的快照，常见
+// 路径是「管理员读到用户（含哈希）→ 用户重置密码 → 管理员保存资料」，此时
+// 快照里的旧哈希会被整对象回写，而这条路径不递增世代——旧密码重新可登录。
+// 改密码只走 updatePassword=true 分支里的显式单列写入。
+var userUpdateOmittedColumns = append(append([]string{}, billingColumns...), "SessionEpoch", "Password")
 
 // bumpUserSessionEpoch 递增用户的会话世代，使该用户此前签发的会话全部失效。
 // 用 SQL 相对更新而不是读写快照：并发改密码时两次递增都必须生效。
@@ -634,6 +639,11 @@ func (user *User) Update(updatePassword bool) error {
 			return err
 		}
 		if updatePassword {
+			// Password 在 Omit 列表里，必须在这里显式落库；与世代递增同事务，
+			// 避免「新密码已生效、旧会话仍有效」的中间态。
+			if err := tx.Model(user).UpdateColumn("password", newUser.Password).Error; err != nil {
+				return err
+			}
 			return bumpUserSessionEpochTx(tx, user.Id)
 		}
 		return nil
