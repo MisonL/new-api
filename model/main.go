@@ -470,7 +470,7 @@ func acquireMigrationLock(db *gorm.DB) (release func(), acquired bool, lockErr e
 			return nil, false, err
 		}
 		var got bool
-		if err := conn.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(?)", migrationAdvisoryLockKey).Scan(&got); err != nil {
+		if err := conn.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock($1)", migrationAdvisoryLockKey).Scan(&got); err != nil {
 			_ = conn.Close()
 			return nil, false, err
 		}
@@ -479,7 +479,7 @@ func acquireMigrationLock(db *gorm.DB) (release func(), acquired bool, lockErr e
 			return func() {}, false, nil
 		}
 		return func() {
-			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock(?)", migrationAdvisoryLockKey)
+			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", migrationAdvisoryLockKey)
 			_ = conn.Close()
 		}, true, nil
 	case common.UsingMySQL:
