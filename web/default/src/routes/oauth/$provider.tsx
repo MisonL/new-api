@@ -82,6 +82,9 @@ function OAuthCallback() {
       }
 
       if (!search?.code) {
+        // 用户在 IdP 取消/拒绝授权时回调只带 error/state：这次流程已经结束，
+        // 残留的 bind 意图会让之后直接到达的回调按绑定处理。
+        clearOAuthIntent()
         toast.error(i18next.t('Missing code'))
         safeNavigate('/sign-in')
         return
@@ -114,7 +117,8 @@ function OAuthCallback() {
         window.close()
         setTimeout(() => {
           if (!window.closed) {
-            window.location.replace('/_authenticated/profile/')
+            // 路由 id 不是可访问路径，直接跳会落到 NotFound。
+            window.location.replace(OAUTH_BIND_SUCCESS_PATH)
           }
         }, 200)
       }

@@ -527,12 +527,58 @@ const (
 // in the DSN are stripped before hashing so the identifier never encodes
 // credentials.
 func migrationLockIdentity(dsn string) string {
-	if sanitized, err := url.Parse(dsn); err == nil && sanitized.Host != "" {
-		sanitized.User = nil
-		dsn = sanitized.String()
-	}
-	sum := sha256.Sum256([]byte(dsn))
+	dsn = strings.TrimSpace(dsn)
+	target := canonicalMigrationTarget(dsn)
+	sum := sha256.Sum256([]byte(target))
 	return hex.EncodeToString(sum[:8])
+}
+
+// canonicalMigrationTarget reduces a DSN to the database it connects to:
+// host, port and database name, with credentials and non-identity options
+// dropped. Two masters configured with equivalent DSNs (scheme alias, sslmode,
+// rotated password, pooled options) must derive the same migration lock, or
+// they would migrate the same database concurrently.
+func canonicalMigrationTarget(dsn string) string {
+	if dsn == "" {
+		return "local:" + common.SQLitePath
+	}
+	if dsn == "local" {
+		return "local:" + common.SQLitePath
+	}
+	if parsed, err := url.Parse(dsn); err == nil && parsed.Host != "" {
+		// postgres:// and postgresql:// name the same target.
+		port := parsed.Port()
+		if port == "" {
+			port = "5432"
+		}
+		return "postgres|" + parsed.Hostname() + "|" + port + "|" + strings.TrimPrefix(parsed.Path, "/")
+	}
+	// MySQL DSN: user[:pass]@tcp(host:port)/db?params or unix(socket)/db.
+	rest := dsn
+	if at := strings.LastIndex(rest, "@"); at >= 0 {
+		rest = rest[at+1:]
+	}
+	dbName := ""
+	if slash := strings.Index(rest, ")/"); slash >= 0 {
+		dbName = rest[slash+2:]
+	}
+	if q := strings.Index(dbName, "?"); q >= 0 {
+		dbName = dbName[:q]
+	}
+	if open := strings.Index(rest, "("); open >= 0 {
+		if close := strings.Index(rest, ")"); close > open {
+			addr := rest[open+1 : close]
+			port := ""
+			if colon := strings.LastIndex(addr, ":"); colon >= 0 {
+				addr, port = addr[:colon], addr[colon+1:]
+			}
+			if port == "" {
+				port = "3306"
+			}
+			return "mysql|" + addr + "|" + port + "|" + dbName
+		}
+	}
+	return "raw|" + rest
 }
 
 func migrationAdvisoryLockKeyFor(dsn string) int64 {

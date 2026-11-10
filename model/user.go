@@ -597,10 +597,17 @@ var userUpdateOmittedColumns = append(append([]string{}, billingColumns...), "Se
 // bumpUserSessionEpoch 递增用户的会话世代，使该用户此前签发的会话全部失效。
 // 用 SQL 相对更新而不是读写快照：并发改密码时两次递增都必须生效。
 func bumpUserSessionEpoch(userId int) error {
+	return bumpUserSessionEpochTx(DB, userId)
+}
+
+// bumpUserSessionEpochTx 是 bumpUserSessionEpoch 的事务内版本。改密码与递增
+// 世代必须同一事务：密码先提交、世代后失败时，新密码已生效而旧会话仍能通过
+// 鉴权，受害者改密码无法把盗号者赶下线。
+func bumpUserSessionEpochTx(tx *gorm.DB, userId int) error {
 	if userId <= 0 {
 		return nil
 	}
-	return DB.Model(&User{}).Where("id = ?", userId).
+	return tx.Model(&User{}).Where("id = ?", userId).
 		UpdateColumn("session_epoch", gorm.Expr("session_epoch + 1")).Error
 }
 
@@ -622,13 +629,17 @@ func (user *User) Update(updatePassword bool) error {
 	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
 	}
-	if err = DB.Omit(userUpdateOmittedColumns...).Model(user).Updates(newUser).Error; err != nil {
-		return err
-	}
-	if updatePassword {
-		if err = bumpUserSessionEpoch(user.Id); err != nil {
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Omit(userUpdateOmittedColumns...).Model(user).Updates(newUser).Error; err != nil {
 			return err
 		}
+		if updatePassword {
+			return bumpUserSessionEpochTx(tx, user.Id)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	// Updates 后再读一次，缓存写的是更新后的整行状态，而不是更新前快照。
 	if err = DB.First(user, user.Id).Error; err != nil {
@@ -665,13 +676,17 @@ func (user *User) Edit(updatePassword bool) error {
 	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
 	}
-	if err = DB.Model(user).Updates(updates).Error; err != nil {
-		return err
-	}
-	if updatePassword {
-		if err = bumpUserSessionEpoch(user.Id); err != nil {
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(user).Updates(updates).Error; err != nil {
 			return err
 		}
+		if updatePassword {
+			return bumpUserSessionEpochTx(tx, user.Id)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
@@ -900,10 +915,12 @@ func ResetUserPasswordByEmail(email string, password string) error {
 	if err != nil {
 		return err
 	}
-	if err := DB.Model(&User{}).Where("id = ?", users[0].Id).Update("password", hashedPassword).Error; err != nil {
-		return err
-	}
-	if err := bumpUserSessionEpoch(users[0].Id); err != nil {
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&User{}).Where("id = ?", users[0].Id).Update("password", hashedPassword).Error; err != nil {
+			return err
+		}
+		return bumpUserSessionEpochTx(tx, users[0].Id)
+	}); err != nil {
 		return err
 	}
 	// 重置密码后必须同步缓存里的世代，否则缓存 TTL 内旧的世代仍会放行
