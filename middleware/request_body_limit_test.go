@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"io"
 	"net/http"
@@ -206,4 +207,88 @@ func TestRequestBodyIngressLimitDoesNotReadUnreadBodies(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Zero(t, reader.reads, "the ingress wrapper must not read the body on its own")
+}
+
+// 匿名路由的上限必须按解压后的内容计。原来的实现读的是压缩后的原始字节，
+// 614KB 的请求体压成 663B 就能绕过 512KB 上限，8MB 的压缩炸弹也能被接受：
+// 匿名端点因此可以被用来制造解压放大的 CPU/内存消耗。
+func TestAnonymousRequestBodyLimitCountsDecompressedSize(t *testing.T) {
+	withAnonymousRequestBodyLimitKB(t, 1)
+	gin.SetMode(gin.TestMode)
+
+	handlerCalled := false
+	engine := gin.New()
+	engine.POST("/t", AnonymousRequestBodyLimit(), func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusOK)
+	})
+
+	payload := bytes.Repeat([]byte("z"), (1<<10)+1) // 解压后超过 1KB 上限
+	var compressed bytes.Buffer
+	zw := gzip.NewWriter(&compressed)
+	_, err := zw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	require.Less(t, compressed.Len(), 1<<10, "前提：压缩后的线上字节数低于上限")
+
+	req := httptest.NewRequest(http.MethodPost, "/t", bytes.NewReader(compressed.Bytes()))
+	req.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code,
+		"解压后超过上限的 gzip 请求体必须被拒绝")
+	require.False(t, handlerCalled, "超限时 handler 不得运行")
+}
+
+// 反向对照：压缩后和解压后都在上限内的 gzip 请求体必须放行，且 handler
+// 拿到的是解压后的原始字节。
+func TestAnonymousRequestBodyLimitAcceptsSmallGzipBody(t *testing.T) {
+	withAnonymousRequestBodyLimitKB(t, 1)
+	gin.SetMode(gin.TestMode)
+
+	payload := bytes.Repeat([]byte("y"), 1<<9) // 512B，压缩前后都低于 1KB
+	var got []byte
+	engine := gin.New()
+	engine.POST("/t", AnonymousRequestBodyLimit(), func(c *gin.Context) {
+		var readErr error
+		got, readErr = io.ReadAll(c.Request.Body)
+		require.NoError(t, readErr)
+		c.Status(http.StatusOK)
+	})
+
+	var compressed bytes.Buffer
+	zw := gzip.NewWriter(&compressed)
+	_, err := zw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/t", bytes.NewReader(compressed.Bytes()))
+	req.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, payload, got, "handler 必须看到解压后的原始字节")
+}
+
+// 无法解析的压缩体是客户端错误，按 400 拒绝而不是放行。
+func TestAnonymousRequestBodyLimitRejectsUndecodableGzip(t *testing.T) {
+	withAnonymousRequestBodyLimitKB(t, 1)
+	gin.SetMode(gin.TestMode)
+
+	handlerCalled := false
+	engine := gin.New()
+	engine.POST("/t", AnonymousRequestBodyLimit(), func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/t", bytes.NewReader([]byte("not a gzip stream")))
+	req.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, handlerCalled)
 }
