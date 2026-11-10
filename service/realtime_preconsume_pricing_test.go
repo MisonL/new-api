@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,6 +73,32 @@ func TestPreWssConsumeQuota_UsesFrozenPriceDataForPerPriceModel(t *testing.T) {
 	wantQuota := int(0.02 * common.QuotaPerUnit)
 	require.Equal(t, 1_000_000-wantQuota, readUserQuota(t, userId),
 		"按次价格模型必须按 model_price 扣费，而不是回落成倍率计费")
+}
+
+// 自动分组：逐 turn 直扣必须使用请求开始时冻结的分组倍率。终态结算
+// PostWssConsumeQuota 读的是 relayInfo.PriceData.GroupRatioInfo，若逐 turn
+// 另按 ContextKeyAutoGroup 取实时配置，连接期间改倍率就会让逐 turn 的预留
+// 上限与结算口径不同源——倍率调高后逐 turn 先按新价拒绝放行，连接被误断。
+func TestPreWssConsumeQuota_IgnoresLiveAutoGroupRatio(t *testing.T) {
+	setupRealtimeBillingProbe(t)
+
+	const userId = 15
+	seedUser(t, userId, 1_000_000)
+	seedToken(t, userId, userId, "realtime-probe-key-15", 1_000_000)
+
+	// 实时配置把 auto-live 的倍率改成 3，冻结快照仍是 1。
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"auto-live":3}`))
+
+	c, _ := newRealtimeProbeContext()
+	common.SetContextKey(c, constant.ContextKeyAutoGroup, "auto-live")
+	info := newRealtimeProbeInfo(userId, userId, "realtime-probe-key-15")
+	info.PriceData.ModelRatio = 2
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
+
+	require.NoError(t, PreWssConsumeQuota(c, info, realtimeTextTurn(1500)))
+
+	require.Equal(t, 1_000_000-1500*2, readUserQuota(t, userId),
+		"逐 turn 直扣必须用冻结的 GroupRatioInfo，而不是实时 GetGroupRatio")
 }
 
 // 未配置倍率的模型：必须用定价快照里冻结的倍率，不能拿 GetModelRatio 的 37.5 兜底。

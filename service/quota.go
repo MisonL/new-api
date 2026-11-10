@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"strings"
 	"time"
@@ -120,17 +119,13 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	audioInputTokens := usage.InputTokenDetails.AudioTokens
 	audioOutTokens := usage.OutputTokenDetails.AudioTokens
 
-	autoGroup, exists := common.GetContextKey(ctx, constant.ContextKeyAutoGroup)
-	if exists {
-		groupRatio = ratio_setting.GetGroupRatio(autoGroup.(string))
-		log.Printf("final group ratio: %f", groupRatio)
-		relayInfo.UsingGroup = autoGroup.(string)
-	}
-
-	actualGroupRatio := groupRatio
-	userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.UserGroup, relayInfo.UsingGroup)
-	if ok {
-		actualGroupRatio = userGroupRatio
+	// 自动分组在渠道选择阶段已由 HandleGroupRatio 写进
+	// PriceData.GroupRatioInfo（含用户专属倍率）；这里只记录选中的分组名，
+	// 用于日志与亲和性口径。倍率仍取冻结快照，不能改用实时配置。
+	if autoGroup, exists := common.GetContextKey(ctx, constant.ContextKeyAutoGroup); exists {
+		if group, ok := autoGroup.(string); ok && group != "" {
+			relayInfo.UsingGroup = group
+		}
 	}
 
 	quotaInfo := QuotaInfo{
@@ -146,7 +141,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		UsePrice:   usePrice,
 		ModelPrice: modelPrice,
 		ModelRatio: modelRatio,
-		GroupRatio: actualGroupRatio,
+		GroupRatio: groupRatio,
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
