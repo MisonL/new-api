@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -418,6 +419,21 @@ func runDBMigration(name string, db *gorm.DB, migrate func() error) error {
 	defer func() {
 		db.Config.Logger = previousLogger
 	}()
+
+	release, acquired, lockErr := acquireMigrationLock(db)
+	if lockErr != nil {
+		return fmt.Errorf("failed to acquire migration lock: %w", lockErr)
+	}
+	if !acquired {
+		// Another master is migrating. It is already fine for this process to
+		// exit the migration step: if that master succeeds, this one can start
+		// serving; if it crashes, the next startup retries. Refusing to run
+		// concurrent DDL is the goal, not a failure mode.
+		common.SysLog(fmt.Sprintf("database migration skipped: another master holds the migration lock: %s", name))
+		return nil
+	}
+	defer release()
+
 	if err := migrate(); err != nil {
 		common.SysLog(fmt.Sprintf("database migration failed: %s in %s: %v", name, time.Since(start).Round(time.Millisecond), err))
 		return err
@@ -425,6 +441,84 @@ func runDBMigration(name string, db *gorm.DB, migrate func() error) error {
 	common.SysLog(fmt.Sprintf("database migration finished: %s in %s", name, time.Since(start).Round(time.Millisecond)))
 	return nil
 }
+
+// acquireMigrationLock serialises DDL across multiple master processes that
+// share one database. Concurrent ADD COLUMN / DROP INDEX / CREATE INDEX are
+// not transactional on any of the three supported engines, so two masters
+// entering the migration at the same moment make the later one fail with
+// duplicate-column or duplicate-index errors and abort startup.
+//
+// The lock is engine specific:
+//   - MySQL: GET_LOCK(name, 0). MySQL locks are connection-scoped, so the lock
+//     is taken on a single pooled connection held for the migration's duration.
+//   - PostgreSQL: pg_try_advisory_lock(key), likewise held on one connection.
+//   - SQLite: a BEGIN IMMEDIATE transaction refuses a second writer outright.
+//     A file lock cannot be held across statements without the transaction body,
+//     so this path serialises the whole migrate step through a process mutex
+//     instead (SQLite deployments are single-process in practice).
+//
+// acquired=false means another master owns the lock; lockErr is a real error.
+func acquireMigrationLock(db *gorm.DB) (release func(), acquired bool, lockErr error) {
+	switch {
+	case common.UsingPostgreSQL:
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, false, err
+		}
+		conn, err := sqlDB.Conn(context.Background())
+		if err != nil {
+			return nil, false, err
+		}
+		var got bool
+		if err := conn.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(?)", migrationAdvisoryLockKey).Scan(&got); err != nil {
+			_ = conn.Close()
+			return nil, false, err
+		}
+		if !got {
+			_ = conn.Close()
+			return func() {}, false, nil
+		}
+		return func() {
+			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock(?)", migrationAdvisoryLockKey)
+			_ = conn.Close()
+		}, true, nil
+	case common.UsingMySQL:
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, false, err
+		}
+		conn, err := sqlDB.Conn(context.Background())
+		if err != nil {
+			return nil, false, err
+		}
+		var got *int
+		if err := conn.QueryRowContext(context.Background(), "SELECT GET_LOCK(?, 0)", migrationLockName).Scan(&got); err != nil {
+			_ = conn.Close()
+			return nil, false, err
+		}
+		if got == nil || *got != 1 {
+			_ = conn.Close()
+			return func() {}, false, nil
+		}
+		return func() {
+			_, _ = conn.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", migrationLockName)
+			_ = conn.Close()
+		}, true, nil
+	default:
+		// SQLite is single-process; a process-level mutex is sufficient.
+		migrateSQLiteLock.Lock()
+		return func() { migrateSQLiteLock.Unlock() }, true, nil
+	}
+}
+
+const (
+	migrationAdvisoryLockKey int64  = 0x6e6577617069 // "newapi"
+	migrationLockName        string = "new-api:migration"
+)
+
+// migrateSQLiteLock serialises migration inside one process. It is returned by
+// acquireMigrationLock for the SQLite path; the caller ignores the value.
+var migrateSQLiteLock sync.Mutex
 
 // autoMigrateModels 是启动时统一迁移的模型列表。
 //

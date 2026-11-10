@@ -67,6 +67,7 @@ input { background: #1b1d21; color: #e6e8eb; border-color: #3a3e46; }
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
 {{if .Done}}
 <p>{{.DoneMessage}}</p>
+{{if .CloseAfterDone}}<script>try{window.close()}catch(_e){}</script>{{end}}
 {{else}}
 <p>下面这个账号即将在桌面应用中登录：</p>
 <div class="account">{{.Account}}</div>
@@ -85,15 +86,16 @@ input { background: #1b1d21; color: #e6e8eb; border-color: #3a3e46; }
 `
 
 type desktopOAuthConfirmPageData struct {
-	Title       string
-	Account     string
-	State       string
-	Action      string
-	Error       string
-	CodeLength  int
-	IsBind      bool
-	Done        bool
-	DoneMessage string
+	Title          string
+	Account        string
+	State          string
+	Action         string
+	Error          string
+	CodeLength     int
+	IsBind         bool
+	Done           bool
+	DoneMessage    string
+	CloseAfterDone bool
 }
 
 var desktopOAuthConfirmPageTemplate = template.Must(
@@ -406,9 +408,10 @@ func DesktopOAuthConfirmSubmit(c *gin.Context) {
 	// 完成后清掉浏览器令牌：同一次 handoff 只能被确认一次。
 	clearDesktopOAuthConfirmBrowserCookie(c)
 	renderDesktopOAuthConfirmPage(c, http.StatusOK, desktopOAuthConfirmPageData{
-		Title:       "确认完成",
-		Done:        true,
-		DoneMessage: "授权已完成，请返回桌面应用继续。",
+		Title:          "确认完成",
+		Done:           true,
+		DoneMessage:    "授权已完成，请返回桌面应用继续。",
+		CloseAfterDone: request.Mode == desktopOAuthModeBind,
 	})
 }
 

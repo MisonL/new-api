@@ -20,7 +20,11 @@ export type OAuthCallbackOutcome =
   | { kind: 'bind' }
   | { kind: 'require_2fa' }
   | { kind: 'desktop_handoff' }
-  | { kind: 'desktop_confirm_required'; confirmUrl: string }
+  | {
+      kind: 'desktop_confirm_required'
+      confirmUrl: string
+      action?: 'login' | 'bind'
+    }
   | { kind: 'login'; user: OAuthCallbackUserPayload }
 
 export function resolveOAuthCallbackOutcome(
@@ -30,26 +34,32 @@ export function resolveOAuthCallbackOutcome(
     return { kind: 'login', user: {} }
   }
   const payload = data as Record<string, unknown>
-  if (payload.action === 'bind') {
-    return { kind: 'bind' }
-  }
-  if (payload.require_2fa === true) {
-    return { kind: 'require_2fa' }
-  }
+  // 桌面端 handoff 必须排在最前：它的载荷里 action 可能是 'bind'，但这里
+  // 不是「已完成的绑定」，而是「浏览器需先整页跳到确认页，确认后桌面端
+  // 才拿到会话」。先判 bind 会让桌面绑定流程跳过确认、窗口也不会关闭。
   if (payload.desktop_handoff === true) {
-    // 桌面端登录/绑定需要浏览器侧确认时，后端给出确认页地址；本页面必须
-    // 整页跳转过去，确认码只在那台完成授权的浏览器里有效。
     if (
       payload.confirm_required === true &&
       typeof payload.confirm_url === 'string' &&
       payload.confirm_url !== ''
     ) {
+      const action =
+        payload.action === 'bind' || payload.action === 'login'
+          ? payload.action
+          : undefined
       return {
         kind: 'desktop_confirm_required',
         confirmUrl: payload.confirm_url,
+        ...(action ? { action } : {}),
       }
     }
     return { kind: 'desktop_handoff' }
+  }
+  if (payload.action === 'bind') {
+    return { kind: 'bind' }
+  }
+  if (payload.require_2fa === true) {
+    return { kind: 'require_2fa' }
   }
   return { kind: 'login', user: payload }
 }

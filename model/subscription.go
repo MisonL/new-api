@@ -1258,13 +1258,15 @@ func ResetDueSubscriptions(limit int) (int, error) {
 	return resetCount, nil
 }
 
-// CleanupSubscriptionPreConsumeRecords removes old idempotency records to keep table small.
+// CleanupSubscriptionPreConsumeRecords removes old refunded idempotency records to keep table small.
+// Records still in "consumed" state are kept regardless of age: they are required by cross-period
+// settlement guards and by refund idempotency checks for long-running requests.
 func CleanupSubscriptionPreConsumeRecords(olderThanSeconds int64) (int64, error) {
 	if olderThanSeconds <= 0 {
 		olderThanSeconds = 7 * 24 * 3600
 	}
 	cutoff := GetDBTimestamp() - olderThanSeconds
-	res := DB.Where("updated_at < ?", cutoff).Delete(&SubscriptionPreConsumeRecord{})
+	res := DB.Where("updated_at < ? AND status = ?", cutoff, "refunded").Delete(&SubscriptionPreConsumeRecord{})
 	return res.RowsAffected, res.Error
 }
 

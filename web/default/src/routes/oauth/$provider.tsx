@@ -189,7 +189,19 @@ function OAuthCallback() {
           // 会话由桌面应用自己轮询 handoff 拿到。提示用户切回应用即可。
           if (outcome.kind === 'desktop_confirm_required') {
             // 桌面端登录/绑定要求浏览器侧确认：整页跳到网关确认页，
-            // 由用户输入桌面应用中显示的确认码。
+            // 由用户输入桌面应用中显示的确认码。确认页由后端渲染，
+            // SPA 管不到它，因此把「这次是绑定」的意图写进 localStorage，
+            // 由确认页在成功后读标记并尝试关闭窗口。
+            if (outcome.action === 'bind') {
+              try {
+                window.localStorage.setItem(
+                  OAUTH_INTENT_STORAGE_KEY,
+                  'bind'
+                )
+              } catch (_error) {
+                void _error
+              }
+            }
             window.location.assign(outcome.confirmUrl)
             return
           }

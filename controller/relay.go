@@ -1193,6 +1193,7 @@ func resetAutoGroupSelectionProgress(c *gin.Context) {
 	if c == nil {
 		return
 	}
+	delete(c.Keys, string(constant.ContextKeyAutoGroup))
 	delete(c.Keys, string(constant.ContextKeyAutoGroupIndex))
 	delete(c.Keys, string(constant.ContextKeyAutoGroupRetryIndex))
 }
