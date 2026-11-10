@@ -10,7 +10,7 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 import { api, getSelf } from '@/lib/api'
-import { OAUTH_INTENT_STORAGE_KEY } from '@/lib/oauth'
+import { OAUTH_INTENT_STORAGE_KEY, clearOAuthIntent } from '@/lib/oauth'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
@@ -32,15 +32,6 @@ function resolveOAuthMode(): 'login' | 'bind' {
   } catch (_error) {
     void _error
     return 'login'
-  }
-}
-
-function clearOAuthIntent(): void {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.removeItem(OAUTH_INTENT_STORAGE_KEY)
-  } catch (_error) {
-    void _error
   }
 }
 
@@ -188,20 +179,10 @@ function OAuthCallback() {
           // 桌面端 login 的回调跑在系统浏览器里，后端不在这里签发会话；
           // 会话由桌面应用自己轮询 handoff 拿到。提示用户切回应用即可。
           if (outcome.kind === 'desktop_confirm_required') {
-            // 桌面端登录/绑定要求浏览器侧确认：整页跳到网关确认页，
-            // 由用户输入桌面应用中显示的确认码。确认页由后端渲染，
-            // SPA 管不到它，因此把「这次是绑定」的意图写进 localStorage，
-            // 由确认页在成功后读标记并尝试关闭窗口。
-            if (outcome.action === 'bind') {
-              try {
-                window.localStorage.setItem(
-                  OAUTH_INTENT_STORAGE_KEY,
-                  'bind'
-                )
-              } catch (_error) {
-                void _error
-              }
-            }
+            // 桌面端登录/绑定要求浏览器侧确认：整页跳到网关确认页，由用户
+            // 输入桌面应用中显示的确认码。确认页由后端渲染，bind 模式成功后
+            // 由服务端的 CloseAfterDone 关闭窗口，前端不需要、也不能在此
+            // 写入任何意图标记（在浏览器里留下 'bind' 会让后续登录被误判）。
             window.location.assign(outcome.confirmUrl)
             return
           }

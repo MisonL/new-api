@@ -77,3 +77,21 @@ test('repairs malformed markup rather than dropping it', () => {
     '<p>unclosed <b>bold</b></p>'
   )
 })
+
+// 管理员用 <style> 给内容写主题样式时，选择器靠元素 id 定位。净化器默认会把
+// id 改成 user-content- 前缀，而 <style> 里的选择器文本不会被一起改写，于是
+// 管理员写的 #hero { ... } 匹配不到任何元素，主题样式整体失效。
+test('keeps element ids so admin style selectors still match', () => {
+  const out = sanitizeHtml(
+    '<style>#hero{color:red}</style><div id="hero">banner</div>'
+  )
+  assert.equal(out, '<style>#hero{color:red}</style><div id="hero">banner</div>')
+})
+
+// 关闭 clobber 之后，DOM clobbering 防护仍需保留：名称相同的表单控件不能
+// 顶替 document 上的属性。
+test('still renames clobbering name attributes', () => {
+  const out = sanitizeHtml('<input name="location"><form name="body"></form>')
+  assert.ok(!/name="location"/.test(out), out)
+  assert.ok(!/name="body"/.test(out), out)
+})

@@ -65,6 +65,14 @@ export function buildLinuxDOOAuthUrl(clientId: string, state: string): string {
  */
 export const OAUTH_INTENT_STORAGE_KEY = 'oauth:intent'
 
+export function clearOAuthIntent(): void {
+  try {
+    window.localStorage.removeItem(OAUTH_INTENT_STORAGE_KEY)
+  } catch (_error) {
+    void _error
+  }
+}
+
 export function markOAuthIntent(intent: 'login' | 'bind'): void {
   try {
     window.localStorage.setItem(OAUTH_INTENT_STORAGE_KEY, intent)

@@ -16,6 +16,15 @@ import { defaultSchema } from 'rehype-sanitize'
  */
 export const sanitizeSchema = {
   ...defaultSchema,
+  // The default schema rewrites element ids to `user-content-<id>` to defeat
+  // DOM clobbering. Admin stylesheets in <style> blocks address elements by
+  // their original id, and the stylesheet text is not rewritten, so every
+  // selector stops matching and the admin theme silently disappears. Keep ids
+  // intact; `name` stays clobbered, which is the attribute that can shadow
+  // document properties.
+  clobber: (defaultSchema.clobber ?? []).filter(
+    (attribute) => attribute !== 'id'
+  ),
   tagNames: [...(defaultSchema.tagNames ?? []), 'style'],
   attributes: {
     ...defaultSchema.attributes,

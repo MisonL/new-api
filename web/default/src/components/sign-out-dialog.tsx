@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { logout } from '@/features/auth/api'
+import { clearOAuthIntent } from '@/lib/oauth'
 
 interface SignOutDialogProps {
   open: boolean
@@ -20,6 +21,9 @@ export function SignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
       /* empty */
     }
     auth.reset()
+    // A pending bind intent must not survive the session: the next sign-in
+    // would otherwise be treated as a bind callback.
+    clearOAuthIntent()
     try {
       if (typeof window !== 'undefined') {
         window.localStorage.removeItem('uid')
