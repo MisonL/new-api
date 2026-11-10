@@ -1,9 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { clearOAuthIntent } from '@/lib/oauth'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { logout } from '@/features/auth/api'
-import { clearOAuthIntent } from '@/lib/oauth'
 
 interface SignOutDialogProps {
   open: boolean

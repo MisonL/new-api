@@ -85,7 +85,10 @@ test('keeps element ids so admin style selectors still match', () => {
   const out = sanitizeHtml(
     '<style>#hero{color:red}</style><div id="hero">banner</div>'
   )
-  assert.equal(out, '<style>#hero{color:red}</style><div id="hero">banner</div>')
+  assert.equal(
+    out,
+    '<style>#hero{color:red}</style><div id="hero">banner</div>'
+  )
 })
 
 // 关闭 clobber 之后，DOM clobbering 防护仍需保留：名称相同的表单控件不能
