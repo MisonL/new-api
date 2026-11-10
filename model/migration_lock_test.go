@@ -35,14 +35,14 @@ func TestMigrationLockIsAcquirableAndReleasable(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	release, acquired, lockErr := acquireMigrationLock(gdb)
+	release, acquired, lockErr := acquireMigrationLock(gdb, false)
 	require.NoError(t, lockErr)
 	require.True(t, acquired, "第一次获取迁移锁应当成功")
 	require.NotNil(t, release)
 	release()
 
 	// 释放之后可以再次获取
-	release2, acquired2, lockErr2 := acquireMigrationLock(gdb)
+	release2, acquired2, lockErr2 := acquireMigrationLock(gdb, false)
 	require.NoError(t, lockErr2)
 	require.True(t, acquired2, "释放后应当可以再次获取迁移锁")
 	require.NotNil(t, release2)
@@ -63,7 +63,7 @@ func TestMigrationLockSQLiteMutualExclusion(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	release1, acquired1, err := acquireMigrationLock(gdb)
+	release1, acquired1, err := acquireMigrationLock(gdb, false)
 	require.NoError(t, err)
 	require.True(t, acquired1)
 
@@ -71,7 +71,7 @@ func TestMigrationLockSQLiteMutualExclusion(t *testing.T) {
 	// 在同一 goroutine 里测。改为验证：第一次释放后第二次能获取。
 	release1()
 
-	release2, acquired2, err := acquireMigrationLock(gdb)
+	release2, acquired2, err := acquireMigrationLock(gdb, false)
 	require.NoError(t, err)
 	require.True(t, acquired2)
 	release2()

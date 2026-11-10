@@ -364,7 +364,7 @@ func InitDB() (err error) {
 		if common.UsingMySQL {
 			//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
 		}
-		err = runDBMigration("main", DB, migrateDB)
+		err = runDBMigration("main", DB, false, migrateDB)
 		return err
 	} else {
 		common.FatalLog(err)
@@ -403,7 +403,7 @@ func InitLogDB() (err error) {
 		if !common.IsMasterNode {
 			return nil
 		}
-		err = runDBMigration("log", LOG_DB, migrateLOGDB)
+		err = runDBMigration("log", LOG_DB, true, migrateLOGDB)
 		return err
 	} else {
 		common.FatalLog(err)
@@ -411,7 +411,7 @@ func InitLogDB() (err error) {
 	return err
 }
 
-func runDBMigration(name string, db *gorm.DB, migrate func() error) error {
+func runDBMigration(name string, db *gorm.DB, isLog bool, migrate func() error) error {
 	start := time.Now()
 	common.SysLog("database migration started: " + name)
 	previousLogger := db.Config.Logger
@@ -420,7 +420,7 @@ func runDBMigration(name string, db *gorm.DB, migrate func() error) error {
 		db.Config.Logger = previousLogger
 	}()
 
-	release, acquired, lockErr := acquireMigrationLock(db)
+	release, acquired, lockErr := acquireMigrationLock(db, isLog)
 	if lockErr != nil {
 		return fmt.Errorf("failed to acquire migration lock: %w", lockErr)
 	}
@@ -458,9 +458,9 @@ func runDBMigration(name string, db *gorm.DB, migrate func() error) error {
 //     instead (SQLite deployments are single-process in practice).
 //
 // acquired=false means another master owns the lock; lockErr is a real error.
-func acquireMigrationLock(db *gorm.DB) (release func(), acquired bool, lockErr error) {
-	switch {
-	case common.UsingPostgreSQL:
+func acquireMigrationLock(db *gorm.DB, isLog bool) (release func(), acquired bool, lockErr error) {
+	switch migrationDialect(isLog) {
+	case migrationDialectPostgreSQL:
 		sqlDB, err := db.DB()
 		if err != nil {
 			return nil, false, err
@@ -482,7 +482,7 @@ func acquireMigrationLock(db *gorm.DB) (release func(), acquired bool, lockErr e
 			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", migrationAdvisoryLockKey)
 			_ = conn.Close()
 		}, true, nil
-	case common.UsingMySQL:
+	case migrationDialectMySQL:
 		sqlDB, err := db.DB()
 		if err != nil {
 			return nil, false, err
@@ -515,6 +515,36 @@ const (
 	migrationAdvisoryLockKey int64  = 0x6e6577617069 // "newapi"
 	migrationLockName        string = "new-api:migration"
 )
+
+const (
+	migrationDialectPostgreSQL = "postgres"
+	migrationDialectMySQL      = "mysql"
+	migrationDialectSQLite     = "sqlite"
+)
+
+// migrationDialect names the engine the target database runs on. The log
+// database can be a different engine from the main one (LOG_SQL_DSN), so a
+// log migration must not reuse the main database's dialect.
+func migrationDialect(isLog bool) string {
+	if isLog {
+		switch common.LogSqlType {
+		case common.DatabaseTypePostgreSQL:
+			return migrationDialectPostgreSQL
+		case common.DatabaseTypeMySQL:
+			return migrationDialectMySQL
+		default:
+			return migrationDialectSQLite
+		}
+	}
+	switch {
+	case common.UsingPostgreSQL:
+		return migrationDialectPostgreSQL
+	case common.UsingMySQL:
+		return migrationDialectMySQL
+	default:
+		return migrationDialectSQLite
+	}
+}
 
 // migrateSQLiteLock serialises migration inside one process. It is returned by
 // acquireMigrationLock for the SQLite path; the caller ignores the value.

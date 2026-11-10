@@ -26,14 +26,14 @@ func TestAcquireMigrationLockOnPostgres(t *testing.T) {
 	common.UsingPostgreSQL = true
 	t.Cleanup(func() { common.UsingPostgreSQL = previous })
 
-	release, acquired, lockErr := acquireMigrationLock(db)
+	release, acquired, lockErr := acquireMigrationLock(db, false)
 	require.NoError(t, lockErr, "PostgreSQL 迁移锁的 SQL 必须能被 pgx 执行")
 	require.True(t, acquired)
 	require.NotNil(t, release)
 	release()
 
 	// 释放后同一进程可以再次拿到锁。
-	release2, acquired2, lockErr2 := acquireMigrationLock(db)
+	release2, acquired2, lockErr2 := acquireMigrationLock(db, false)
 	require.NoError(t, lockErr2)
 	require.True(t, acquired2)
 	release2()

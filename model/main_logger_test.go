@@ -36,7 +36,7 @@ func TestRunDBMigrationUsesMigrationSlowThresholdAndRestoresLogger(t *testing.T)
 	require.NoError(t, err)
 	originalLogger := db.Config.Logger
 
-	err = runDBMigration("test", db, func() error {
+	err = runDBMigration("test", db, false, func() error {
 		require.NotSame(t, originalLogger, db.Config.Logger)
 		return db.Exec("SELECT 1").Error
 	})
