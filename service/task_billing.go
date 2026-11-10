@@ -187,6 +187,11 @@ func RevertTaskTerminalTransition(ctx context.Context, task *model.Task, termina
 		return
 	}
 	task.PrivateData.BillingRetryCount++
+	// 回退的是成功终态时，上游已经交付。这个标记必须与回退同一条语句落库，
+	// 否则后续超时清扫会把「上游已成功但结算失败」的任务当成普通失败退款。
+	if terminalStatus == model.TaskStatusSuccess {
+		task.PrivateData.UpstreamSucceeded = true
+	}
 	won, err := task.RestoreSnapshot(terminalStatus, snap)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("任务 %s 计费失败后回退终态出错: %s", task.TaskID, err.Error()))

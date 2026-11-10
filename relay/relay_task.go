@@ -1422,7 +1422,11 @@ func tryRealtimeFetch(c *gin.Context, task *model.Task, isOpenAIVideoAPI bool) (
 				service.RevertTaskTerminalTransition(c, task, model.TaskStatusSuccess, snap)
 			}
 		} else if task.Status == model.TaskStatusFailure && task.Quota != 0 {
-			if refundErr := service.RefundTaskQuota(c, task, ti.Reason); refundErr != nil {
+			if task.PrivateData.UpstreamSucceeded {
+				// 曾经观察到上游成功、只是结算失败被回退：不能整笔退款，
+				// 否则先前已交付的产出变成免费。
+				logger.LogError(c, fmt.Sprintf("任务 %s 上游曾报告成功，结算未完成即被报告失败，保留预扣 %d 待人工核对", task.TaskID, task.Quota))
+			} else if refundErr := service.RefundTaskQuota(c, task, ti.Reason); refundErr != nil {
 				service.RevertTaskTerminalTransition(c, task, model.TaskStatusFailure, snap)
 			}
 		}

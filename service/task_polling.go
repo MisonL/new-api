@@ -565,20 +565,27 @@ func sweepTimedOutTasks(ctx context.Context) {
 
 	reason := fmt.Sprintf("任务超时（%d分钟）", constant.TaskTimeoutMinutes)
 	legacyReason := "任务超时（旧系统遗留任务，不进行退款，请联系管理员）"
+	// 上游已报告成功、只是终态结算没成功就超时的任务：预扣要保留，退款会把
+	// 已经交付的工作变成免费。差额留给人工核对或后续补偿。
+	settlementPendingReason := "任务超时，但上游已交付且结算失败，保留预扣待人工核对"
 	now := time.Now().Unix()
 	timedOutCount := 0
 
 	for _, task := range tasks {
 		isLegacy := task.SubmitTime > 0 && task.SubmitTime < legacyTaskCutoff
+		awaitingSettlement := task.PrivateData.UpstreamSucceeded
 
 		snap := task.Snapshot()
 		oldStatus := task.Status
 		task.Status = model.TaskStatusFailure
 		task.Progress = "100%"
 		task.FinishTime = now
-		if isLegacy {
+		switch {
+		case isLegacy:
 			task.FailReason = legacyReason
-		} else {
+		case awaitingSettlement:
+			task.FailReason = settlementPendingReason
+		default:
 			task.FailReason = reason
 		}
 
@@ -592,6 +599,10 @@ func sweepTimedOutTasks(ctx context.Context) {
 			continue
 		}
 		timedOutCount++
+		if awaitingSettlement && task.Quota != 0 {
+			logger.LogError(ctx, fmt.Sprintf("任务 %s 上游已成功但结算未完成即超时，保留预扣 %d 待人工核对", task.TaskID, task.Quota))
+			continue
+		}
 		if !isLegacy && task.Quota != 0 {
 			if refundErr := RefundTaskQuota(ctx, task, reason); refundErr != nil {
 				RevertTaskTerminalTransition(ctx, task, model.TaskStatusFailure, snap)
@@ -809,6 +820,11 @@ func markTaskPollingFailure(ctx context.Context, task *model.Task, reason string
 	if strings.TrimSpace(reason) == "" {
 		reason = "Task polling failed locally"
 	}
+	awaitingSettlement := task.PrivateData.UpstreamSucceeded
+	if awaitingSettlement {
+		// 上游已交付、结算未完成：不能按普通失败退款，否则完成的工作变成免费。
+		reason = "任务轮询失败，但上游已交付且结算失败，保留预扣待人工核对"
+	}
 	task.FailReason = reason
 	won, err := task.UpdateWithStatus(oldStatus)
 	if err != nil {
@@ -816,6 +832,10 @@ func markTaskPollingFailure(ctx context.Context, task *model.Task, reason string
 	}
 	if !won {
 		logger.LogInfo(ctx, fmt.Sprintf("Task %s already transitioned, skip local failure", task.TaskID))
+		return nil
+	}
+	if awaitingSettlement && task.Quota != 0 {
+		logger.LogError(ctx, fmt.Sprintf("任务 %s 上游已成功但结算未完成即标记本地失败，保留预扣 %d 待人工核对", task.TaskID, task.Quota))
 		return nil
 	}
 	if task.Quota != 0 {
@@ -925,6 +945,12 @@ func applySunoTaskResponse(ctx context.Context, task *model.Task, responseItem d
 		return nil
 	}
 	if status == model.TaskStatusFailure && oldStatus != model.TaskStatusFailure && task.Quota != 0 {
+		if task.PrivateData.UpstreamSucceeded {
+			// 之前一轮已经观察到上游成功、只是结算失败被回退：这次的上游失败
+			// 不能整笔退款，否则先前已交付的产出变成免费。
+			logger.LogError(ctx, fmt.Sprintf("任务 %s 上游曾报告成功，结算未完成即被报告失败，保留预扣 %d 待人工核对", task.TaskID, task.Quota))
+			return nil
+		}
 		logger.LogInfo(ctx, task.TaskID+" 构建失败，"+task.FailReason)
 		if refundErr := RefundTaskQuota(ctx, task, task.FailReason); refundErr != nil {
 			RevertTaskTerminalTransition(ctx, task, model.TaskStatusFailure, snap)
@@ -1756,6 +1782,11 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 
 	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
 	if isDone && snap.Status != task.Status {
+		// 这次 CAS 会落库私有数据：重新观察到成功时清掉上次结算失败留下的
+		// 「上游已成功」标记；若本轮结算再失败，回退语句会重新置位。
+		if task.Status == model.TaskStatusSuccess {
+			task.PrivateData.UpstreamSucceeded = false
+		}
 		won, err := task.UpdateWithStatus(snap.Status)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("UpdateWithStatus failed for task %s: %s", task.TaskID, err.Error()))
@@ -1785,6 +1816,12 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		}
 	}
 	if shouldRefund {
+		if task.PrivateData.UpstreamSucceeded {
+			// 之前一轮已观察到上游成功、只是结算失败被回退：这次的失败报告
+			// 不能整笔退款，否则先前已交付的产出变成免费。
+			logger.LogError(ctx, fmt.Sprintf("任务 %s 上游曾报告成功，结算未完成即被报告失败，保留预扣 %d 待人工核对", task.TaskID, task.Quota))
+			return nil
+		}
 		if refundErr := RefundTaskQuota(ctx, task, task.FailReason); refundErr != nil {
 			RevertTaskTerminalTransition(ctx, task, model.TaskStatusFailure, snap)
 			return fmt.Errorf("refund task %s: %w", task.TaskID, refundErr)

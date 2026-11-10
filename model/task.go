@@ -189,6 +189,11 @@ type TaskPrivateData struct {
 	// 回退到未完成状态等待重试，没有上限时一个永久性失败（例如订阅行已被
 	// 删除）会让每轮轮询都重复请求上游。超过上限后保留终态并告警。
 	BillingRetryCount int `json:"billing_retry_count,omitempty"`
+	// UpstreamSucceeded 表示上游已明确报告成功，但该次终态结算失败、任务被
+	// 回退等待重试。上游已经交付，此时任何「任务失败」路径都不得整笔退款，
+	// 否则完成的工作变成免费；超时清扫与本地失败标记据此保留预扣待人工核对。
+	// 重新观察到上游成功时由 CAS 清回 false。
+	UpstreamSucceeded bool `json:"upstream_succeeded,omitempty"`
 }
 
 // TaskRouteSnapshotSchemaVersion is the current persisted snapshot schema.
