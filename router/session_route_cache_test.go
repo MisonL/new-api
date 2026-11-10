@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"bytes"
+
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -39,4 +42,27 @@ func TestSessionIssuingRoutesDisableCache(t *testing.T) {
 	require.Equal(t, http.StatusOK, issued.Code)
 	require.Contains(t, issued.Header().Get("Cache-Control"), "no-store",
 		"访问令牌响应不得被缓存")
+}
+
+// 真实路由表上的顺序验证：超过匿名上限的请求体在 body-limit 中间件就被
+// 413 拦下，只有 DisableCache 排在这个中间件之前，被拒绝的响应才带
+// no-store。否则共享代理可能缓存这条 413，影响后续同 URL 的请求。
+func TestLoginRouteRejectsOversizedBodyWithNoStore(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	constant.AnonymousRequestBodyLimitKB = 1
+	t.Cleanup(func() { constant.AnonymousRequestBodyLimitKB = 0 })
+
+	engine := gin.New()
+	SetApiRouter(engine)
+
+	body := bytes.Repeat([]byte("a"), (1<<10)+1)
+	req := httptest.NewRequest(http.MethodPost, "/api/user/login", bytes.NewReader(body))
+	req.RemoteAddr = "192.0.2.7:12345"
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code,
+		"超限请求体应被匿名上限拦截，实际: %d", rec.Code)
+	require.Contains(t, rec.Header().Get("Cache-Control"), "no-store",
+		"被匿名上限拒绝的登录响应也必须带 no-store")
 }
