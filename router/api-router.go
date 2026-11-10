@@ -54,11 +54,13 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)
 		apiRouter.POST("/user/reset", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.ResetPassword)
 		// OAuth routes - specific routes must come before :provider wildcard
-		apiRouter.GET("/oauth/state", middleware.CriticalRateLimit(), controller.GenerateOAuthCode)
-		apiRouter.GET("/oauth/desktop/start", middleware.CriticalRateLimit(), controller.StartDesktopOAuth)
-		apiRouter.GET("/oauth/desktop/poll", middleware.DesktopOAuthPollRateLimit(), controller.PollDesktopOAuth)
-		apiRouter.GET("/oauth/desktop/confirm", middleware.CriticalRateLimit(), controller.DesktopOAuthConfirmPage)
-		apiRouter.POST("/oauth/desktop/confirm", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.DesktopOAuthConfirmSubmit)
+		// 这些端点会写入或消费会话（state 种 cookie、desktop poll 签发会话、
+		// 回调写登录态），响应一律不得被共享代理或浏览器缓存。
+		apiRouter.GET("/oauth/state", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.GenerateOAuthCode)
+		apiRouter.GET("/oauth/desktop/start", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.StartDesktopOAuth)
+		apiRouter.GET("/oauth/desktop/poll", middleware.DisableCache(), middleware.DesktopOAuthPollRateLimit(), controller.PollDesktopOAuth)
+		apiRouter.GET("/oauth/desktop/confirm", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.DesktopOAuthConfirmPage)
+		apiRouter.POST("/oauth/desktop/confirm", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.DesktopOAuthConfirmSubmit)
 		apiRouter.POST("/oauth/email/bind", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.EmailBind)
 		// Non-standard OAuth (WeChat, Telegram) - keep original routes
 		apiRouter.GET("/oauth/wechat", middleware.CriticalRateLimit(), controller.WeChatAuth)
@@ -66,7 +68,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/telegram/login", middleware.CriticalRateLimit(), controller.TelegramLogin)
 		apiRouter.GET("/oauth/telegram/bind", middleware.CriticalRateLimit(), controller.TelegramBind)
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route
-		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), controller.HandleOAuth)
+		apiRouter.GET("/oauth/:provider", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.HandleOAuth)
 		apiRouter.POST("/auth/external/:provider/jwt/login", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.HandleCustomOAuthJWTLogin)
 		apiRouter.POST("/auth/external/:provider/header/login", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.HandleCustomOAuthHeaderLogin)
 		apiRouter.GET("/auth/external/:provider/cas/start", middleware.CriticalRateLimit(), controller.HandleCustomOAuthCASStart)

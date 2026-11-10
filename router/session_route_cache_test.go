@@ -7,9 +7,14 @@ import (
 
 	"bytes"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,6 +47,47 @@ func TestSessionIssuingRoutesDisableCache(t *testing.T) {
 	require.Equal(t, http.StatusOK, issued.Code)
 	require.Contains(t, issued.Header().Get("Cache-Control"), "no-store",
 		"访问令牌响应不得被缓存")
+}
+
+// OAuth 起始与桌面轮询接口同样会下发会话 Cookie：/api/oauth/state 在响应里
+// 写 session，桌面 poll 在授权完成时签发会话。这两类响应若被共享代理或浏览器
+// 缓存，等同于把某个用户的会话复放给下一个人，必须与登录/注册同等待遇。
+func TestOAuthSessionRoutesDisableCache(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// 桌面 poll 用的是 Redis 限流器，测试环境没有 Redis 会直接空指针。
+	server, err := miniredis.Run()
+	require.NoError(t, err)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	oldRedisEnabled := common.RedisEnabled
+	oldRDB := common.RDB
+	t.Cleanup(func() {
+		common.RedisEnabled = oldRedisEnabled
+		common.RDB = oldRDB
+		_ = client.Close()
+		server.Close()
+	})
+	common.RedisEnabled = true
+	common.RDB = client
+
+	engine := gin.New()
+	store := cookie.NewStore([]byte("oauth-session-route-test-secret"))
+	engine.Use(sessions.Sessions("session", store))
+	SetApiRouter(engine)
+
+	for _, target := range []string{
+		"/api/oauth/state",
+		"/api/oauth/desktop/poll?handoff_token=probe-token",
+	} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.RemoteAddr = "192.0.2.9:12345"
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, req)
+
+		require.NotEqual(t, http.StatusNotFound, rec.Code, "%s 必须已注册", target)
+		require.Contains(t, rec.Header().Get("Cache-Control"), "no-store",
+			"%s 会下发或引用会话，必须带 no-store（实际码 %d）", target, rec.Code)
+	}
 }
 
 // 真实路由表上的顺序验证：超过匿名上限的请求体在 body-limit 中间件就被
