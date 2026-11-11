@@ -121,3 +121,31 @@ func TestPreWssConsumeQuota_UsesFrozenModelRatioNotFallback(t *testing.T) {
 	require.Equal(t, 1_000_000-wantQuota, readUserQuota(t, userId),
 		"逐 turn 直扣必须使用冻结倍率，不得回落到 37.5 兜底")
 }
+
+// 终态结算必须用定价快照里冻结的补全倍率。连接期间管理员改倍率时，
+// 若这里回查实时配置，同一请求的逐 turn 直扣与终态 delta 会按两套价格计算。
+func TestPostWssConsumeQuota_UsesFrozenCompletionRatio(t *testing.T) {
+	setupRealtimeBillingProbe(t)
+
+	const userId = 16
+	const initial = 1_000_000
+	seedUser(t, userId, initial)
+	seedToken(t, userId, userId, "realtime-probe-key-16", initial)
+
+	// 实时配置把补全倍率改成 4；请求开始时冻结的是 1。
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(
+		`{"`+realtimeDoubleChargeModel+`":4}`))
+
+	c, _ := newRealtimeProbeContext()
+	info := newRealtimeProbeInfo(userId, userId, "realtime-probe-key-16")
+	info.PriceData.ModelRatio = 1
+	info.PriceData.CompletionRatio = 1
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
+
+	require.Nil(t, PreConsumeBilling(c, 0, info))
+	PostWssConsumeQuota(c, info, info.OriginModelName, realtimeTextTurn(1500), "")
+
+	// 冻结口径：输入 1000 + 输出 500 x 1 = 1500。
+	require.Equal(t, initial-1500, readUserQuota(t, userId),
+		"终态结算必须用冻结的 CompletionRatio，而不是实时配置")
+}
