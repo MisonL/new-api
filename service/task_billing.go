@@ -257,7 +257,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) error
 // 与 RefundTaskQuota 相同，返回值只报告资金来源调整是否成功；失败表示
 // 数据库未发生资金变动，调用方可以安全回退任务终态等待重试。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string) error {
-	if actualQuota <= 0 {
+	// 0 是合法结果（冻结的 0 分组/补全倍率、免费模型），必须照常走退款路径，
+	// 不能被当成无效值跳过而把预扣额度留在账上。负数只可能是上游算错。
+	if actualQuota < 0 {
 		return nil
 	}
 	preConsumedQuota := task.Quota
@@ -329,19 +331,20 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	return nil
 }
 
-// taskFrozenGroupRatio returns the group ratio captured at submission time.
-// The task row stores the concrete group that was actually used, not the
-// user's own group, so re-deriving the ratio from configuration can pick a
-// different value than the one the pre-consume charged.
-func taskFrozenGroupRatio(task *model.Task) (float64, bool) {
+// taskFrozenBillingContext returns the billing snapshot captured at submission
+// time. Rows written before TaskBillingContext.Frozen existed carry no marker,
+// so callers must fall back to live configuration for those. Presence is the
+// marker's job: a legitimate zero ratio (free group, fail-closed unpriced
+// model) must not be read as "no snapshot".
+func taskFrozenBillingContext(task *model.Task) (*model.TaskBillingContext, bool) {
 	if task == nil || task.PrivateData.BillingContext == nil {
-		return 0, false
+		return nil, false
 	}
-	ratio := task.PrivateData.BillingContext.GroupRatio
-	if ratio <= 0 {
-		return 0, false
+	bc := task.PrivateData.BillingContext
+	if !bc.Frozen {
+		return nil, false
 	}
-	return ratio, true
+	return bc, true
 }
 
 // resolveTaskGroupRatio re-derives the group ratio for legacy rows that carry
@@ -401,22 +404,28 @@ func RecalculateTaskQuotaByTokensWithUsage(ctx context.Context, task *model.Task
 
 	modelName := taskModelName(task)
 
-	// 获取模型价格和倍率
-	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
-	// 只有配置了倍率(非固定价格)时才按 token 重新计费
-	if !hasRatioSetting || modelRatio <= 0 {
-		return nil
-	}
-
-	// 分组倍率优先取提交时冻结的快照：预扣用的就是它，重算另取一份配置
-	// 会让同一笔任务在补扣/退款时换一套口径。只有旧行没有快照时才回退到
-	// 现查，且必须按 (用户分组, 使用分组) 查专属倍率。
-	finalGroupRatio, ok := taskFrozenGroupRatio(task)
-	if !ok {
+	// 倍率一律优先取提交时冻结的快照：预扣用的就是它，重算另取一份配置会让
+	// 同一笔任务在补扣/退款时换一套口径。快照里的 0 是合法值（免费组、
+	// 未定价模型 fail-closed），只有旧行没有快照时才现查，且必须按
+	// (用户分组, 使用分组) 查专属倍率。
+	var modelRatio, completionRatio, finalGroupRatio float64
+	if bc, ok := taskFrozenBillingContext(task); ok {
+		modelRatio = bc.ModelRatio
+		completionRatio = bc.CompletionRatio
+		finalGroupRatio = bc.GroupRatio
+	} else {
+		liveModelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
+		// 只有配置了倍率(非固定价格)时才按 token 重新计费
+		if !hasRatioSetting || liveModelRatio <= 0 {
+			return nil
+		}
+		modelRatio = liveModelRatio
+		// GetCompletionRatio 对未配置的模型返回默认值；配置里的 0 原样生效。
+		completionRatio = ratio_setting.GetCompletionRatio(modelName)
 		finalGroupRatio = resolveTaskGroupRatio(task)
-	}
-	if finalGroupRatio <= 0 {
-		return nil
+		if finalGroupRatio <= 0 {
+			return nil
+		}
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）
@@ -427,12 +436,6 @@ func RecalculateTaskQuotaByTokensWithUsage(ctx context.Context, task *model.Task
 				otherMultiplier *= r
 			}
 		}
-	}
-
-	// 输出 token 按完成倍率计价；GetCompletionRatio 对未配置的模型返回默认值。
-	completionRatio := ratio_setting.GetCompletionRatio(modelName)
-	if completionRatio <= 0 {
-		completionRatio = 1
 	}
 
 	weightedTokens := float64(inputTokens) + float64(outputTokens)*completionRatio

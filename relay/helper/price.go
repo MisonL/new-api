@@ -171,6 +171,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
 	usePrice := success
 	var modelRatio float64
+	var completionRatio float64
 
 	if !success {
 		defaultPrice, ok := ratio_setting.GetDefaultModelPriceMap()[info.OriginModelName]
@@ -206,6 +207,9 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 		// 按量计费：以模型倍率的一半作为预扣额度
 		quota = int(modelRatio / 2 * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
 		modelPrice = -1
+		// 补全倍率也在提交时冻结，供任务终态按 token 重算使用。任务可能运行
+		// 数分钟到数小时，轮询期再查配置会让同一笔任务的预扣与结算不同源。
+		completionRatio = ratio_setting.GetCompletionRatio(info.OriginModelName)
 		if !operation_setting.FreeModelPreConsumeEnabled() {
 			if groupRatioInfo.GroupRatio == 0 || modelRatio == 0 {
 				quota = 0
@@ -215,12 +219,13 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 	}
 
 	priceData := types.PriceData{
-		FreeModel:      freeModel,
-		ModelPrice:     modelPrice,
-		ModelRatio:     modelRatio,
-		UsePrice:       usePrice,
-		Quota:          quota,
-		GroupRatioInfo: groupRatioInfo,
+		FreeModel:       freeModel,
+		ModelPrice:      modelPrice,
+		ModelRatio:      modelRatio,
+		CompletionRatio: completionRatio,
+		UsePrice:        usePrice,
+		Quota:           quota,
+		GroupRatioInfo:  groupRatioInfo,
 	}
 	return priceData, nil
 }

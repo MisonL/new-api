@@ -391,22 +391,26 @@ func TestRecalculate_ZeroDelta(t *testing.T) {
 	assert.Equal(t, int64(0), countLogs(t))
 }
 
+// 实际应扣为 0 是合法结果（冻结的 0 分组/补全倍率、免费模型）：必须走退款
+// 路径把预扣额度退回，不能被当成无效值跳过而把预扣留在账上。
 func TestRecalculate_ActualQuotaZero(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
 
 	const userID = 13
 	const initQuota = 10000
+	const preConsumed = 5000
 
 	seedUser(t, userID, initQuota)
 
-	task := makeTask(userID, 0, 5000, 0, BillingSourceWallet, 0)
+	task := makeTask(userID, 0, preConsumed, 0, BillingSourceWallet, 0)
 
 	RecalculateTaskQuota(ctx, task, 0, "zero actual")
 
-	// No change (early return)
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-	assert.Equal(t, int64(0), countLogs(t))
+	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID),
+		"实际应扣为 0 时必须把预扣额度退回")
+	assert.Equal(t, 0, task.Quota)
+	assert.Equal(t, int64(1), countLogs(t), "退款必须留一条消费日志")
 }
 
 func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {

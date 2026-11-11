@@ -655,9 +655,15 @@ type TaskBillingContext struct {
 	ModelPrice      float64            `json:"model_price,omitempty"`       // 模型单价
 	GroupRatio      float64            `json:"group_ratio,omitempty"`       // 分组倍率
 	ModelRatio      float64            `json:"model_ratio,omitempty"`       // 模型倍率
+	CompletionRatio float64            `json:"completion_ratio,omitempty"`  // 补全倍率
 	OtherRatios     map[string]float64 `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
 	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+	// Frozen 表示 GroupRatio/ModelRatio/CompletionRatio 取自请求开始时的定价
+	// 快照，是权威值，且 0 也合法（0 分组倍率表示免费组，未定价模型靠 0 倍率
+	// fail-closed）。旧行没有这个标记，只能回退到现查配置；不能用"倍率大于 0"
+	// 推断快照是否存在。
+	Frozen bool `json:"frozen,omitempty"`
 	// RequestId 是提交请求的幂等键，用于关联 SubscriptionPreConsumeRecord。
 	// 轮询阶段的差额结算与失败退款靠它判断预扣是否属于已被周期重置的旧周期。
 	RequestId string `json:"request_id,omitempty"`

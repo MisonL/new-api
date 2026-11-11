@@ -3846,9 +3846,11 @@ func RelayTask(c *gin.Context) {
 				ModelPrice:      relayInfo.PriceData.ModelPrice,
 				GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 				ModelRatio:      relayInfo.PriceData.ModelRatio,
+				CompletionRatio: relayInfo.PriceData.CompletionRatio,
 				OtherRatios:     relayInfo.PriceData.OtherRatios,
 				OriginModelName: relayInfo.OriginModelName,
 				PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+				Frozen:          true,
 				RequestId:       relayInfo.BillingAttemptKey,
 			}
 			task.Quota = result.Quota
@@ -3965,9 +3967,11 @@ func persistAmbiguousTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo,
 		ModelPrice:      info.PriceData.ModelPrice,
 		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:      info.PriceData.ModelRatio,
+		CompletionRatio: info.PriceData.CompletionRatio,
 		OtherRatios:     info.PriceData.OtherRatios,
 		OriginModelName: info.OriginModelName,
 		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, info.OriginModelName) || info.PriceData.UsePrice,
+		Frozen:          true,
 	}
 	task.PrivateData.RouteSnapshot = result.RouteSnapshot
 	task.Quota = 0

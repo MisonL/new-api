@@ -65,6 +65,14 @@ func TestRecalculateTaskQuotaByTokensPrefersFrozenGroupRatio(t *testing.T) {
 
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"task-billing-frozen-model":1}`))
 	// 现查配置给的是 2.0，快照冻结的是 0.5。
+	// 分组倍率是包级全局表，必须还原：无快照的旧行会现查它，残留的 2.0
+	// 会让后续结算用例按两倍计价。
+	prevGroupRatio := ratio_setting.GetGroupRatioCopy()
+	t.Cleanup(func() {
+		payload, err := common.Marshal(prevGroupRatio)
+		require.NoError(t, err)
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(payload)))
+	})
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":2}`))
 
 	const preConsumed = 500
@@ -78,7 +86,11 @@ func TestRecalculateTaskQuotaByTokensPrefersFrozenGroupRatio(t *testing.T) {
 		PrivateData: model.TaskPrivateData{
 			BillingContext: &model.TaskBillingContext{
 				OriginModelName: "task-billing-frozen-model",
+				ModelRatio:      1,
 				GroupRatio:      0.5,
+				CompletionRatio: 1,
+				// 新行必须显式声明快照存在；旧行没有这个标记时按现查配置处理。
+				Frozen: true,
 			},
 		},
 	}
