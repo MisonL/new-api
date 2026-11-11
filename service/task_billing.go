@@ -113,13 +113,18 @@ func taskAdjustFunding(task *model.Task, delta int, allowSubscriptionOverage boo
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
 // 需要通过 resolveTokenKey 运行时获取 key（不从 PrivateData 中读取）。
-func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
+//
+// 返回错误由调用方写进计费日志 other：令牌调整发生在资金来源变动之后，
+// 重试会重复退款/扣费，但缺口必须可对账，不能只留在 stderr。
+func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) error {
 	if task.PrivateData.TokenId <= 0 || delta == 0 {
-		return
+		return nil
 	}
 	tokenKey := resolveTokenKey(ctx, task.PrivateData.TokenId, task.TaskID)
 	if tokenKey == "" {
-		return
+		err := fmt.Errorf("无法解析令牌 key (tokenId=%d)", task.PrivateData.TokenId)
+		logger.LogWarn(ctx, fmt.Sprintf("调整令牌额度失败 (delta=%d, task=%s): %s", delta, task.TaskID, err.Error()))
+		return err
 	}
 	var err error
 	if delta > 0 {
@@ -129,7 +134,9 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 	}
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("调整令牌额度失败 (delta=%d, task=%s): %s", delta, task.TaskID, err.Error()))
+		return err
 	}
+	return nil
 }
 
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
@@ -230,12 +237,15 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) error
 	}
 
 	// 2. 退还令牌额度
-	taskAdjustTokenQuota(ctx, task, -quota)
+	tokenQuotaErr := taskAdjustTokenQuota(ctx, task, -quota)
 
 	// 3. 记录日志
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
+	if tokenQuotaErr != nil {
+		other[tokenQuotaErrorLogField] = tokenQuotaErr.Error()
+	}
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
@@ -286,7 +296,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	}
 
 	// 调整令牌额度
-	taskAdjustTokenQuota(ctx, task, quotaDelta)
+	tokenQuotaErr := taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
 	// 结算额度必须落库：任务列表读的是库里的 quota，只改内存会让用户看到的
@@ -312,6 +322,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	other["task_id"] = task.TaskID
 	other["pre_consumed_quota"] = preConsumedQuota
 	other["actual_quota"] = actualQuota
+	if tokenQuotaErr != nil {
+		other[tokenQuotaErrorLogField] = tokenQuotaErr.Error()
+	}
 	if usageStatsErr != nil {
 		other[usageStatsErrorLogField] = usageStatsErr.Error()
 		logger.LogError(ctx, fmt.Sprintf("error recording task usage stats: %s (userId %d, channelId %d, quota %d)",

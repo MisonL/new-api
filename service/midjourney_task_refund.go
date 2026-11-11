@@ -47,15 +47,26 @@ func RefundMidjourneyTaskQuota(ctx context.Context, task *model.Midjourney, reas
 	// 提交时 PostConsumeQuota 同时扣了令牌 remain_quota，退款必须两层一起退，
 	// 否则用户钱包回补、API key 的可用额度却永久减少。通用任务路径由
 	// taskAdjustTokenQuota 负责同样的事；MJ 行此前连 TokenId 都没落库。
+	// 失败写进退款日志 other：资金已退回、不可重试，但缺口必须可对账。
+	var tokenQuotaErr error
 	if task.PrivateData.TokenId > 0 {
 		token, err := model.GetTokenById(task.PrivateData.TokenId)
 		if err != nil {
-			logger.LogWarn(ctx, fmt.Sprintf("退还 Midjourney 令牌额度失败 (tokenId=%d, task=%s): %s",
-				task.PrivateData.TokenId, task.MjId, err.Error()))
+			tokenQuotaErr = err
 		} else if err := model.IncreaseTokenQuota(token.Id, token.Key, task.Quota); err != nil {
-			logger.LogWarn(ctx, fmt.Sprintf("退还 Midjourney 令牌额度失败 (tokenId=%d, task=%s): %s",
-				task.PrivateData.TokenId, task.MjId, err.Error()))
+			tokenQuotaErr = err
 		}
+		if tokenQuotaErr != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("退还 Midjourney 令牌额度失败 (tokenId=%d, task=%s): %s",
+				task.PrivateData.TokenId, task.MjId, tokenQuotaErr.Error()))
+		}
+	}
+	other := map[string]interface{}{
+		"task_id": task.MjId,
+		"reason":  reason,
+	}
+	if tokenQuotaErr != nil {
+		other[tokenQuotaErrorLogField] = tokenQuotaErr.Error()
 	}
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
@@ -64,9 +75,6 @@ func RefundMidjourneyTaskQuota(ctx context.Context, task *model.Midjourney, reas
 		ChannelId: task.ChannelId,
 		ModelName: CovertMjpActionToModelName(task.Action),
 		Quota:     task.Quota,
-		Other: map[string]interface{}{
-			"task_id": task.MjId,
-			"reason":  reason,
-		},
+		Other:     other,
 	})
 }
