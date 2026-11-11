@@ -23,8 +23,6 @@ func TestPostWssConsumeQuotaRecordsUsageStatsFailureInConsumeLog(t *testing.T) {
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(6, 6, "usage-stats-failure-probe-key")
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
 	// 关闭结算差额：本用例只观察用量统计写入失败。
 	info.FinalPreConsumedQuota = realtimeTurnQuota
 

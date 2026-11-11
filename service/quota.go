@@ -40,12 +40,14 @@ type QuotaInfo struct {
 	GroupRatio    float64
 	// 以下三个倍率来自请求开始时冻结的 PriceData。终态与逐 turn 必须同源：
 	// 若这里回查实时配置，连接期间改倍率会让同一请求按两套价格计算。
-	// 取值为 0 只出现在按次计费与分档表达式路径（它们不填这三个字段），
-	// 这两条路径要么走 UsePrice 分支、要么由表达式结算覆盖，此时回查实时
-	// 配置只是保持既有行为。
+	//
+	// 0 是合法倍率（未定价模型靠它 fail-closed），因此"值为 0"与"没有快照"
+	// 必须分开表达：只有 HasFrozenRatios 为 false 的按次计费/分档表达式路径
+	// 才回查实时配置，这两条路径分别走 UsePrice 分支或由表达式结算覆盖。
 	CompletionRatio      float64
 	AudioRatio           float64
 	AudioCompletionRatio float64
+	HasFrozenRatios      bool
 }
 
 func hasCustomModelRatio(modelName string, currentRatio float64) bool {
@@ -56,11 +58,12 @@ func hasCustomModelRatio(modelName string, currentRatio float64) bool {
 	return currentRatio != defaultRatio
 }
 
-// pickRatio 优先返回请求开始时冻结的倍率，只有在冻结值为 0（按次计费与分档
-// 表达式路径不填这些字段）时才回查实时配置。回退不是静默容错：调用点已在
-// 注释里列明这两条路径，且它们分别走 UsePrice 分支或由表达式结算覆盖。
-func pickRatio(frozen float64, live func() float64) float64 {
-	if frozen > 0 {
+// pickRatio 优先返回请求开始时冻结的倍率，仅在调用方声明没有快照
+// （按次计费与分档表达式路径不填这三个字段）时才回查实时配置。不能用
+// "值大于 0"判断存在性：0 是合法倍率，被当成缺失会让本应免费的输出去按
+// 管理员事后调整的实时价格扣费。
+func pickRatio(hasFrozen bool, frozen float64, live func() float64) float64 {
+	if hasFrozen {
 		return frozen
 	}
 	return live()
@@ -76,13 +79,13 @@ func calculateAudioQuota(info QuotaInfo) int {
 		return common.SafeQuotaIntFromDecimal(quota, false)
 	}
 
-	completionRatio := decimal.NewFromFloat(pickRatio(info.CompletionRatio, func() float64 {
+	completionRatio := decimal.NewFromFloat(pickRatio(info.HasFrozenRatios, info.CompletionRatio, func() float64 {
 		return ratio_setting.GetCompletionRatio(info.ModelName)
 	}))
-	audioRatio := decimal.NewFromFloat(pickRatio(info.AudioRatio, func() float64 {
+	audioRatio := decimal.NewFromFloat(pickRatio(info.HasFrozenRatios, info.AudioRatio, func() float64 {
 		return ratio_setting.GetAudioRatio(info.ModelName)
 	}))
-	audioCompletionRatio := decimal.NewFromFloat(pickRatio(info.AudioCompletionRatio, func() float64 {
+	audioCompletionRatio := decimal.NewFromFloat(pickRatio(info.HasFrozenRatios, info.AudioCompletionRatio, func() float64 {
 		return ratio_setting.GetAudioCompletionRatio(info.ModelName)
 	}))
 
@@ -169,6 +172,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		CompletionRatio:      relayInfo.PriceData.CompletionRatio,
 		AudioRatio:           relayInfo.PriceData.AudioRatio,
 		AudioCompletionRatio: relayInfo.PriceData.AudioCompletionRatio,
+		HasFrozenRatios:      relayInfo.PriceData.RatiosFrozen,
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
@@ -220,13 +224,14 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	tokenName := ctx.GetString("token_name")
 	// 结算与预扣必须同源：预扣（PreWssConsumeQuota）用 OriginModelName 查倍率，
 	// 这里若用上游映射后的模型名，映射渠道会查到另一套倍率并写错日志口径。
-	completionRatio := decimal.NewFromFloat(pickRatio(relayInfo.PriceData.CompletionRatio, func() float64 {
+	frozenRatios := relayInfo.PriceData.RatiosFrozen
+	completionRatio := decimal.NewFromFloat(pickRatio(frozenRatios, relayInfo.PriceData.CompletionRatio, func() float64 {
 		return ratio_setting.GetCompletionRatio(relayInfo.OriginModelName)
 	}))
-	audioRatio := decimal.NewFromFloat(pickRatio(relayInfo.PriceData.AudioRatio, func() float64 {
+	audioRatio := decimal.NewFromFloat(pickRatio(frozenRatios, relayInfo.PriceData.AudioRatio, func() float64 {
 		return ratio_setting.GetAudioRatio(relayInfo.OriginModelName)
 	}))
-	audioCompletionRatio := decimal.NewFromFloat(pickRatio(relayInfo.PriceData.AudioCompletionRatio, func() float64 {
+	audioCompletionRatio := decimal.NewFromFloat(pickRatio(frozenRatios, relayInfo.PriceData.AudioCompletionRatio, func() float64 {
 		return ratio_setting.GetAudioCompletionRatio(relayInfo.OriginModelName)
 	}))
 
@@ -252,6 +257,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		CompletionRatio:      completionRatio.InexactFloat64(),
 		AudioRatio:           audioRatio.InexactFloat64(),
 		AudioCompletionRatio: audioCompletionRatio.InexactFloat64(),
+		HasFrozenRatios:      relayInfo.PriceData.RatiosFrozen,
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
@@ -352,13 +358,14 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	audioOutTokens := usage.CompletionTokenDetails.AudioTokens
 
 	tokenName := ctx.GetString("token_name")
-	completionRatio := decimal.NewFromFloat(pickRatio(relayInfo.PriceData.CompletionRatio, func() float64 {
+	frozenRatios := relayInfo.PriceData.RatiosFrozen
+	completionRatio := decimal.NewFromFloat(pickRatio(frozenRatios, relayInfo.PriceData.CompletionRatio, func() float64 {
 		return ratio_setting.GetCompletionRatio(relayInfo.OriginModelName)
 	}))
-	audioRatio := decimal.NewFromFloat(pickRatio(relayInfo.PriceData.AudioRatio, func() float64 {
+	audioRatio := decimal.NewFromFloat(pickRatio(frozenRatios, relayInfo.PriceData.AudioRatio, func() float64 {
 		return ratio_setting.GetAudioRatio(relayInfo.OriginModelName)
 	}))
-	audioCompletionRatio := decimal.NewFromFloat(pickRatio(relayInfo.PriceData.AudioCompletionRatio, func() float64 {
+	audioCompletionRatio := decimal.NewFromFloat(pickRatio(frozenRatios, relayInfo.PriceData.AudioCompletionRatio, func() float64 {
 		return ratio_setting.GetAudioCompletionRatio(relayInfo.OriginModelName)
 	}))
 
@@ -384,6 +391,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		CompletionRatio:      completionRatio.InexactFloat64(),
 		AudioRatio:           audioRatio.InexactFloat64(),
 		AudioCompletionRatio: audioCompletionRatio.InexactFloat64(),
+		HasFrozenRatios:      relayInfo.PriceData.RatiosFrozen,
 	}
 
 	quota := calculateAudioQuota(quotaInfo)

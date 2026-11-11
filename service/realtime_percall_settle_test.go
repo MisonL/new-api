@@ -31,9 +31,11 @@ func TestPostWssConsumeQuota_ChargesPerPriceModel(t *testing.T) {
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(userId, userId, "realtime-percall-key-21")
+	// 与 ModelPriceHelperPerCall 同形：按次计费只填 UsePrice/ModelPrice，
+	// 不冻结完成/音频倍率，RatiosFrozen 保持 false。
 	info.PriceData.UsePrice = true
 	info.PriceData.ModelPrice = modelPrice
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
+	info.PriceData.RatiosFrozen = false
 
 	require.Nil(t, PreConsumeBilling(c, preConsume, info))
 	require.Equal(t, initial-preConsume, readUserQuota(t, userId))
@@ -70,6 +72,8 @@ func TestPostAudioConsumeQuota_ChargesPerPriceModel(t *testing.T) {
 		StartTime:       time.Now(),
 	}
 	info.ChannelMeta = &relaycommon.ChannelMeta{UpstreamModelName: audioModel}
+	// 与 ModelPriceHelperPerCall 同形：按次计费只填 UsePrice/ModelPrice/分组倍率，
+	// 不冻结完成/音频倍率。
 	info.PriceData.UsePrice = true
 	info.PriceData.ModelPrice = modelPrice
 	info.PriceData.GroupRatioInfo.GroupRatio = 1

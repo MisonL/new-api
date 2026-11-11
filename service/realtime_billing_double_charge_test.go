@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -62,6 +63,18 @@ func newRealtimeProbeInfo(userId, tokenId int, tokenKey string) *relaycommon.Rel
 	}
 	// ChannelMeta 以指针内嵌，必须初始化，UpstreamModelName 才可读。
 	info.ChannelMeta = &relaycommon.ChannelMeta{UpstreamModelName: realtimeDoubleChargeModel}
+	// 生产链路里 ModelPriceHelper 一定会在中继前把倍率冻结进 PriceData 并置位
+	// RatiosFrozen；逐 turn 直扣与终态结算读的都是这份快照。探针必须保持
+	// 同样的形状，否则 RatiosFrozen=false 会让计费回查实时配置，
+	// 测到的就不是生产的冻结语义。
+	info.PriceData = types.PriceData{
+		ModelRatio:           1,
+		CompletionRatio:      1,
+		AudioRatio:           1,
+		AudioCompletionRatio: 1,
+		GroupRatioInfo:       types.GroupRatioInfo{GroupRatio: 1},
+		RatiosFrozen:         true,
+	}
 	return info
 }
 
@@ -100,10 +113,8 @@ func TestPreWssConsumeQuota_DebitsImmediately(t *testing.T) {
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(1, 1, "realtime-probe-key")
-	// 生产链路里 ModelPriceHelper 一定会在中继前把冻结倍率写进 PriceData，
-	// 逐 turn 直扣读的就是这份快照。
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
+	// 生产链路里 ModelPriceHelper 会在中继前把冻结倍率写进 PriceData，
+	// helper 已按同样形状构造，逐 turn 直扣读的就是这份快照。
 
 	require.NoError(t, PreWssConsumeQuota(c, info, realtimeTextTurn(1500)))
 
@@ -131,8 +142,6 @@ func TestRealtimeBilling_NoDoubleChargeAcrossPreConsumeTurnDebitAndSettle(t *tes
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(2, 2, "realtime-probe-key-2")
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
 
 	// 阶段 1：controller 通用预扣，建立 BillingSession。
 	apiErr := PreConsumeBilling(c, preConsume, info)
@@ -174,8 +183,6 @@ func TestRealtimeBilling_TurnDebitAndSettleMustNotBothDebitWallet(t *testing.T) 
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(3, 3, "realtime-probe-key-3")
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
 
 	// 预扣 0（信任额度旁路），使结算的 delta 恰为实际用量，便于隔离观察。
 	require.Nil(t, PreConsumeBilling(c, 0, info))
@@ -209,8 +216,6 @@ func TestRealtimeBilling_TieredSettleChargesAudioSubcategory(t *testing.T) {
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(5, 5, "realtime-probe-key-5")
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
 
 	// tiered 快照：与生产预扣路径同构（makeRelayInfo 会算 EstimatedQuotaAfterGroup）。
 	const expr = `tier("base", p * 1 + c * 1 + cr * 0.5 + ai * 12 + ao * 50)`
@@ -263,8 +268,6 @@ func TestRealtimeBilling_TrustedUserStillChargedOnce(t *testing.T) {
 	c.Set("token_quota", userQuota)
 
 	info := newRealtimeProbeInfo(4, 4, "realtime-probe-key-4")
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
 
 	require.Nil(t, PreConsumeBilling(c, 500, info))
 	require.Equal(t, userQuota, readUserQuota(t, 4),
@@ -305,8 +308,6 @@ func TestRealtimeBilling_TieredMultiTurnChargesExactlyOnce(t *testing.T) {
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(6, 6, "realtime-probe-key-6")
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
 
 	// tiered 快照与生产预扣路径同构：est 0/0 使预扣为 0，便于隔离逐 turn 与结算。
 	const expr = `tier("base", p * 1 + c * 1 + cr * 0.5 + ai * 12 + ao * 50)`

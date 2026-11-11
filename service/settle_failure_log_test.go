@@ -28,8 +28,6 @@ func TestPostWssConsumeQuotaRecordsSettleFailureInConsumeLog(t *testing.T) {
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(5, 5, "settle-failure-probe-key")
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
 	info.Billing = &BillingSession{
 		relayInfo:        info,
 		funding:          failingFunding{},

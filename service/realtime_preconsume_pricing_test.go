@@ -36,8 +36,6 @@ func TestPreWssConsumeQuota_SubscriptionBillingIgnoresWalletBalance(t *testing.T
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(userId, userId, "realtime-probe-key-11")
-	info.PriceData.ModelRatio = 1
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
 	info.UserSetting.BillingPreference = "subscription_only"
 	// 生产链路的 RequestId 由中间件填充，订阅预扣以它做幂等键。
 	info.RequestId = "realtime-sub-probe-req-1"
@@ -64,9 +62,10 @@ func TestPreWssConsumeQuota_UsesFrozenPriceDataForPerPriceModel(t *testing.T) {
 
 	c, _ := newRealtimeProbeContext()
 	info := newRealtimeProbeInfo(userId, userId, "realtime-probe-key-12")
+	// 与 ModelPriceHelperPerCall 同形：按次计费只填 UsePrice/ModelPrice。
 	info.PriceData.UsePrice = true
 	info.PriceData.ModelPrice = 0.02
-	info.PriceData.GroupRatioInfo.GroupRatio = 1
+	info.PriceData.RatiosFrozen = false
 
 	require.NoError(t, PreWssConsumeQuota(c, info, realtimeTextTurn(1500)))
 
@@ -148,4 +147,56 @@ func TestPostWssConsumeQuota_UsesFrozenCompletionRatio(t *testing.T) {
 	// 冻结口径：输入 1000 + 输出 500 x 1 = 1500。
 	require.Equal(t, initial-1500, readUserQuota(t, userId),
 		"终态结算必须用冻结的 CompletionRatio，而不是实时配置")
+}
+
+// 0 是合法倍率（未定价模型靠它 fail-closed，ratio_validation 只拒负值）。
+// 冻结快照里的 0 必须原样生效：若回退到实时配置，本应免费的输出会按管理员
+// 事后调整的倍率扣费。
+func TestPostWssConsumeQuota_HonorsFrozenZeroCompletionRatio(t *testing.T) {
+	setupRealtimeBillingProbe(t)
+
+	const userId = 17
+	const initial = 1_000_000
+	seedUser(t, userId, initial)
+	seedToken(t, userId, userId, "realtime-probe-key-17", initial)
+
+	// 请求开始时冻结 0，连接期间实时配置改成 4。
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(
+		`{"`+realtimeDoubleChargeModel+`":4}`))
+
+	c, _ := newRealtimeProbeContext()
+	info := newRealtimeProbeInfo(userId, userId, "realtime-probe-key-17")
+	info.PriceData.ModelRatio = 1
+	info.PriceData.CompletionRatio = 0
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
+
+	require.Nil(t, PreConsumeBilling(c, 0, info))
+	PostWssConsumeQuota(c, info, info.OriginModelName, realtimeTextTurn(1500), "")
+
+	// 冻结口径：输入 1000 + 输出 500 x 0 = 1000。
+	require.Equal(t, initial-1000, readUserQuota(t, userId),
+		"冻结的 0 补全倍率必须生效，不得回退实时配置")
+}
+
+// 逐 turn 直扣同样遵守冻结的 0。
+func TestPreWssConsumeQuota_HonorsFrozenZeroCompletionRatio(t *testing.T) {
+	setupRealtimeBillingProbe(t)
+
+	const userId = 18
+	const initial = 1_000_000
+	seedUser(t, userId, initial)
+	seedToken(t, userId, userId, "realtime-probe-key-18", initial)
+
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(
+		`{"`+realtimeDoubleChargeModel+`":4}`))
+
+	c, _ := newRealtimeProbeContext()
+	info := newRealtimeProbeInfo(userId, userId, "realtime-probe-key-18")
+	info.PriceData.ModelRatio = 1
+	info.PriceData.CompletionRatio = 0
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
+
+	require.NoError(t, PreWssConsumeQuota(c, info, realtimeTextTurn(1500)))
+	require.Equal(t, initial-1000, readUserQuota(t, userId),
+		"逐 turn 也必须用冻结的 0 补全倍率")
 }
