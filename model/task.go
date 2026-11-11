@@ -1142,7 +1142,7 @@ func GetTimedOutUnfinishedTasksWithError(cutoffUnix int64, limit int) ([]*Task, 
 	// 进度不是终端状态的唯一依据：provider 可能在终态前把 progress 写到 100%，
 	// 或者 legacy 行已把 status 改成 FAILURE/SUCCESS 但 progress 仍停在中间值。
 	// 以 status 为准，progress 只在输出时解析；这里只筛选非终端状态。
-	query := backgroundDB().Model(&Task{}).Where("COALESCE(status, '') NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+	query := backgroundDB().Model(&Task{}).Where("status IS NULL OR status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
 		Where("submit_time < ?", cutoffUnix).
 		Order("submit_time")
 	return loadTasksWithPrivateDataIsolation(query, limit)
@@ -1160,7 +1160,7 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 func GetAllUnFinishSyncTasksWithError(limit int) ([]*Task, error) {
 	// 同上：用 status 而不是 progress，避免遗漏非终端的 100% 进度行或误删
 	// 已终态的行。polling loop 按此查询会漏掉所有 progress="100%" 但 status!=FAILURE/SUCCESS 的任务。
-	query := backgroundDB().Model(&Task{}).Where("COALESCE(status, '') NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+	query := backgroundDB().Model(&Task{}).Where("status IS NULL OR status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
 		Order("id")
 	return loadTasksWithPrivateDataIsolation(query, limit)
 }
@@ -1172,7 +1172,7 @@ func GetAllUnFinishSyncTasksWithError(limit int) ([]*Task, error) {
 // tasks with larger ids are never polled until those rows time out.
 func GetUnfinishSyncTasksAfterIDWithError(afterID int64, limit int) ([]*Task, error) {
 	query := backgroundDB().Model(&Task{}).
-		Where("COALESCE(status, '') NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+		Where("status IS NULL OR status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
 		Where("id > ?", afterID).
 		Order("id")
 	return loadTasksWithPrivateDataIsolation(query, limit)
@@ -1256,7 +1256,7 @@ func TaskCountUnfinishedWithError() (int64, error) {
 		return 0, errors.New("database is not initialized")
 	}
 	err := backgroundDB().Model(&Task{}).
-		Where("COALESCE(status, '') NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
+		Where("status IS NULL OR status NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
 		Count(&count).Error
 	if err != nil {
 		return 0, err

@@ -13,16 +13,14 @@ import (
 //
 // 可观测面：清理完成后会写入 options 标记。测试持有迁移锁再调用 InitLogDB，
 // 修复前清理会照常执行（标记被写入），修复后经 runDBMigration 取锁失败被跳过
-//（标记缺席）。SQLite 分支为此使用 TryLock，进程内可模拟「另一 master 持锁」
+// （标记缺席）。SQLite 分支为此使用 TryLock，进程内可模拟「另一 master 持锁」
 // 而不会死锁。
 func TestLogIndexCleanupSkippedWhenMainMigrationLockHeld(t *testing.T) {
-	t.Cleanup(func() {
-		DB = openTestDB(t, &User{})
-	})
+	origDB, origLogDB := DB, LOG_DB
+	t.Cleanup(func() { DB, LOG_DB = origDB, origLogDB })
 	DB = openTestDB(t, &Log{}, &Option{})
 	KeyColumn()
 	LOG_DB = DB
-	t.Cleanup(func() { LOG_DB = nil })
 
 	oldMaster := common.IsMasterNode
 	common.IsMasterNode = true
@@ -51,13 +49,11 @@ func TestLogIndexCleanupSkippedWhenMainMigrationLockHeld(t *testing.T) {
 
 // 对照：锁空闲时清理照常执行（保持既有行为）。
 func TestLogIndexCleanupRunsWhenLockFree(t *testing.T) {
-	t.Cleanup(func() {
-		DB = openTestDB(t, &User{})
-	})
+	origDB, origLogDB := DB, LOG_DB
+	t.Cleanup(func() { DB, LOG_DB = origDB, origLogDB })
 	DB = openTestDB(t, &Log{}, &Option{})
 	KeyColumn()
 	LOG_DB = DB
-	t.Cleanup(func() { LOG_DB = nil })
 
 	oldMaster := common.IsMasterNode
 	common.IsMasterNode = true
