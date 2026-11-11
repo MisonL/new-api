@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -239,4 +240,47 @@ func TestDesktopOAuthCallbackUsesJSONForXHR(t *testing.T) {
 		"/api/oauth/desktop/poll?handoff_token="+handoffToken, nil))
 	require.NotContains(t, pollRecorder.Body.String(), providerSlug+"-user",
 		"未确认不得签发会话，body=%s", pollRecorder.Body.String())
+}
+
+// 确认凭据 Cookie 的 Secure 判定必须与同页的来源校验同源：TLS 在反向代理
+// 终止时 Go 只看到明文请求，但 X-Forwarded-Proto 已说明客户端用的是 https。
+// 只看 c.Request.TLS 会让凭据缺 Secure，浏览器随后可能把它明文回传。
+func TestDesktopOAuthConfirmCookieSecureFollowsForwardedProto(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name       string
+		tls        bool
+		proto      string
+		wantSecure bool
+	}{
+		{name: "plain http stays insecure"},
+		{name: "direct tls is secure", tls: true, wantSecure: true},
+		{name: "forwarded https is secure", proto: "https", wantSecure: true},
+		{name: "forwarded https chain is secure", proto: "https, http", wantSecure: true},
+		{name: "forwarded http stays insecure", proto: "http"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			req := httptest.NewRequest(http.MethodGet, "/api/oauth/desktop/confirm", nil)
+			if tc.tls {
+				req.TLS = &tls.ConnectionState{}
+			}
+			if tc.proto != "" {
+				req.Header.Set("X-Forwarded-Proto", tc.proto)
+			}
+			c.Request = req
+
+			setDesktopOAuthConfirmBrowserCookie(c, "probe-confirm-token")
+
+			cookies := recorder.Result().Cookies()
+			require.Len(t, cookies, 1)
+			require.Equal(t, desktopOAuthConfirmCookieName, cookies[0].Name)
+			require.Equal(t, tc.wantSecure, cookies[0].Secure,
+				"Secure 判定必须与 requestIsHTTPS 一致")
+		})
+	}
 }

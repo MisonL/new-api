@@ -184,7 +184,7 @@ func authHelper(c *gin.Context, minRole int) {
 				// 会话已吊销：清掉会话并让浏览器丢弃这个 Cookie，避免之后每个
 				// 请求继续携带它，也让前端能识别"需要重新登录"。
 				session.Clear()
-				opts := SessionCookieOptions(requestIsHTTPS(c))
+				opts := SessionCookieOptions(RequestIsHTTPS(c))
 				opts.MaxAge = -1
 				session.Options(opts)
 				if saveErr := session.Save(); saveErr != nil {

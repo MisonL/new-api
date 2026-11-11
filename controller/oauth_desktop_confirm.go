@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/gin-gonic/gin"
@@ -168,7 +169,7 @@ func setDesktopOAuthConfirmBrowserCookie(c *gin.Context, token string) {
 		Path:     desktopOAuthConfirmPath,
 		MaxAge:   int(desktopOAuthTTL / time.Second),
 		HttpOnly: true,
-		Secure:   c.Request.TLS != nil,
+		Secure:   middleware.RequestIsHTTPS(c),
 		SameSite: http.SameSiteStrictMode,
 	})
 }
@@ -180,7 +181,7 @@ func clearDesktopOAuthConfirmBrowserCookie(c *gin.Context) {
 		Path:     desktopOAuthConfirmPath,
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   c.Request.TLS != nil,
+		Secure:   middleware.RequestIsHTTPS(c),
 		SameSite: http.SameSiteStrictMode,
 	})
 }

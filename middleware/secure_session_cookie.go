@@ -33,7 +33,7 @@ func SessionCookieOptions(secure bool) sessions.Options {
 // session the Options apply to.
 func SecureSessionCookie() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if requestIsHTTPS(c) {
+		if RequestIsHTTPS(c) {
 			session := sessions.Default(c)
 			if session != nil {
 				session.Options(SessionCookieOptions(true))
@@ -43,9 +43,14 @@ func SecureSessionCookie() gin.HandlerFunc {
 	}
 }
 
-// requestIsHTTPS reports whether the request reached the server over TLS,
+// RequestIsHTTPS reports whether the request reached the server over TLS,
 // either directly or through a proxy that forwarded the scheme.
-func requestIsHTTPS(c *gin.Context) bool {
+//
+// It is exported because session-adjacent cookies outside this package (the
+// desktop OAuth confirm credential) must use the same rule: those responses
+// also serve deployments that terminate TLS at a proxy, and a second,
+// narrower "Request.TLS != nil" check would silently drop Secure there.
+func RequestIsHTTPS(c *gin.Context) bool {
 	if c.Request.TLS != nil {
 		return true
 	}
