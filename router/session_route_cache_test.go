@@ -78,6 +78,11 @@ func TestOAuthSessionRoutesDisableCache(t *testing.T) {
 	for _, target := range []string{
 		"/api/oauth/state",
 		"/api/oauth/desktop/poll?handoff_token=probe-token",
+		// WeChat / Telegram 的登录与绑定端点同样调用 setupLogin 签发会话。
+		// telegram/bind 与前端调用一致，是 GET。
+		"/api/oauth/wechat",
+		"/api/oauth/telegram/login",
+		"/api/oauth/telegram/bind",
 	} {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		req.RemoteAddr = "192.0.2.9:12345"
@@ -87,6 +92,20 @@ func TestOAuthSessionRoutesDisableCache(t *testing.T) {
 		require.NotEqual(t, http.StatusNotFound, rec.Code, "%s 必须已注册", target)
 		require.Contains(t, rec.Header().Get("Cache-Control"), "no-store",
 			"%s 会下发或引用会话，必须带 no-store（实际码 %d）", target, rec.Code)
+	}
+
+	// wechat/bind 是 POST：只验证路由存在且带 no-store，不触发绑定逻辑。
+	for _, target := range []string{
+		"/api/oauth/wechat/bind",
+	} {
+		req := httptest.NewRequest(http.MethodPost, target, nil)
+		req.RemoteAddr = "192.0.2.9:12345"
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, req)
+
+		require.NotEqual(t, http.StatusNotFound, rec.Code, "%s 必须已注册", target)
+		require.Contains(t, rec.Header().Get("Cache-Control"), "no-store",
+			"%s 绑定成功后同样签发会话，必须带 no-store（实际码 %d）", target, rec.Code)
 	}
 }
 

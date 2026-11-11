@@ -63,10 +63,12 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/oauth/desktop/confirm", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.DesktopOAuthConfirmSubmit)
 		apiRouter.POST("/oauth/email/bind", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.EmailBind)
 		// Non-standard OAuth (WeChat, Telegram) - keep original routes
-		apiRouter.GET("/oauth/wechat", middleware.CriticalRateLimit(), controller.WeChatAuth)
-		apiRouter.POST("/oauth/wechat/bind", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.WeChatBind)
-		apiRouter.GET("/oauth/telegram/login", middleware.CriticalRateLimit(), controller.TelegramLogin)
-		apiRouter.GET("/oauth/telegram/bind", middleware.CriticalRateLimit(), controller.TelegramBind)
+		// 这些端点同样会通过 setupLogin 签发会话 cookie（登录 / 绑定后登录），
+		// 与上面标准 OAuth 回调一致，禁用缓存，避免共享代理或浏览器复用登录态。
+		apiRouter.GET("/oauth/wechat", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.WeChatAuth)
+		apiRouter.POST("/oauth/wechat/bind", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.WeChatBind)
+		apiRouter.GET("/oauth/telegram/login", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.TelegramLogin)
+		apiRouter.GET("/oauth/telegram/bind", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.TelegramBind)
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route
 		apiRouter.GET("/oauth/:provider", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.HandleOAuth)
 		apiRouter.POST("/auth/external/:provider/jwt/login", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.HandleCustomOAuthJWTLogin)
