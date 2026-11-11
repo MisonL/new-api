@@ -289,34 +289,6 @@ func TestTaskInsertRejectsRouteSnapshotChannelMismatch(t *testing.T) {
 	require.ErrorContains(t, err, "task route snapshot channel mismatch")
 }
 
-func TestTaskUpdateRejectsInvalidCurrentRouteSnapshot(t *testing.T) {
-	previousDB, previousLogDB := DB, LOG_DB
-	db := openTestDB(t, &Task{})
-	DB, LOG_DB = db, db
-	t.Cleanup(func() { DB, LOG_DB = previousDB, previousLogDB })
-
-	snapshot := newCurrentTaskRouteSnapshotForValidationTest(t)
-	snapshot.HeaderPolicyCaptured = false
-	snapshot.HeaderPolicyCiphertext = ""
-	snapshot.HeaderPolicyFingerprint = ""
-	snapshot.SnapshotFingerprint = snapshot.ComputeFingerprint()
-	task := &Task{
-		ID:        1,
-		TaskID:    "invalid-snapshot-update",
-		ChannelId: snapshot.ChannelID,
-		PrivateData: TaskPrivateData{
-			RouteSnapshot: snapshot,
-		},
-	}
-
-	err := task.Update()
-	require.Error(t, err)
-	require.ErrorContains(t, err, "route snapshot validation failed")
-	var count int64
-	require.NoError(t, db.Model(&Task{}).Count(&count).Error)
-	require.Zero(t, count)
-}
-
 func TestTaskUpdateWithStatusRejectsInvalidCurrentRouteSnapshot(t *testing.T) {
 	previousDB, previousLogDB := DB, LOG_DB
 	db := openTestDB(t, &Task{})
@@ -341,6 +313,10 @@ func TestTaskUpdateWithStatusRejectsInvalidCurrentRouteSnapshot(t *testing.T) {
 	won, err := task.UpdateWithStatus(TaskStatusInProgress)
 	require.Error(t, err)
 	require.False(t, won)
+	// 校验必须在落库前失败：非法快照不得留下任何行。
+	var count int64
+	require.NoError(t, db.Model(&Task{}).Count(&count).Error)
+	require.Zero(t, count)
 }
 
 func TestTaskBulkUpdateAllowsOnlyNonLifecycleFields(t *testing.T) {

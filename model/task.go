@@ -1373,16 +1373,6 @@ func (t *Task) Snapshot() TaskSnapshot {
 	}
 }
 
-func (Task *Task) Update() error {
-	if Task == nil {
-		return errors.New("task is nil")
-	}
-	if err := validateTaskRouteSnapshotForWrite(Task.PrivateData.RouteSnapshot, Task.ChannelId); err != nil {
-		return err
-	}
-	return DB.Save(Task).Error
-}
-
 // UpdateTaskQuota persists a settled quota on the task row. It is a targeted
 // column write: settlement runs after the terminal status CAS, and a full-row
 // save would rewrite status, progress and private data from a polling snapshot
