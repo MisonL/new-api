@@ -55,6 +55,10 @@ const usageStatsErrorLogField = "usage_stats_error"
 // 钱包与 API key 可用额度之间的缺口无法对账。
 const tokenQuotaErrorLogField = "token_quota_error"
 
+// taskQuotaPersistErrorLogField 是结算额度回写任务行失败写进计费日志 other
+// 的键。回写同样在资金与令牌之后执行，失败后任务行金额与实际扣费分叉。
+const taskQuotaPersistErrorLogField = "task_quota_persist_error"
+
 // MarkUsageStatsFailure 把用量统计写入失败记录到消费日志的 other 字段。
 // 统计是相对增量，失败后无法从日志回放；只在服务端 stderr 留一行时
 // 既不知道是哪个请求丢的增量，也无法对账。

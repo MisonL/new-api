@@ -116,3 +116,39 @@ func TestRefundMidjourneyTaskQuotaRecordsTokenQuotaFailureInLog(t *testing.T) {
 		"MJ 令牌额度退还失败必须写进日志行，而不是只写 stderr")
 	require.Contains(t, other[tokenQuotaErrorLogField], "injected token quota failure")
 }
+
+// 结算额度回写任务行发生在资金与令牌都调整之后，失败同样无法回滚，
+// 也必须落进日志行，否则任务列表的金额与实际扣费分叉且无对账依据。
+func TestRecalculateTaskQuotaRecordsTaskRowPersistFailureInLog(t *testing.T) {
+	truncate(t)
+	model.KeyColumn()
+
+	const userId, tokenId, channelId = 74, 74, 74
+	const preConsumed = 100
+	const actualQuota = 900
+	seedUser(t, userId, 1_000_000)
+	seedToken(t, tokenId, userId, "task-row-persist-failure-key", 1_000_000)
+	seedChannel(t, channelId)
+
+	task := makeTask(userId, channelId, preConsumed, tokenId, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
+
+	// 只让 tasks 表的 UPDATE 失败；资金与令牌写入不受影响。
+	require.NoError(t, model.DB.Exec(
+		`CREATE TRIGGER task_quota_update_fail BEFORE UPDATE ON tasks BEGIN SELECT RAISE(ABORT, 'injected task quota persist failure'); END;`,
+	).Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Exec("DROP TRIGGER IF EXISTS task_quota_update_fail").Error)
+	})
+
+	require.NoError(t, RecalculateTaskQuota(context.Background(), task, actualQuota, "probe persist"))
+
+	logRow := getLastLog(t)
+	require.NotNil(t, logRow, "差额结算必须留下消费日志")
+
+	other, err := common.StrToMap(logRow.Other)
+	require.NoError(t, err)
+	require.Contains(t, other, taskQuotaPersistErrorLogField,
+		"结算额度回写任务行失败必须写进日志行，而不是只写 stderr")
+	require.Contains(t, other[taskQuotaPersistErrorLogField], "injected task quota persist failure")
+}
