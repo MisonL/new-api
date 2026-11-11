@@ -381,7 +381,10 @@ func InitLogDB() (err error) {
 		if !common.IsMasterNode {
 			return nil
 		}
-		return migrateLogIndexCleanup()
+		// 日志索引清理跑在主库上，必须与主迁移共用同一把锁：若主迁移因另一
+		// master 持锁被跳过，本进程不得再对同一库做 HasIndex→DROP 类 DDL，
+		// 否则与持锁方的迁移并发。锁键按 DSN 派生，与 "main" 迁移一致。
+		return runDBMigration("main-log-cleanup", DB, os.Getenv("SQL_DSN"), false, migrateLogIndexCleanup)
 	}
 	db, err := chooseDBWithStartupRetry("LOG_SQL_DSN", true)
 	if err == nil {
@@ -511,7 +514,11 @@ func acquireMigrationLock(db *gorm.DB, dsn string, isLog bool) (release func(), 
 		}, true, nil
 	default:
 		// SQLite is single-process; a process-level mutex is sufficient.
-		migrateSQLiteLock.Lock()
+		// TryLock 而不是 Lock：另一 master 持锁时应跳过迁移（与 PG/MySQL 的
+		// acquired=false 语义一致），而不是阻塞；进程内也因此可以模拟持锁方。
+		if !migrateSQLiteLock.TryLock() {
+			return func() {}, false, nil
+		}
 		return func() { migrateSQLiteLock.Unlock() }, true, nil
 	}
 }
