@@ -56,9 +56,10 @@
 
 结算失败会把成功终态回退到未完成等待重试，但任务重新进入未完成集合后，超时清扫
 与本地失败标记会把它当普通失败并整笔退款：上游已交付的产出变成免费。修复：新增
-私有数据标记 `UpstreamSucceeded`，在回退成功终态的同一条语句里置位；超时清扫、
-本地失败标记、Suno 构建失败、realtime 中继四条失败路径在标记存在时保留预扣并
-记录人工核对原因；重新观察到上游成功时由 CAS 清回 false。
+私有数据标记 `UpstreamSucceeded`，在回退成功终态的同一条语句里置位；五条失败路径
+在标记存在时保留预扣并记录人工核对原因——超时清扫（`sweepTimedOutTasks`）、
+本地失败标记（`markTaskLocalFailure`）、Suno 构建失败、轮询器在上游报告失败时的
+退款分支、realtime 中继的失败退款分支；重新观察到上游成功时由 CAS 清回 false。
 
 ### 2.5 OAuth 会话端点 no-store（`c720e07fe`）
 
@@ -66,6 +67,11 @@
 `/api/oauth/:provider` 回调写登录态，但都没有 `DisableCache`。补齐后
 `DisableCache` 位于限流之前，被拒绝的响应同样带 `no-store`。反向验证：临时移除
 poll 路由的 `DisableCache`，路由测试即在 poll 处失败，恢复后通过。
+
+需要更正当时提交信息里"移除任一 DisableCache 测试即失败"的说法：该测试只钉住了
+`state` 与 `desktop/poll` 两个路由，移除 `desktop/start`、`desktop/confirm`
+（GET/POST）或 `/oauth/:provider` 的 `DisableCache` 并不会让它失败。第 5 轮把
+覆盖扩到微信 / Telegram 的登录与绑定端点（提交 `8e87f30a6`）。
 
 ### 2.6 桌面确认凭据 Cookie 的 Secure（`fcdc7d79a`）
 
@@ -102,12 +108,14 @@ poll 路由的 `DisableCache`，路由测试即在 poll 处失败，恢复后通
 
 ## 4. 已确认但未修复（附原因）
 
-结构性或需要产品决策，未在本轮改动：
+结构性或需要产品决策，第 4 轮未改动（第 5 轮状态见条目注记）：
 
 - 任务终态 CAS 与结算之间的崩溃窗口：终态行不会再被任何轮询选中，崩溃即永久漏收/漏退。
   需要新增持久化待结算标记与幂等补偿扫描，且结算依赖 provider 结果，属于设计要求。
 - 价格快照不完整：`TaskBillingContext` 未保存 `CompletionRatio` 等参数，异步任务终态
   重算读实时配置；realtime 终态 `calculateAudioQuota` 同样回查实时音频/补全倍率。
+  第 5 轮已修复（`533d2cd9f` 引入冻结快照，`a9152aa6f` 改为显式 `RatiosFrozen` 标记，
+  `a3660828e` 在 `TaskBillingContext` 增加 `CompletionRatio` 与 `Frozen`）。
 - 用户缓存的异步回写竞态（同一根因的两种表现）：`updateUserCache` 用整对象 HSET，
   只对 `Quota` 用 `HSETNX` 建基数。其一，回退路径写的 `session_epoch` 可能是旧值，
   已吊销会话在一个 TTL 内重新通过；其二，缓存键被失效删除后，更早读到旧行的回写
