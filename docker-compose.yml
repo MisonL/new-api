@@ -47,6 +47,9 @@ services:
       - REDIS_CONN_STRING=${REDIS_CONN_STRING:?set REDIS_CONN_STRING}
       - TZ=${TZ:-Asia/Shanghai}
       - ERROR_LOG_ENABLED=${ERROR_LOG_ENABLED:-true} # 是否启用错误日志记录 (Whether to enable error log recording)
+      # 应用日志文件保留天数：启动时清理超过该天数的轮转 oneapi-*.log；0 或未设表示不清理。
+      # 每进程每百万行轮转一个新文件且从不删除，长期运行的部署会无限累积。
+      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS:-}
       # true reduces database write pressure; false avoids volatile in-memory quota deltas
       # when strict persistence is more important than throughput.
       - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}
