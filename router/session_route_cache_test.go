@@ -6,16 +6,22 @@ import (
 	"testing"
 
 	"bytes"
+	"io"
+	"log"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // 登录/注册/2FA 与访问令牌接口会在成功响应里写会话 Cookie，或在响应体里
@@ -54,6 +60,27 @@ func TestSessionIssuingRoutesDisableCache(t *testing.T) {
 // 缓存，等同于把某个用户的会话复放给下一个人，必须与登录/注册同等待遇。
 func TestOAuthSessionRoutesDisableCache(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	// 企业认证 handler 会立即查库；不打桩时 model.DB 为 nil 会 panic，
+	// 掩盖缓存头断言。用内存库承载，未注册的 provider 会正常返回错误响应。
+	prevDB, prevLogDB := model.DB, model.LOG_DB
+	prevUsingSQLite := common.UsingSQLite
+	db, err := gorm.Open(sqlite.Open("file:oauth_session_route_cache?mode=memory&cache=shared"), &gorm.Config{
+		Logger: gormlogger.New(log.New(io.Discard, "", 0), gormlogger.Config{
+			LogLevel: gormlogger.Silent,
+		}),
+	})
+	require.NoError(t, err)
+	model.DB, model.LOG_DB = db, db
+	common.UsingSQLite = true
+	require.NoError(t, db.AutoMigrate(&model.User{}))
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = prevDB, prevLogDB
+		common.UsingSQLite = prevUsingSQLite
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 
 	// 桌面 poll 用的是 Redis 限流器，测试环境没有 Redis 会直接空指针。
 	server, err := miniredis.Run()
@@ -106,6 +133,30 @@ func TestOAuthSessionRoutesDisableCache(t *testing.T) {
 		require.NotEqual(t, http.StatusNotFound, rec.Code, "%s 必须已注册", target)
 		require.Contains(t, rec.Header().Get("Cache-Control"), "no-store",
 			"%s 绑定成功后同样签发会话，必须带 no-store（实际码 %d）", target, rec.Code)
+	}
+
+	// 企业认证：JWT / header 登录与 CAS 回调都调用 setupLoginWithResult 签发
+	// 会话，start 跳转也会写 state 会话，必须与标准 OAuth 同一契约。
+	for method, targets := range map[string][]string{
+		http.MethodPost: {
+			"/api/auth/external/probe/jwt/login",
+			"/api/auth/external/probe/header/login",
+		},
+		http.MethodGet: {
+			"/api/auth/external/probe/cas/start",
+			"/api/auth/external/probe/cas/callback",
+		},
+	} {
+		for _, target := range targets {
+			req := httptest.NewRequest(method, target, nil)
+			req.RemoteAddr = "192.0.2.9:12345"
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+
+			require.NotEqual(t, http.StatusNotFound, rec.Code, "%s %s 必须已注册", method, target)
+			require.Contains(t, rec.Header().Get("Cache-Control"), "no-store",
+				"%s %s 会下发或消费会话，必须带 no-store（实际码 %d）", method, target, rec.Code)
+		}
 	}
 }
 

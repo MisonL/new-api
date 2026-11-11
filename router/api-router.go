@@ -71,10 +71,12 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/telegram/bind", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.TelegramBind)
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route
 		apiRouter.GET("/oauth/:provider", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.HandleOAuth)
-		apiRouter.POST("/auth/external/:provider/jwt/login", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.HandleCustomOAuthJWTLogin)
-		apiRouter.POST("/auth/external/:provider/header/login", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.HandleCustomOAuthHeaderLogin)
-		apiRouter.GET("/auth/external/:provider/cas/start", middleware.CriticalRateLimit(), controller.HandleCustomOAuthCASStart)
-		apiRouter.GET("/auth/external/:provider/cas/callback", middleware.CriticalRateLimit(), controller.HandleCustomOAuthCASCallback)
+		// 企业认证：登录与 CAS 回调通过 setupLoginWithResult 签发会话，start 跳转
+		// 写 state 会话，与标准 OAuth 同一契约，先禁缓存再限流。
+		apiRouter.POST("/auth/external/:provider/jwt/login", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.HandleCustomOAuthJWTLogin)
+		apiRouter.POST("/auth/external/:provider/header/login", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.HandleCustomOAuthHeaderLogin)
+		apiRouter.GET("/auth/external/:provider/cas/start", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.HandleCustomOAuthCASStart)
+		apiRouter.GET("/auth/external/:provider/cas/callback", middleware.DisableCache(), middleware.CriticalRateLimit(), controller.HandleCustomOAuthCASCallback)
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
 
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, controller.StripeWebhook)
