@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -464,6 +465,22 @@ func runDBMigration(name string, db *gorm.DB, dsn string, isLog bool, migrate fu
 //     instead (SQLite deployments are single-process in practice).
 //
 // acquired=false means another master owns the lock; lockErr is a real error.
+// ensureMigrationPoolCapacity 保证持锁连接之外至少还有一个可用连接：迁移锁
+// 来自同一连接池（sqlDB.Conn），若池上限为 1，迁移 DDL 将永远等不到连接，
+// 启动挂死（SQL_MAX_OPEN_CONNS=1）。这里临时把上限抬到 2，并在释放锁时还原；
+// 抬升会打日志，不是静默变更。
+func ensureMigrationPoolCapacity(sqlDB *sql.DB) (restore func(), changed bool) {
+	stats := sqlDB.Stats()
+	if stats.MaxOpenConnections != 0 && stats.MaxOpenConnections < 2 {
+		sqlDB.SetMaxOpenConns(2)
+		common.SysLog(fmt.Sprintf(
+			"SQL_MAX_OPEN_CONNS=%d 过小：迁移锁占用池内一个连接，其余 DDL 将等不到连接；迁移期间临时抬升为 2，结束后还原",
+			stats.MaxOpenConnections))
+		return func() { sqlDB.SetMaxOpenConns(stats.MaxOpenConnections) }, true
+	}
+	return func() {}, false
+}
+
 func acquireMigrationLock(db *gorm.DB, dsn string, isLog bool) (release func(), acquired bool, lockErr error) {
 	advisoryKey := migrationAdvisoryLockKeyFor(dsn)
 	lockName := migrationLockNameFor(dsn)
@@ -486,9 +503,11 @@ func acquireMigrationLock(db *gorm.DB, dsn string, isLog bool) (release func(), 
 			_ = conn.Close()
 			return func() {}, false, nil
 		}
+		restorePool, _ := ensureMigrationPoolCapacity(sqlDB)
 		return func() {
 			_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", advisoryKey)
 			_ = conn.Close()
+			restorePool()
 		}, true, nil
 	case migrationDialectMySQL:
 		sqlDB, err := db.DB()
@@ -508,9 +527,11 @@ func acquireMigrationLock(db *gorm.DB, dsn string, isLog bool) (release func(), 
 			_ = conn.Close()
 			return func() {}, false, nil
 		}
+		restorePool, _ := ensureMigrationPoolCapacity(sqlDB)
 		return func() {
 			_, _ = conn.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", lockName)
 			_ = conn.Close()
+			restorePool()
 		}, true, nil
 	default:
 		// SQLite is single-process; a process-level mutex is sufficient.
