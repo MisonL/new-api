@@ -3,7 +3,7 @@
 ## 0. 采样与基线
 
 - 审查基线提交：`e34a97ae6`（dev，`git rev-parse HEAD`）。
-- 收尾提交：`fcdc7d79a`。
+- 收尾提交：`533d2cd9f`。
 - 隔离开发环境：`new-api-dev-isolated-new-api-1`，端口 `127.0.0.1:3001`，PG `5433`，Redis `6380`。
 - 收尾容器镜像 `new-api-local:dev`，`--build-info` 输出
   `commit=fcdc7d79a0e64cc50d337b291be768f7ab251c83-dirty`、`date=2026-11-11T00:04:37Z`。
@@ -28,6 +28,7 @@
 | `dea97b8ec` | 上游已成功但结算失败的任务不再整笔退款 | 超时清扫保留预扣并记录人工核对原因；对照组仍正常退款 |
 | `c720e07fe` | OAuth 会话端点补 `no-store` | 路由级测试 + 运行时响应头实测 |
 | `fcdc7d79a` | 桌面确认凭据 Cookie 的 `Secure` 识别代理 TLS | 表驱动测试覆盖直连 TLS、forwarded https、逗号链、纯 http |
+| `533d2cd9f` | realtime 终态结算沿用冻结的补全与音频倍率 | 实时补全倍率 4、冻结 1 时终态必须按 1 结算 |
 
 ### 2.1 format 门禁（`9d89432e2`）
 
@@ -73,6 +74,17 @@ poll 路由的 `DisableCache`，路由测试即在 poll 处失败，恢复后通
 客户端在 https，凭据却没有 `Secure`。修复：把 HTTPS 判定导出为
 `middleware.RequestIsHTTPS`，会话 Cookie 与确认凭据共用同一规则。
 
+### 2.7 realtime 终态结算的倍率口径（`533d2cd9f`）
+
+`calculateAudioQuota` 每次回查 `ratio_setting` 取补全/音频倍率，而模型倍率与分组
+倍率取自 `PriceData` 冻结快照：连接期间管理员改倍率，同一请求的逐 turn 直扣与
+终态结算会按两套价格计算，日志里打印的倍率与实际计费也会分叉。
+
+把三个倍率纳入 `QuotaInfo`，逐 turn 预扣、终态结算、音频结算三个构造点统一从
+`PriceData` 取值；只有冻结值为 0 的按次计费与分档表达式路径才回查实时配置，这两
+条路径分别走 `UsePrice` 分支或由表达式结算覆盖，行为不变。反向验证：修复前同一
+测试扣 3000（期望 1500）并打印按实时倍率 4 计算的金额，修复后扣 1500。
+
 ## 3. 复核后推翻的结论
 
 - **`.app.tar.gz` 产物缺失（部署线 P1 候选）不成立。**
@@ -96,8 +108,12 @@ poll 路由的 `DisableCache`，路由测试即在 poll 处失败，恢复后通
   需要新增持久化待结算标记与幂等补偿扫描，且结算依赖 provider 结果，属于设计要求。
 - 价格快照不完整：`TaskBillingContext` 未保存 `CompletionRatio` 等参数，异步任务终态
   重算读实时配置；realtime 终态 `calculateAudioQuota` 同样回查实时音频/补全倍率。
-- `session_epoch` 缓存异步回写可能逆序，导致已吊销会话在一个 TTL 内重新通过。
-  需要 Redis 侧比较写入（Lua/CAS）。
+- 用户缓存的异步回写竞态（同一根因的两种表现）：`updateUserCache` 用整对象 HSET，
+  只对 `Quota` 用 `HSETNX` 建基数。其一，回退路径写的 `session_epoch` 可能是旧值，
+  已吊销会话在一个 TTL 内重新通过；其二，缓存键被失效删除后，更早读到旧行的回写
+  会重建该键并把旧额度写回（`TestManageUserOverrideInvalidatesQuotaCache` 在负载下
+  暴露此路径）。正确修法需要在 Redis 侧做比较写入（版本键 + Lua/CAS），并把「权威写」
+  与「回写」区分开；只改一半会让吊销失效或把正常用户踢下线，本轮未改。
 - `taskAdjustTokenQuota` 失败只记日志，资金与令牌账本可能分叉；正确处理需要幂等补偿。
 - `/api/*` 的 CORS：`SetApiRouter` 在 `router.Use(middleware.CORS())` 之前执行，
   预飞经 NoRoute 返回 204 与 `Allow-Origin`，真实响应却没有该头。是否允许 `/api/*`
@@ -126,7 +142,7 @@ poll 路由的 `DisableCache`，路由测试即在 poll 处失败，恢复后通
 | `go vet ./...` | 0 | 无输出 |
 | `go test ./... -count=1` | 0 | 全部包通过 |
 
-运行时验证（容器 `new-api-dev-isolated-new-api-1`，镜像 `commit=fcdc7d79a...`）：
+运行时验证（容器 `new-api-dev-isolated-new-api-1`，镜像 `commit=fcdc7d79a...`；该镜像早于 `533d2cd9f`）：
 
 - `/api/healthz` 首次探测即 200，启动日志 `database migration finished: main in 1.291s`、
   `ready in 1425 ms`，无 panic。
@@ -136,8 +152,12 @@ poll 路由的 `DisableCache`，路由测试即在 poll 处失败，恢复后通
 
 跳过与偶发：
 
-- 一次 `go test ./controller` 全量运行失败，但输出未保留失败用例名；随后连续三次全量运行
-  均通过（含单独两次留档）。按并发会话构建争用记录，不作为可复现失败。
+- `TestManageUserOverrideInvalidatesQuotaCache` 在全量 `go test ./...` 中失败过一次，
+  单跑、`-count=20`、以及两次 controller 整包运行均通过。排查后确认不是构建争用：
+  `updateUserCache` 在整对象 HSET 中跳过 `Quota`，随后用 `RedisHSetFieldIfAbsent`
+  建基数；若 override 路径删除了缓存键，一个更早读到旧行的异步回写会重建该键并把
+  旧额度写回。这与第 4 节列出的 `session_epoch` 回写竞态同一类，已单列为已知问题，
+  本轮未修（需要版本化缓存或 Redis 比较写入，见第 4 节）。
 - 未运行前端 `bun run build` / `bun run typecheck`：本轮前端改动仅为格式化与注释级，
   且 `format:check`、`lint`、单测均已通过。
 - 未做真实 MySQL/PostgreSQL 并发、真实 Redis 竞争、真实崩溃注入、真实上游与浏览器
@@ -148,4 +168,4 @@ poll 路由的 `DisableCache`，路由测试即在 poll 处失败，恢复后通
 - 本轮修复均基于 SQLite 测试库与本地隔离容器验证，不代表三库全量验收。
 - `go test ./...` 的输出里包含 `web/*/node_modules/**` 下的 Go 包（无测试文件），不属于本项目代码。
 - 修复后的镜像标签带 `-dirty`（工作区存在其他会话的未提交改动），不能据此推断镜像内容
-  与 `fcdc7d79a` 的树完全一致。
+  与提交时的树完全一致。
