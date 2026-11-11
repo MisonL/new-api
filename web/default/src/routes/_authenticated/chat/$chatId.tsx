@@ -1,14 +1,12 @@
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, redirect } from '@tanstack/react-router'
 import { Loader2, MessageCircleWarning } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { useActiveChatKey } from '@/features/chat/hooks/use-active-chat-key'
 import { useChatPresets } from '@/features/chat/hooks/use-chat-presets'
 import { resolveChatUrl } from '@/features/chat/lib/chat-links'
-import { getApiKeys } from '@/features/keys/api'
-import { API_KEY_STATUS } from '@/features/keys/constants'
 
 export const Route = createFileRoute('/_authenticated/chat/$chatId')({
   loader: async ({ params }) => {
@@ -37,33 +35,14 @@ function ChatRouteComponent() {
     return url.includes('{key}') || url.includes('{cherryConfig}')
   }, [isWebLink, preset])
 
+  // 与侧栏入口共用同一实现：列表接口只给掩码 key，真实 key 必须按 id
+  // 单独取，否则 iframe 带着掩码去鉴权必然失败。
   const {
     data: activeKey,
     isPending,
     isError,
     error,
-  } = useQuery({
-    queryKey: ['chat-active-key'],
-    queryFn: async () => {
-      const result = await getApiKeys({ p: 1, size: 50 })
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to load API keys')
-      }
-      const items = result.data?.items ?? []
-      const active = items.find(
-        (item) => item.status === API_KEY_STATUS.ENABLED
-      )
-      if (!active) {
-        throw new Error(
-          'No enabled API key available. Please enable an API key first.'
-        )
-      }
-      return active.key
-    },
-    enabled: Boolean(preset && requiresActiveKey),
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
-  })
+  } = useActiveChatKey(Boolean(preset && requiresActiveKey))
 
   const iframeSrc = useMemo(() => {
     if (!preset || !isWebLink) return ''
