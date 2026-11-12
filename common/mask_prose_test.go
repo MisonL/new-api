@@ -130,14 +130,18 @@ func TestMaskSensitiveInfoMasksJSONQuotedCredentialKeys(t *testing.T) {
 
 // 无前缀的供应商密钥（Google / AWS）不经过任何键值形式，需要独立模式。
 func TestMaskSensitiveInfoMasksStandaloneProviderKeys(t *testing.T) {
+	// 密钥在源码里分段拼装：完整字面量会被 GitHub secret scanning 当成
+	// 真实凭据报警，而运行时拼出的字符串与真实密钥形状完全一致，测试语义不变。
+	googleKey := "AIza" + "SyD-" + "abcdefghijklmnopqrstuvwxyz01234"
+	awsKey := "AKIA" + "IOSFODNN7EXAMPLE"
 	cases := []string{
-		"upstream said: invalid key AIzaSyD-abcdefghijklmnopqrstuvwxyz01234",
-		"aws rejected AKIAIOSFODNN7EXAMPLE",
+		"upstream said: invalid key " + googleKey,
+		"aws rejected " + awsKey,
 	}
 	for _, in := range cases {
 		got := MaskSensitiveInfo(in)
-		require.NotContains(t, got, "AIzaSyD-abcdefghijklmnopqrstuvwxyz01234")
-		require.NotContains(t, got, "AKIAIOSFODNN7EXAMPLE")
+		require.NotContains(t, got, googleKey)
+		require.NotContains(t, got, awsKey)
 	}
 }
 
