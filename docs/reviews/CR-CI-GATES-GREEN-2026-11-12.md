@@ -159,7 +159,9 @@ web/classic 的单测是后来才接入门禁（`a3ff3b668`），而首轮运行
 要等那份改动入库后才会转绿。
 
 本地用工作区那份改动跑同一用例：`bun test tests/channelAdvancedSettings.test.js` → 2 通过、
-0 失败，可作为「缺的是那份改动」的反证。
+0 失败，可作为「缺的是那份改动」的反证。该改动随后作为 `1553f3560` 提交入库（补齐
+`strip_codex_encrypted_context` 与 `request_body_limit` 的默认值、回填、序列化、删除与控件），
+`web/classic` 全量 222 通过/0 失败、prettier 全符合、eslint 0 error。
 
 ### 2.7 第二轮 CI（run 43222956547）
 
@@ -172,6 +174,15 @@ c-symbols 10/17、selfcheck 自述 22 处全一致），`go-tests`、`i18n-gate`
 web/default 单测与构建、web/classic eslint 与构建。失败步骤之后未在 CI 上执行的两步
 （`web node contract tests`、`verify bundled dependency versions`）本地补跑：分别退出码 0
 （`fail 0`）与 0（`web/classic: katex 0.18.11 已确认打包`），即除该既有用例外没有其他阻塞项。
+
+### 2.8 第三轮 CI（run 43234489753，`1553f3560`）：全绿
+
+补齐 classic 弹窗后重新推送，5 个 job 全部 success：`frontend-checks`、`go-tests`、
+`relaykit-gates`、`i18n-gate`、`operational-contracts`。
+
+secret scanning 告警 #2（Google API Key，`common/mask_prose_test.go:134`）已在同一轮
+通过 API 标记为 `false_positive` 并附说明：该值是 `AIza` 前缀加字面字母表序列的合成样例，
+不是真实密钥；源码里已改为运行时拼装，`state=open` 的告警数现为 0。
 
 ## 3. 已记录但本轮未修
 
