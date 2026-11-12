@@ -158,6 +158,21 @@ web/classic 的单测是后来才接入门禁（`a3ff3b668`），而首轮运行
 说明该功能正在被他们落地。按仓库约定，本记录不修改、不提交他人工作区改动，该 job
 要等那份改动入库后才会转绿。
 
+本地用工作区那份改动跑同一用例：`bun test tests/channelAdvancedSettings.test.js` → 2 通过、
+0 失败，可作为「缺的是那份改动」的反证。
+
+### 2.7 第二轮 CI（run 43222956547）
+
+修掉短 SHA 解析后重新推送，`relaykit-gates` 转绿（取回 → citation 83/152/47/9、bare 67、
+c-symbols 10/17、selfcheck 自述 22 处全一致），`go-tests`、`i18n-gate`、
+`operational-contracts` 同时通过。仅剩 `frontend-checks` 红，失败点仍是 2.6 记录的那条
+`web/classic` 既有用例。
+
+该 job 在失败前已跑通的步骤：两个前端的 format、lint、typecheck、production audit、
+web/default 单测与构建、web/classic eslint 与构建。失败步骤之后未在 CI 上执行的两步
+（`web node contract tests`、`verify bundled dependency versions`）本地补跑：分别退出码 0
+（`fail 0`）与 0（`web/classic: katex 0.18.11 已确认打包`），即除该既有用例外没有其他阻塞项。
+
 ## 3. 已记录但本轮未修
 
 `updateUserCache` 的哈希重建不是原子的（见 2.4）。读者在两条命令之间会看到 `Quota` 缺失、
