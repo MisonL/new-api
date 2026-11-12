@@ -488,8 +488,8 @@ def check_ci_anchor_fetch(text):
     上游仓库取）；实际能否取到由 CI 该步骤的退出码决定——本地 selfcheck
     没有联网义务，不实跑 fetch。
     """
-    pin_expr = "$(git rev-parse $(python3 -I scripts/relaykit-pin.py))"
-    baseline_expr = "$(git rev-parse $(python3 -I scripts/relaykit-pin.py --baseline))"
+    pin_expr = "$(python3 -I scripts/relaykit-pin.py --full)"
+    baseline_expr = "$(python3 -I scripts/relaykit-pin.py --full --baseline)"
 
     # YAML 的续行反斜杠把一条命令拆成多物理行，先按逻辑行归并再匹配。
     logical, buffer = [], ""
@@ -514,7 +514,8 @@ def check_ci_anchor_fetch(text):
         failures.append(
             "CI 锚点取回检查：repo-gates.yml 未从上游仓库按完整 SHA 取回 "
             "UPSTREAM_PIN（需要 git fetch ... \"https://github.com/"
-            "$relaykit_anchor_repository\" \"" + pin_expr + "\"）")
+            "$relaykit_anchor_repository\" \"" + pin_expr + "\"，"
+            "不能用 git rev-parse 解析短 SHA——CI checkout 里没有该对象）")
     if not any(baseline_expr in line and re.search(r"\borigin\b", line)
                for line in fetches):
         failures.append(

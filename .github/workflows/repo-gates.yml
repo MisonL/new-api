@@ -126,9 +126,9 @@ jobs:
           relaykit_anchor_repository: QuantumNous/new-api
         run: |
           git fetch --no-tags --depth=1 "https://github.com/$relaykit_anchor_repository" \
-            "$(git rev-parse $(python3 -I scripts/relaykit-pin.py))"
+            "$(python3 -I scripts/relaykit-pin.py --full)"
           git fetch --no-tags --depth=1 origin \
-            "$(git rev-parse $(python3 -I scripts/relaykit-pin.py --baseline))"
+            "$(python3 -I scripts/relaykit-pin.py --full --baseline)"
       # citation-check 的默认 ref 是 upstream/main（fail-closed 设计），CI 中无该
       # remote 且预期漂移，因此显式钉在设计文档声明的锚点上。ref 值经
       # scripts/relaykit-pin.py 从 selfcheck 的 UPSTREAM_PIN 取得，升锚只改一处；

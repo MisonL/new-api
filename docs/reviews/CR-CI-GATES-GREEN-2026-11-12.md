@@ -123,6 +123,41 @@ common.RedisHSetFieldIfAbsent(key, "Quota", base.Quota, ttl)
 
 全仓复扫（`*.go`/`ts`/`tsx`/`js`/`jsx`/`json`/`md`，排除 `node_modules`）确认已无命中。
 
+### 2.6 首轮修复后的 CI 复核（run 43217079919）
+
+推送 6 个提交后再次运行，5 个 job 的结果：
+
+| job | 结论 | 说明 |
+| --- | --- | --- |
+| `go-tests` | success | 工具链升到 1.27.4 后 `govulncheck` 不再命中 GO-2026-6859 |
+| `i18n-gate` | success | — |
+| `operational-contracts` | success | — |
+| `relaykit-gates` | failure | 取回步骤自身失败，见下 |
+| `frontend-checks` | failure | `web/classic` 的既有用例，见下 |
+
+**relaykit-gates：取回步骤用了短 SHA。** 上一版写的是
+`"$(git rev-parse $(python3 -I scripts/relaykit-pin.py))"`，日志为：
+
+```
+fatal: ambiguous argument '789c97019': unknown revision or path not in the working tree.
+fatal: couldn't find remote ref 789c97019
+```
+
+`git rev-parse <短 SHA>` 只能解析仓库里已存在的对象；CI 的 checkout 恰恰没有这两个锚点，
+所以取回步骤自己先失败。本地能通过是因为本地仓库里有这两个对象——这正是「本地绿、
+CI 红」的那类差集。修法：`relaykit-pin.py` 增加 `--full`，短 SHA 仍写在常量里（与设计
+文档一致），完整 SHA 在脚本内显式登记并校验前缀一致；workflow 与 `check_ci_anchor_fetch`
+的契约同步改为 `--full` 形态。缺登记或前缀不符时脚本直接失败，不会静默取错对象。
+
+**frontend-checks：不是本轮改动引入的失败。** `web/classic/tests/channelAdvancedSettings.test.js`
+（提交 `8859d52c6`，2026-10-15）要求 `EditChannelModal.jsx` 含
+`strip_codex_encrypted_context` 的读写与删除，而该提交并未修改这个文件，`HEAD` 版本里
+一次都不出现该标识符（`git show HEAD:… | grep -c` = 0）。该用例此前从未在 CI 上跑过：
+web/classic 的单测是后来才接入门禁（`a3ff3b668`），而首轮运行在 web/default 的用例上
+就中断了。工作区里另一会话的未提交改动（同一文件，14 处引用）恰好满足这 5 条断言，
+说明该功能正在被他们落地。按仓库约定，本记录不修改、不提交他人工作区改动，该 job
+要等那份改动入库后才会转绿。
+
 ## 3. 已记录但本轮未修
 
 `updateUserCache` 的哈希重建不是原子的（见 2.4）。读者在两条命令之间会看到 `Quota` 缺失、

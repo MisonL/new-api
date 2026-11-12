@@ -490,8 +490,8 @@ class TestCiAnchorFetch(unittest.TestCase):
         self.assertEqual(selfcheck.check_ci_anchor_fetch(self._workflow()), [])
 
     def test_missing_baseline_fetch_fails_closed(self):
-        text = self._workflow().replace("relaykit-pin.py --baseline",
-                                        "relaykit-pin.py")
+        text = self._workflow().replace("relaykit-pin.py --full --baseline",
+                                        "relaykit-pin.py --full")
         failures = selfcheck.check_ci_anchor_fetch(text)
         self.assertEqual(len(failures), 1)
         self.assertIn("宿主基线", failures[0])
