@@ -73,6 +73,10 @@ func InvalidateUserCache(userId int) error {
 // Quota 不在整对象回写里：它由 HINCRBY 增量维护，用读库快照覆盖会把
 // 已扣减的额度在缓存里复活（最长一个 TTL）。额度只在字段缺失时用
 // HSETNX 建立基数，已有值一律保留。
+//
+// SessionEpoch 同理不能整对象回写，但它需要的是「只增不减」而不是「只写一次」：
+// 世代只会在改密码时递增，而这里可能写入调用方更早读到的旧快照。整值覆盖会把
+// 已递增的世代调低，令刚被吊销的旧会话重新通过 stored == current 判定。
 func updateUserCache(user User) error {
 	if !common.RedisEnabled {
 		return nil
@@ -84,11 +88,14 @@ func updateUserCache(user User) error {
 		getUserCacheKey(user.Id),
 		base,
 		ttl,
-		map[string]struct{}{"Quota": {}},
+		map[string]struct{}{"Quota": {}, "SessionEpoch": {}},
 	); err != nil {
 		return err
 	}
 	if _, err := common.RedisHSetFieldIfAbsent(getUserCacheKey(user.Id), "Quota", base.Quota, ttl); err != nil {
+		return err
+	}
+	if _, err := common.RedisHSetFieldIfGreater(getUserCacheKey(user.Id), "SessionEpoch", base.SessionEpoch, ttl); err != nil {
 		return err
 	}
 	return nil

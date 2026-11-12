@@ -154,6 +154,37 @@ redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2])
 return 1
 `)
 
+var hSetFieldIfGreaterScript = redis.NewScript(`
+if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1 then
+  local current = tonumber(redis.call('HGET', KEYS[1], ARGV[1]))
+  if current ~= nil and tonumber(ARGV[2]) <= current then
+    return 0
+  end
+end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+if tonumber(ARGV[3]) > 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[3])
+end
+return 1
+`)
+
+// RedisHSetFieldIfGreater 只在字段缺失或新值严格大于旧值时写入，返回是否真的写入。
+// 用于单调递增的计数/世代类字段（如用户会话世代的 SessionEpoch）：读库得到的
+// 快照可能已经落后于并发发生过的递增，整值回写会把世代调低，等于让刚被吊销的
+// 会话在缓存 TTL 内重新放行。用 Lua 在 Redis 侧做比较，避免读改写竞态。
+func RedisHSetFieldIfGreater(key, field string, value int64, expiration time.Duration) (bool, error) {
+	ttlSeconds := int64(0)
+	if expiration > 0 {
+		ttlSeconds = int64(expiration / time.Second)
+	}
+	res, err := hSetFieldIfGreaterScript.Run(context.Background(), RDB,
+		[]string{key}, field, value, ttlSeconds).Int()
+	if err != nil {
+		return false, err
+	}
+	return res == 1, nil
+}
+
 // RedisHSetFieldIfAbsent 只在字段不存在时写入，返回是否真的写入。
 // 用户额度这类字段由增量扣减维护：用读库得到的旧快照整值回写会覆盖
 // 并发 HINCRBY 的结果，把已扣掉的额度在缓存里复活。
