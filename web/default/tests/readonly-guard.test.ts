@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
 import type { AxiosAdapter, AxiosRequestConfig } from 'axios'
 
-// The guard reads its flag once at module load, so it must be set before the
-// module under test is imported.
+// The guard reads its flag on every call, but the module still has to be
+// imported after the env is set so the axios instance it patches is the one
+// this file uses.
 import.meta.env.VITE_REACT_APP_READONLY_MODE = 'true'
 
 const toastError = mock(() => undefined)
@@ -30,9 +31,9 @@ globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch
 
 const { api } = await import('../src/lib/api')
 const {
-  IS_READONLY_FRONTEND,
   READONLY_FRONTEND_MESSAGE,
   isReadonlyBlockedRequest,
+  isReadonlyFrontend,
   installReadonlyFetchGuard,
 } = await import('../src/lib/readonly-guard')
 
@@ -42,7 +43,7 @@ const {
 installReadonlyFetchGuard()
 
 beforeAll(() => {
-  expect(IS_READONLY_FRONTEND).toBe(true)
+  expect(isReadonlyFrontend()).toBe(true)
 })
 
 afterAll(() => {

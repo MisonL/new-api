@@ -17,8 +17,17 @@ import type { AxiosInstance } from 'axios'
  * so it costs nothing in a normal build.
  */
 
-export const IS_READONLY_FRONTEND =
-  import.meta.env.VITE_REACT_APP_READONLY_MODE === 'true'
+/**
+ * Build-time read-only flag.
+ *
+ * 每次调用时读取而不是在模块加载时定值：bun test 在同一进程里跑完所有测试
+ * 文件，每个模块只求值一次，写成常量会把「第一个导入本模块的测试文件看到的
+ * 环境」冻结下来，后续测试再设 env 也不生效。生产构建由打包器把 env 内联成
+ * 字面量，因此这里没有额外开销，语义与常量一致。
+ */
+export function isReadonlyFrontend(): boolean {
+  return import.meta.env.VITE_REACT_APP_READONLY_MODE === 'true'
+}
 
 export const READONLY_FRONTEND_MESSAGE =
   (import.meta.env.VITE_REACT_APP_READONLY_MESSAGE as string | undefined) ||
@@ -209,7 +218,7 @@ let installedFetchWrapper: typeof globalThis.fetch | null = null
  * target) and local blob/data URLs keep working.
  */
 export function installReadonlyFetchGuard(): void {
-  if (!IS_READONLY_FRONTEND) {
+  if (!isReadonlyFrontend()) {
     return
   }
   if (typeof globalThis.fetch !== 'function') {
@@ -264,7 +273,7 @@ export interface ReadonlyXHRGuardOptions {
 export function installReadonlyXHRGuard(
   options?: ReadonlyXHRGuardOptions
 ): void {
-  const enabled = options?.enabled ?? IS_READONLY_FRONTEND
+  const enabled = options?.enabled ?? isReadonlyFrontend()
   if (!enabled) {
     return
   }
@@ -303,7 +312,7 @@ export function installReadonlyXHRGuard(
  */
 export function applyReadonlyRequestGuard(instance: AxiosInstance): void {
   instance.interceptors.request.use((config) => {
-    if (!IS_READONLY_FRONTEND) {
+    if (!isReadonlyFrontend()) {
       return config
     }
     if (isReadonlyBlockedRequest(config.method, config.url)) {

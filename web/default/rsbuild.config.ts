@@ -140,7 +140,7 @@ export default defineConfig(({ envMode }) => {
       },
       // loadEnv 只读取变量，不会把它们注入产物；必须显式交给 source.define，
       // 否则 import.meta.env.VITE_* 在打包后是 undefined。只读守卫的
-      // IS_READONLY_FRONTEND 依赖这个注入，没接上时它会被常量折叠成 false，
+      // isReadonlyFrontend() 依赖这个注入，没接上时它恒为 false，
       // 整个第二层阻断静默失效。
       define: env.publicVars,
     },
