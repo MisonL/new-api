@@ -472,6 +472,45 @@ class TestCiPin(unittest.TestCase):
         self.assertEqual(selfcheck.check_ci_pin(text), [])
 
 
+class TestCiAnchorFetch(unittest.TestCase):
+    """CI 必须取回两个锚点提交。
+
+    checkout 只有本仓库可达历史：上游锚点 789c97019 只随上游 tag 出现，
+    宿主基线 dbfbc096f 可能只是本地历史。缺了它们 citation 会把每一条引用
+    都判成 file not found——这正是 repo-gates 首次运行时 83/152/47 全红的原因。
+    """
+
+    def _workflow(self):
+        path = os.path.join(
+            os.path.dirname(_HERE), ".github", "workflows", "repo-gates.yml")
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_real_workflow_fetches_both_anchors(self):
+        self.assertEqual(selfcheck.check_ci_anchor_fetch(self._workflow()), [])
+
+    def test_missing_baseline_fetch_fails_closed(self):
+        text = self._workflow().replace("relaykit-pin.py --baseline",
+                                        "relaykit-pin.py")
+        failures = selfcheck.check_ci_anchor_fetch(text)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("宿主基线", failures[0])
+
+    def test_upstream_fetched_from_wrong_host_fails_closed(self):
+        text = self._workflow().replace(
+            "https://github.com/$relaykit_anchor_repository", "origin")
+        failures = selfcheck.check_ci_anchor_fetch(text)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("上游仓库", failures[0])
+
+    def test_missing_anchor_repository_fails_closed(self):
+        text = self._workflow().replace(
+            "          relaykit_anchor_repository: QuantumNous/new-api\n", "")
+        failures = selfcheck.check_ci_anchor_fetch(text)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("relaykit_anchor_repository", failures[0])
+
+
 class TestRealDoc(unittest.TestCase):
     def test_real_doc_matches_real_gates(self):
         """端到端：实跑各门禁，与设计文档的自述计数比对。

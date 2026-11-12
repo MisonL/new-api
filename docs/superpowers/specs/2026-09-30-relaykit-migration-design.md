@@ -859,7 +859,7 @@ python3 scripts/relaykit-doc-structure-check.test.py   # 25 个单测（第 41 �
 
 ```bash
 python3 scripts/relaykit-gate-selfcheck.py            # 实跑前四条门禁，与本文档的自述计数逐处比对（内部按本文档锚点 789c97019 钉 citation 的 --ref 与 dto 的 KIT_REF，见脚本 UPSTREAM_PIN；citation 四行的 `failed` 必须存在且为 0（第 43 轮起含裸引用组；其 `unresolved` 数由第 11 节声明并逐条比对）；设计文档必须携带 EXPECTED_CLAIM_KINDS 声明的整类自述，删空一类即失败——第 41 轮补入的两条 fail-closed）
-python3 scripts/relaykit-gate-selfcheck.test.py       # 47 个单测（第 40 轮 +1：钉死 ref 句式；第 41 轮 +4：failed 字段、尾注句式、类别 fail-closed；第 43 轮 +4：裸组解析与声明；CI 钉点 +5：动态形态、字面量、陈旧钉点 fail-closed、缺调用 fail-closed、真实 workflow 核对）
+python3 scripts/relaykit-gate-selfcheck.test.py       # 51 个单测（第 40 轮 +1：钉死 ref 句式；第 41 轮 +4：failed 字段、尾注句式、类别 fail-closed；第 43 轮 +4：裸组解析与声明；CI 钉点 +5：动态形态、字面量、陈旧钉点 fail-closed、缺调用 fail-closed、真实 workflow 核对；锚点取回 +4：真实 workflow、缺宿主基线取回、上游锚点取错仓库、缺仓库变量）
 ```
 
 它只检查**本文档的当前口径声明**；CR 记录里的计数是历史记录（「第 37 轮为 50/103/24」这类），记的是「当时为真」，不随门禁演进失效，故不在射程内。

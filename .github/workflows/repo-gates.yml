@@ -116,6 +116,19 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+      # 上游锚点只随上游 tag（v1.0.0-rc.41 等）出现，不在本仓库历史里；
+      # 宿主基线也可能只是本地历史。checkout 拿不到它们时 citation 会把
+      # 每一条引用都判成 file not found。GitHub 不接受按短 SHA fetch，
+      # 因此两个锚点都按发全长的 SHA 取回，SHA 一律由 relaykit-pin.py 给，
+      # workflow 不抄第二份（gate-selfcheck 的 check_ci_anchor_fetch 核对）。
+      - name: fetch relaykit anchors
+        env:
+          relaykit_anchor_repository: QuantumNous/new-api
+        run: |
+          git fetch --no-tags --depth=1 "https://github.com/$relaykit_anchor_repository" \
+            "$(git rev-parse $(python3 -I scripts/relaykit-pin.py))"
+          git fetch --no-tags --depth=1 origin \
+            "$(git rev-parse $(python3 -I scripts/relaykit-pin.py --baseline))"
       # citation-check 的默认 ref 是 upstream/main（fail-closed 设计），CI 中无该
       # remote 且预期漂移，因此显式钉在设计文档声明的锚点上。ref 值经
       # scripts/relaykit-pin.py 从 selfcheck 的 UPSTREAM_PIN 取得，升锚只改一处；

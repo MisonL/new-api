@@ -475,6 +475,54 @@ def check_ci_pin(text):
     return failures
 
 
+def check_ci_anchor_fetch(text):
+    """CI 必须取回两个锚点提交，否则 checkout 里没有锚点、全部门禁空跑变红。
+
+    checkout 只含本仓库可达历史；上游锚点（UPSTREAM_PIN）不在 fork 历史里
+    （它只随 v1.0.0-rc.41 等上游 tag 出现），宿主基线提交也可能只是本地
+    历史。GitHub 不接受按短 SHA fetch，所以两者都按完整 SHA 取：上游锚点
+    从 relaykit_anchor_repository 指定的上游仓库取，宿主基线从 origin 取，
+    两者的 SHA 都由 relaykit-pin.py 现算，workflow 不抄第二份。
+
+    这里只核对文本契约（取回命令存在、SHA 来自 pin 脚本、上游锚点确实从
+    上游仓库取）；实际能否取到由 CI 该步骤的退出码决定——本地 selfcheck
+    没有联网义务，不实跑 fetch。
+    """
+    pin_expr = "$(git rev-parse $(python3 -I scripts/relaykit-pin.py))"
+    baseline_expr = "$(git rev-parse $(python3 -I scripts/relaykit-pin.py --baseline))"
+
+    # YAML 的续行反斜杠把一条命令拆成多物理行，先按逻辑行归并再匹配。
+    logical, buffer = [], ""
+    for line in text.splitlines():
+        stripped = line.rstrip()
+        buffer += " " + stripped
+        if stripped.endswith("\\"):
+            continue
+        logical.append(buffer)
+        buffer = ""
+    if buffer:
+        logical.append(buffer)
+
+    failures = []
+    if not re.search(r"^\s*relaykit_anchor_repository:\s*\S+\s*$", text, re.M):
+        failures.append(
+            "CI 锚点取回检查：repo-gates.yml 缺少 relaykit_anchor_repository "
+            "（上游锚点所在的仓库）")
+    fetches = [line for line in logical if "git fetch" in line]
+    if not any(pin_expr in line and "https://github.com/$relaykit_anchor_repository" in line
+               for line in fetches):
+        failures.append(
+            "CI 锚点取回检查：repo-gates.yml 未从上游仓库按完整 SHA 取回 "
+            "UPSTREAM_PIN（需要 git fetch ... \"https://github.com/"
+            "$relaykit_anchor_repository\" \"" + pin_expr + "\"）")
+    if not any(baseline_expr in line and re.search(r"\borigin\b", line)
+               for line in fetches):
+        failures.append(
+            "CI 锚点取回检查：repo-gates.yml 未从 origin 按完整 SHA 取回宿主基线"
+            "（需要 git fetch ... origin \"" + baseline_expr + "\"）")
+    return failures
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--doc", default=DEFAULT_DOC)
@@ -505,7 +553,9 @@ def main():
 
     ci_workflow = os.path.join(ROOT, ".github", "workflows", "repo-gates.yml")
     if os.path.exists(ci_workflow):
-        failures.extend(check_ci_pin(read_text(ci_workflow)))
+        workflow_text = read_text(ci_workflow)
+        failures.extend(check_ci_pin(workflow_text))
+        failures.extend(check_ci_anchor_fetch(workflow_text))
     else:
         failures.append("CI 钉点检查：缺少 .github/workflows/repo-gates.yml")
 
