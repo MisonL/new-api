@@ -120,8 +120,11 @@ poll 路由的 `DisableCache`，路由测试即在 poll 处失败，恢复后通
   只对 `Quota` 用 `HSETNX` 建基数。其一，回退路径写的 `session_epoch` 可能是旧值，
   已吊销会话在一个 TTL 内重新通过；其二，缓存键被失效删除后，更早读到旧行的回写
   会重建该键并把旧额度写回（`TestManageUserOverrideInvalidatesQuotaCache` 在负载下
-  暴露此路径）。正确修法需要在 Redis 侧做比较写入（版本键 + Lua/CAS），并把「权威写」
-  与「回写」区分开；只改一半会让吊销失效或把正常用户踢下线，本轮未改。
+  暴露此路径）。
+  **世代部分已于 2026-11-11 修复**：新增 `common.RedisHSetFieldIfGreater`（Lua 内比较），
+  `updateUserCache` 把 `SessionEpoch` 移出整对象回写，改为只增不减，见
+  `CR-AUTH-SESSION-AND-CACHE-HARDENING-2026-11-11.md`。额度部分（键被删除后重建）仍
+  未处理：它需要版本键把「权威写」与「回写」区分开。
 - `taskAdjustTokenQuota` 失败只记日志，资金与令牌账本可能分叉；正确处理需要幂等补偿。
 - `/api/*` 的 CORS：`SetApiRouter` 在 `router.Use(middleware.CORS())` 之前执行，
   预飞经 NoRoute 返回 204 与 `Allow-Origin`，真实响应却没有该头。是否允许 `/api/*`

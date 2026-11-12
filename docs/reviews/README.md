@@ -105,6 +105,7 @@
 
 | 记录 | 内容 |
 | --- | --- |
+| [CR-AUTH-SESSION-AND-CACHE-HARDENING-2026-11-11.md](CR-AUTH-SESSION-AND-CACHE-HARDENING-2026-11-11.md) | 会话签发端点补 `no-store`、会话世代缓存只增不减；三项已知风险裁决 |
 | [CR-SSRF-OLLAMA-RECHECK-2026-09-09.md](CR-SSRF-OLLAMA-RECHECK-2026-09-09.md) | SSRF 复核 |
 
 ### 发布记录
