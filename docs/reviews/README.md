@@ -99,6 +99,7 @@
 
 | 记录 | 内容 |
 | --- | --- |
+| [CR-CI-GATES-GREEN-2026-11-12.md](CR-CI-GATES-GREEN-2026-11-12.md) | Repo Gates 首次运行的三个失败与 secret scanning 告警收口：只读守卫改为逐次读取开关、Go 工具链钉到 1.27.4（GO-2026-6859）、relaykit 锚点在 CI 的取回步骤、额度覆盖用例断言对齐其不变量 |
 | [CR-MACOS-DOCKER-TUN-HARDENING-2026-08-23.md](CR-MACOS-DOCKER-TUN-HARDENING-2026-08-23.md) | macOS Docker TUN 加固 |
 
 ### 安全与认证
