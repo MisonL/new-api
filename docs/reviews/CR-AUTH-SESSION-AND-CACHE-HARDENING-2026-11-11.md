@@ -88,14 +88,37 @@
 
 三次扰动后均已还原，相关测试重新通过。
 
-### 4.2 偶发与跳过
+### 4.2 后续自查发现并修复的回归
+
+- 自定义 OAuth 登录的 toast 文案是新增的 `t('...')` 字面量，但 6 个语言文件都没登记。
+  `bun run i18n:coverage` 退出码 1，报 `en/fr/ja/ru/vi/zh 各缺少 2 个代码中使用的键`。
+  `scripts/sync-i18n.mjs` 只对齐语言文件之间、**不扫描源码**（源码扫描在
+  `i18nDefaultCoverageGate.mjs`），所以新增文案必须显式写进语言文件。已按各语言包的
+  字母序插入 `{{n}}` 与 `{{value}}` 之间并保持原始格式补齐；补齐后
+  `i18n:coverage`、`i18n:complete` 与 classic 侧两个 i18n 门禁全部通过。
+
+### 4.3 本轮补跑的其它门禁
+
+| 命令 | 退出码 | 摘要 |
+| --- | --- | --- |
+| `go vet ./...` | 0 | 全量，无输出 |
+| `cd web/default && bun run format:check` | 0 | `All matched files use Prettier code style!` |
+| `cd web/default && bun run test` | 0 | 313 pass / 0 fail（44 个文件） |
+| `cd web/default && bun run i18n:coverage` | 0 | 3795 个字面量键 × 6 个语言文件 |
+| `cd web/default && bun run i18n:complete` | 0 | 两个前端均无未翻译多词文案 |
+| `cd web/classic && node ../scripts/i18nCoverageGate.mjs` | 0 | 7 个语言文件键齐全 |
+| `cd web/classic && node ../scripts/i18nLintGate.mjs` | 0 | 62 条 == 基线，新增 0 条 |
+| `cd web/default && bun audit --production` | 0 | 593 个依赖，无漏洞 |
+| `cd web/classic && bun audit --production` | 0 | 661 个依赖，无漏洞 |
+
+### 4.4 偶发与跳过
 
 - `TestManageUserOverrideInvalidatesQuotaCache` 在本轮一次 `./controller` 定向运行中失败
   （`override 后缓存不得继续持有旧额度`）。单跑 3 次、`-count=30`、以及随后 3 次整包
   `go test ./controller -count=1` 均通过。该用例的偶发性质在第 4 轮记录第 5 节已有记载，
   根因是异步回写在键被删除后重建，与本轮改动无关（本轮只改 `SessionEpoch` 写入语义）。
-- 未运行 `go test ./...` 全量、未做真实 MySQL/PostgreSQL 并发、真实 Redis 竞争、
-  崩溃注入与真实浏览器 passkey/OAuth 往返。
+- 未运行 `go test ./...` 全量（改为 `go vet ./...` 与关键包 `-count=1`）、未做真实
+  MySQL/PostgreSQL 并发、真实 Redis 竞争、崩溃注入与真实浏览器 passkey/OAuth 往返。
 
 ## 5. 边界声明
 
