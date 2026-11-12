@@ -52,6 +52,8 @@
     "{{field}} updated to {{value}}": "{{field}} を {{value}} に更新しました",
     "{{field}} updated to {{value}} for tag: {{tag}}": "タグ「{{tag}}」の {{field}} を {{value}} に更新しました",
     "{{n}} model(s) selected": "{{n}} 件のモデルを選択済み",
+    "{{provider}} login is unavailable": "{{provider}} でログインできません",
+    "{{provider}} login is unavailable: {{reason}}": "{{provider}} でログインできません：{{reason}}",
     "{{value}}ms": "{{value}}ミリ秒",
     "{{value}}s": "{{value}}秒",
     "@lobehub/icons key": "@lobehub/icons キー",

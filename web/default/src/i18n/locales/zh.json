@@ -52,6 +52,8 @@
     "{{field}} updated to {{value}}": "{{field}} 已更新为 {{value}}",
     "{{field}} updated to {{value}} for tag: {{tag}}": "标签「{{tag}}」的 {{field}} 已更新为 {{value}}",
     "{{n}} model(s) selected": "已选 {{n}} 个模型",
+    "{{provider}} login is unavailable": "{{provider}} 登录不可用",
+    "{{provider}} login is unavailable: {{reason}}": "{{provider}} 登录不可用：{{reason}}",
     "{{value}}ms": "{{value}} 毫秒",
     "{{value}}s": "{{value}} 秒",
     "@lobehub/icons key": "@lobehub/icons 键",

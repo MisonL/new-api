@@ -52,6 +52,8 @@
     "{{field}} updated to {{value}}": "{{field}} đã cập nhật thành {{value}}",
     "{{field}} updated to {{value}} for tag: {{tag}}": "{{field}} đã cập nhật thành {{value}} cho nhãn: {{tag}}",
     "{{n}} model(s) selected": "Đã chọn {{n}} model",
+    "{{provider}} login is unavailable": "Không thể đăng nhập bằng {{provider}}",
+    "{{provider}} login is unavailable: {{reason}}": "Không thể đăng nhập bằng {{provider}}: {{reason}}",
     "{{value}}ms": "{{value}} ms",
     "{{value}}s": "{{value}} s",
     "@lobehub/icons key": "@lobehub/icons khóa",

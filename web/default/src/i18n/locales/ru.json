@@ -52,6 +52,8 @@
     "{{field}} updated to {{value}}": "{{field}} обновлено на {{value}}",
     "{{field}} updated to {{value}} for tag: {{tag}}": "{{field}} обновлено на {{value}} для тега: {{tag}}",
     "{{n}} model(s) selected": "Выбрано моделей: {{n}}",
+    "{{provider}} login is unavailable": "Вход через {{provider}} недоступен",
+    "{{provider}} login is unavailable: {{reason}}": "Вход через {{provider}} недоступен: {{reason}}",
     "{{value}}ms": "{{value}} мс",
     "{{value}}s": "{{value}} с",
     "@lobehub/icons key": "Ключ @lobehub/icons",

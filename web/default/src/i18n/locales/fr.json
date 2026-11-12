@@ -52,6 +52,8 @@
     "{{field}} updated to {{value}}": "{{field}} mis à jour en {{value}}",
     "{{field}} updated to {{value}} for tag: {{tag}}": "{{field}} mis à jour en {{value}} pour le tag : {{tag}}",
     "{{n}} model(s) selected": "{{n}} modèle(s) sélectionné(s)",
+    "{{provider}} login is unavailable": "La connexion via {{provider}} est indisponible",
+    "{{provider}} login is unavailable: {{reason}}": "La connexion via {{provider}} est indisponible : {{reason}}",
     "{{value}}ms": "{{value}} ms",
     "{{value}}s": "{{value}} s",
     "@lobehub/icons key": "@lobehub/icons clé",
