@@ -90,11 +90,19 @@ pub fn bootstrap_desktop_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), St
     ensure_local_server_port_available(&runtime_config)?;
 
     let sqlite_path = data_dir.join(SQLITE_FILE_NAME);
+    let passthrough_env =
+        crate::runtime_support::sidecar_passthrough_env(|key| std::env::var(key).ok());
     let sidecar_command = app
         .shell()
         .sidecar("new-api")
         .map_err(|err| err.to_string())?
         .current_dir(&app_data_dir)
+        // 先清空宿主环境再挑选透传：宿主配置（NODE_TYPE、UPDATE_TASK、
+        // TRUSTED_PROXIES、HTTP(S)_PROXY 等）若被继承会悄悄改变网关行为，
+        // 或把出站流量导向宿主代理。只保留时区、临时目录、语言与证书链
+        // 这类运行环境变量。
+        .env_clear()
+        .envs(passthrough_env)
         .env("PORT", runtime_config.port.to_string())
         // 只绑回环。桌面端的探针、窗口和预检全部假设 127.0.0.1，而
         // Go 服务不设 HOST 时绑全部网卡：在公共网络里会把整个控制台

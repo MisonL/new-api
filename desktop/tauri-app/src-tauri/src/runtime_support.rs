@@ -336,6 +336,32 @@ pub fn probe_readiness_response(response: &str) -> ReadinessProbeResult {
     }
 }
 
+/// 宿主环境里允许透传给 sidecar 的变量键。
+///
+/// sidecar 必须隔离宿主配置（NODE_TYPE、UPDATE_TASK、TRUSTED_PROXIES、
+/// HTTP(S)_PROXY 等一旦继承会改变网关行为或把流量导向宿主代理），因此启动
+/// 前先 env_clear。但完全空环境会破坏时区、临时目录和系统证书链，所以只把
+/// 这几类与运行环境强相关、又不影响业务配置的变量原样带回。
+pub fn sidecar_passthrough_env_keys() -> &'static [&'static str] {
+    &[
+        "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "TZ", "LANG", "LC_ALL", "LC_CTYPE",
+        "SSL_CERT_FILE", "SSL_CERT_DIR",
+    ]
+}
+
+/// 从给定的环境读取器里挑出允许透传的键值对。
+///
+/// 以「键 -> 值」的闭包注入，方便在不依赖进程全局环境的情况下测试。
+pub fn sidecar_passthrough_env<F>(read: F) -> Vec<(String, String)>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    sidecar_passthrough_env_keys()
+        .iter()
+        .filter_map(|key| read(key).map(|value| ((*key).to_string(), value)))
+        .collect()
+}
+
 fn load_existing_desktop_secrets(secret_file: &Path) -> Result<DesktopSecrets, String> {
     let persisted = fs::read_to_string(secret_file)
         .map_err(|err| format!("failed to read desktop secret file: {err}"))?;

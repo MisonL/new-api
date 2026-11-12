@@ -9,7 +9,8 @@ use new_api_tauri_desktop_lib::runtime_support::{
     analyze_startup_error, is_ready_status_response, is_service_management_recoverable_error,
     load_or_create_desktop_runtime_config, load_or_create_desktop_secrets,
     probe_readiness_response, resolve_single_instance_focus_target, save_desktop_runtime_config,
-    DesktopRuntimeConfig, ReadinessProbeResult, SingleInstanceFocusTarget,
+    sidecar_passthrough_env, sidecar_passthrough_env_keys, DesktopRuntimeConfig,
+    ReadinessProbeResult, SingleInstanceFocusTarget,
 };
 
 fn desktop_port_env_lock() -> MutexGuard<'static, ()> {
@@ -466,6 +467,59 @@ fn resolve_single_instance_focus_target_noops_without_existing_windows() {
         resolve_single_instance_focus_target(false, false),
         SingleInstanceFocusTarget::None,
     );
+}
+
+#[test]
+fn sidecar_passthrough_env_keeps_only_runtime_keys() {
+    // 宿主环境里的业务配置（NODE_TYPE / UPDATE_TASK / TRUSTED_PROXIES）
+    // 与代理变量都不得出现在透传集合里。
+    let fake: Vec<(&str, &str)> = vec![
+        ("PATH", "/usr/bin"),
+        ("HOME", "/Users/probe"),
+        ("TZ", "Asia/Shanghai"),
+        ("SSL_CERT_FILE", "/etc/ssl/cert.pem"),
+        ("HTTP_PROXY", "http://host.docker.internal:7890"),
+        ("HTTPS_PROXY", "http://host.docker.internal:7890"),
+        ("NODE_TYPE", "slave"),
+        ("UPDATE_TASK", "true"),
+        ("TRUSTED_PROXIES", "10.0.0.1"),
+    ];
+    let env = sidecar_passthrough_env(|key| {
+        fake.iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| (*value).to_string())
+    });
+    let keys: Vec<&str> = env.iter().map(|(key, _)| key.as_str()).collect();
+
+    assert!(keys.contains(&"PATH"));
+    assert!(keys.contains(&"HOME"));
+    assert!(keys.contains(&"TZ"));
+    assert!(keys.contains(&"SSL_CERT_FILE"));
+    for forbidden in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NODE_TYPE",
+        "UPDATE_TASK",
+        "TRUSTED_PROXIES",
+    ] {
+        assert!(
+            !keys.contains(&forbidden),
+            "{forbidden} must not be passed through to the sidecar"
+        );
+    }
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| key == "TZ")
+            .map(|(_, value)| value.as_str()),
+        Some("Asia/Shanghai"),
+    );
+}
+
+#[test]
+fn sidecar_passthrough_env_skips_unset_keys() {
+    let env = sidecar_passthrough_env(|_| None);
+    assert!(env.is_empty());
+    assert!(sidecar_passthrough_env_keys().contains(&"PATH"));
 }
 
 fn unique_test_dir(prefix: &str) -> PathBuf {
