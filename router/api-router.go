@@ -88,20 +88,35 @@ func SetApiRouter(router *gin.Engine) {
 		//apiRouter.POST("/waffo-pancake/webhook", controller.WaffoPancakeWebhook)
 
 		// Universal secure verification routes
-		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
+		// 成功后 setSecureVerificationSession 写会话，与登录端点同一契约：响应
+		// 一律 no-store。必须排在校验链路最前，被拒绝的响应才同样带 no-store。
+		apiRouter.POST("/verify", middleware.DisableCache(), middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
 
 		userRoute := apiRouter.Group("/user")
 		{
 			userRoute.POST("/register", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, middleware.TurnstileCheck(), controller.Register)
 			userRoute.POST("/login", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, middleware.TurnstileCheck(), controller.Login)
 			userRoute.POST("/login/2fa", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.Verify2FALogin)
-			userRoute.POST("/passkey/login/begin", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.PasskeyLoginBegin)
-			userRoute.POST("/passkey/login/finish", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.PasskeyLoginFinish)
+			userRoute.POST("/passkey/login/begin", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.PasskeyLoginBegin)
+			userRoute.POST("/passkey/login/finish", middleware.DisableCache(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.PasskeyLoginFinish)
 			//userRoute.POST("/tokenlog", middleware.CriticalRateLimit(), controller.TokenLog)
 			userRoute.GET("/logout", controller.Logout)
 			userRoute.POST("/epay/notify", anonymousRequestBodyLimit, controller.EpayNotify)
 			userRoute.GET("/epay/notify", controller.EpayNotify)
 			userRoute.GET("/groups", middleware.TryUserAuth(), controller.GetUserGroups)
+
+			// Passkey 的各 begin/finish 都会 SaveSessionData/PopSessionData
+			// 改写会话，finish 成功还会 setupLogin 签发会话。DisableCache 必须
+			// 排在鉴权之前，被拒绝（401）的响应才同样带 no-store，不会留下可
+			// 缓存的中间态——这也是它与 selfRoute 分开注册的原因。
+			passkeySelfRoute := userRoute.Group("/")
+			passkeySelfRoute.Use(middleware.DisableCache(), middleware.UserAuth())
+			{
+				passkeySelfRoute.POST("/passkey/register/begin", controller.PasskeyRegisterBegin)
+				passkeySelfRoute.POST("/passkey/register/finish", controller.PasskeyRegisterFinish)
+				passkeySelfRoute.POST("/passkey/verify/begin", controller.PasskeyVerifyBegin)
+				passkeySelfRoute.POST("/passkey/verify/finish", controller.PasskeyVerifyFinish)
+			}
 
 			selfRoute := userRoute.Group("/")
 			selfRoute.Use(middleware.UserAuth())
@@ -113,10 +128,6 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.DELETE("/self", controller.DeleteSelf)
 				selfRoute.GET("/token", middleware.DisableCache(), controller.GenerateAccessToken)
 				selfRoute.GET("/passkey", controller.PasskeyStatus)
-				selfRoute.POST("/passkey/register/begin", controller.PasskeyRegisterBegin)
-				selfRoute.POST("/passkey/register/finish", controller.PasskeyRegisterFinish)
-				selfRoute.POST("/passkey/verify/begin", controller.PasskeyVerifyBegin)
-				selfRoute.POST("/passkey/verify/finish", controller.PasskeyVerifyFinish)
 				selfRoute.DELETE("/passkey", controller.PasskeyDelete)
 				selfRoute.GET("/aff", controller.GetAffCode)
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)

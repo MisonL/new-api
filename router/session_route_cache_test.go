@@ -141,6 +141,17 @@ func TestOAuthSessionRoutesDisableCache(t *testing.T) {
 		http.MethodPost: {
 			"/api/auth/external/probe/jwt/login",
 			"/api/auth/external/probe/header/login",
+			// /api/verify 成功后 setSecureVerificationSession 写会话；匿名
+			// passkey 登录的 begin/finish 通过 SaveSessionData/PopSessionData
+			// 改写会话，finish 成功还会 setupLogin 签发会话。这三条把
+			// DisableCache 排在校验链路最前，被拒绝的响应同样带 no-store。
+			"/api/verify",
+			"/api/user/passkey/login/begin",
+			"/api/user/passkey/login/finish",
+			"/api/user/passkey/register/begin",
+			"/api/user/passkey/register/finish",
+			"/api/user/passkey/verify/begin",
+			"/api/user/passkey/verify/finish",
 		},
 		http.MethodGet: {
 			"/api/auth/external/probe/cas/start",
