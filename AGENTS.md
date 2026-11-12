@@ -19,7 +19,7 @@
 
 ## 2. 技术栈和目录
 
-- 后端：Go 1.27.3、Gin、GORM v2
+- 后端：Go 1.27.4、Gin、GORM v2
 - 前端：React 18、Vite、Semi Design，默认包管理器为 `bun`
 - 数据库：SQLite、MySQL、PostgreSQL，三者必须兼容
 - 缓存：Redis + 内存缓存
