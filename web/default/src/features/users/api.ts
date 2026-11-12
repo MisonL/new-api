@@ -124,10 +124,15 @@ export async function getGroups(): Promise<ApiResponse<string[]>> {
 // ============================================================================
 
 export interface OAuthBinding {
-  provider_id: string
+  // 后端 UserOAuthBindingResponse 里 provider_id 是 int，身份标识字段名
+  // 是 provider_user_id（不是 external_id）。按实际载荷声明，避免把
+  // 数字 id 当字符串比较、或永远读不到绑定的外部身份。
+  provider_id: number
   provider_name: string
+  provider_slug?: string
+  provider_icon?: string
+  provider_user_id?: string
   user_id?: number
-  external_id?: string
 }
 
 /**
@@ -156,7 +161,7 @@ export async function adminClearUserBinding(
  */
 export async function adminUnbindCustomOAuth(
   userId: number,
-  providerId: string
+  providerId: number | string
 ): Promise<ApiResponse> {
   const res = await api.delete(
     `/api/user/${userId}/oauth/bindings/${providerId}`

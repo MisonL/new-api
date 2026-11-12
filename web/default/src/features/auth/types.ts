@@ -178,6 +178,10 @@ export interface CustomOAuthProviderInfo {
   client_id: string
   authorization_endpoint: string
   scopes: string
+  // 后端按 kind 区分 oauth_code / cas / jwt_direct / trusted_header，
+  // 并给出是否支持浏览器登录。前端据此分流，不能一律按授权码流程处理。
+  kind?: string
+  browser_login_supported?: boolean
 }
 
 // ============================================================================

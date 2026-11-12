@@ -7,6 +7,10 @@ import { api } from '@/lib/api'
 import { markOAuthIntent } from '@/lib/oauth'
 import { getOAuthState } from '../api'
 import {
+  resolveCustomOAuthAction,
+  buildCustomOAuthStartUrl,
+} from '../lib/custom-oauth-action'
+import {
   buildGitHubOAuthUrl,
   buildDiscordOAuthUrl,
   buildOIDCOAuthUrl,
@@ -181,7 +185,19 @@ export function useOAuthLogin(status: SystemStatus | null) {
   }
 
   const handleCustomOAuthLogin = async (provider: CustomOAuthProviderInfo) => {
-    if (!provider.authorization_endpoint || !provider.client_id) return
+    // 后端按 kind 区分 oauth_code / cas / jwt_direct / trusted_header。
+    // 非授权码类型没有 client_id + authorization_endpoint，拼 OAuth code URL
+    // 只会得到死按钮；这里显式分流，不支持的入口给出可见失败。
+    const action = resolveCustomOAuthAction(provider)
+    if (action.type === 'unsupported' || action.type === 'misconfigured') {
+      toast.error(
+        t('{{provider}} login is unavailable: {{reason}}', {
+          provider: provider.name,
+          reason: action.reason,
+        })
+      )
+      return
+    }
 
     setIsLoading(true)
     try {
@@ -193,17 +209,16 @@ export function useOAuthLogin(status: SystemStatus | null) {
       }
 
       const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
-      const url = new URL(provider.authorization_endpoint)
-      url.searchParams.set('client_id', provider.client_id)
-      url.searchParams.set('redirect_uri', redirectUri)
-      url.searchParams.set('response_type', 'code')
-      url.searchParams.set('state', state)
-      if (provider.scopes) {
-        url.searchParams.set('scope', provider.scopes)
+      const url = buildCustomOAuthStartUrl(provider, state, redirectUri)
+      if (!url) {
+        toast.error(
+          t('{{provider}} login is unavailable', { provider: provider.name })
+        )
+        return
       }
 
       markOAuthIntent('login')
-      window.open(url.toString(), '_self')
+      window.open(url, '_self')
     } catch (_error) {
       toast.error(
         t('Failed to start {{provider}} login', { provider: provider.name })

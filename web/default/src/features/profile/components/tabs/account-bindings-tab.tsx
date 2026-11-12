@@ -9,6 +9,7 @@ import {
   handleOIDCOAuth,
   handleDiscordOAuth,
   handleLinuxDOOAuth,
+  markOAuthIntent,
 } from '@/lib/oauth'
 import { useDialogs } from '@/hooks/use-dialog'
 import { useStatus } from '@/hooks/use-status'
@@ -16,7 +17,12 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { StatusBadge } from '@/components/status-badge'
+import { getOAuthState } from '@/features/auth/api'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import {
+  buildCustomOAuthStartUrl,
+  type CustomOAuthProviderLike,
+} from '@/features/auth/lib/custom-oauth-action'
 import {
   getSelfOAuthBindings,
   unbindCustomOAuth,
@@ -52,7 +58,8 @@ export function AccountBindingsTab({
   const [unbinding, setUnbinding] = useState(false)
 
   const customProviders = status?.custom_oauth_providers as
-    Array<{ id: string; name: string }> | undefined
+    | Array<CustomOAuthProviderLike & { id: string | number; name: string }>
+    | undefined
 
   const fetchCustomBindings = useCallback(async () => {
     if (!customProviders || customProviders.length === 0) return
@@ -94,11 +101,33 @@ export function AccountBindingsTab({
     }
   }
 
-  const handleBindCustomOAuth = (provider: { id: string; name: string }) => {
-    const redirectUrl = `${window.location.origin}/oauth/${provider.id}?bind=true`
-    window.location.assign(
-      `/api/oauth/${provider.id}?redirect=${encodeURIComponent(redirectUrl)}`
-    )
+  const handleBindCustomOAuth = async (
+    provider: CustomOAuthProviderLike & { name: string }
+  ) => {
+    // 绑定与登录共用同一条回调链：回调页 /oauth/{slug} 用 slug 反查
+    // provider，再请求 /api/oauth/{slug}。旧实现用数字 id 作路径段且不带
+    // state，后端按 slug 注册 provider，id 只会得到 unknown provider，缺
+    // state 也会被 403 拒绝——点下去必然失败。这里先取 state 写入会话，
+    // 再按 kind 构造起始跳转到 IdP。
+    const state = await getOAuthState()
+    if (!state) {
+      toast.error(t('Failed to initialize OAuth'))
+      return
+    }
+    // redirect_uri 必须与后端换 token 时提交的一致：后端用
+    // {ServerAddress}/oauth/{slug}，不含查询串。绑定意图由
+    // markOAuthIntent('bind') 标记，不靠 URL 参数，所以这里不能再附加
+    // ?bind=true，否则 IdP 会判定 redirect_uri 不匹配并拒绝授权。
+    const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
+    const url = buildCustomOAuthStartUrl(provider, state, redirectUri)
+    if (!url) {
+      toast.error(
+        t('{{provider}} login is unavailable', { provider: provider.name })
+      )
+      return
+    }
+    markOAuthIntent('bind')
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   useEffect(() => {
@@ -294,7 +323,7 @@ export function AccountBindingsTab({
           <div className='grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3'>
             {customProviders.map((provider) => {
               const binding = customBindings.find(
-                (b) => b.provider_id === provider.id
+                (b) => String(b.provider_id) === String(provider.id)
               )
               const isBound = !!binding
               return (
@@ -319,7 +348,7 @@ export function AccountBindingsTab({
                       </div>
                       <p className='text-muted-foreground truncate text-xs'>
                         {isBound
-                          ? binding?.external_id || t('Bound')
+                          ? binding?.provider_user_id || t('Bound')
                           : t('Not bound')}
                       </p>
                     </div>

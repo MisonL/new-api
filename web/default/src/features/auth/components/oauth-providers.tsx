@@ -9,6 +9,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useOAuthLogin } from '../hooks/use-oauth-login'
+import { isInteractiveCustomOAuthProvider } from '../lib/custom-oauth-action'
 import type { SystemStatus } from '../types'
 
 type OAuthProvidersProps = {
@@ -105,9 +106,12 @@ export function OAuthProviders({
   }
 
   // Custom OAuth providers
+  // 只有真正能走通的交互入口（授权码 / 可浏览器登录的 CAS）才生成按钮：
+  // JWT、trusted header 与缺配置的 provider 在这里点了什么都不会发生。
   const customProviders = status?.custom_oauth_providers
   if (customProviders && customProviders.length > 0) {
     for (const provider of customProviders) {
+      if (!isInteractiveCustomOAuthProvider(provider)) continue
       providerButtons.push({
         key: `custom-${provider.slug}`,
         label: t('Continue with {{name}}', { name: provider.name }),
