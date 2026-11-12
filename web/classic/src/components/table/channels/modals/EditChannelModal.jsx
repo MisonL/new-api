@@ -287,6 +287,7 @@ const EditChannelModal = (props) => {
     disable_store: false, // false = 允许透传（默认开启）
     allow_safety_identifier: false,
     allow_include_obfuscation: false,
+    strip_codex_encrypted_context: false,
     codex_folded_sse_enabled: false,
     allow_inference_geo: false,
     allow_speed: false,
@@ -311,6 +312,7 @@ const EditChannelModal = (props) => {
     upstream_model_update_last_check_time: 0,
     upstream_model_update_last_detected_models: [],
     upstream_model_update_ignored_models: '',
+    request_body_limit_max_bytes: 0,
     auxiliary_request_header_policy_enabled: true,
   };
   const [batch, setBatch] = useState(false);
@@ -1529,6 +1531,8 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_safety_identifier || false;
           data.allow_include_obfuscation =
             parsedSettings.allow_include_obfuscation || false;
+          data.strip_codex_encrypted_context =
+            parsedSettings.strip_codex_encrypted_context === true;
           data.codex_folded_sse_enabled =
             data.type === 57 &&
             parsedSettings.codex_folded_sse_enabled === true;
@@ -1581,6 +1585,13 @@ const EditChannelModal = (props) => {
           )
             ? parsedSettings.upstream_model_update_ignored_models.join(',')
             : '';
+          const requestBodyLimit = parsedSettings.request_body_limit;
+          data.request_body_limit_max_bytes =
+            requestBodyLimit &&
+            typeof requestBodyLimit === 'object' &&
+            Number.isFinite(Number(requestBodyLimit.max_bytes))
+              ? Math.max(0, Math.trunc(Number(requestBodyLimit.max_bytes)))
+              : 0;
           data.auxiliary_request_header_policy_enabled =
             parsedSettings.auxiliary_request_header_policy_enabled !== false;
         } catch (error) {
@@ -1594,6 +1605,7 @@ const EditChannelModal = (props) => {
           data.disable_store = false;
           data.allow_safety_identifier = false;
           data.allow_include_obfuscation = false;
+          data.strip_codex_encrypted_context = false;
           data.codex_folded_sse_enabled = false;
           data.allow_inference_geo = false;
           data.allow_speed = false;
@@ -1618,6 +1630,7 @@ const EditChannelModal = (props) => {
           data.upstream_model_update_last_check_time = 0;
           data.upstream_model_update_last_detected_models = [];
           data.upstream_model_update_ignored_models = '';
+          data.request_body_limit_max_bytes = 0;
           data.auxiliary_request_header_policy_enabled = true;
         }
       } else {
@@ -1629,6 +1642,7 @@ const EditChannelModal = (props) => {
         data.disable_store = false;
         data.allow_safety_identifier = false;
         data.allow_include_obfuscation = false;
+        data.strip_codex_encrypted_context = false;
         data.codex_folded_sse_enabled = false;
         data.allow_inference_geo = false;
         data.allow_speed = false;
@@ -1653,6 +1667,7 @@ const EditChannelModal = (props) => {
         data.upstream_model_update_last_check_time = 0;
         data.upstream_model_update_last_detected_models = [];
         data.upstream_model_update_ignored_models = '';
+        data.request_body_limit_max_bytes = 0;
         data.auxiliary_request_header_policy_enabled = true;
       }
 
@@ -1740,6 +1755,9 @@ const EditChannelModal = (props) => {
         data.force_format ||
         data.claude_beta_query ||
         data.system_prompt_override ||
+        data.strip_codex_encrypted_context ||
+        (data.request_body_limit_max_bytes &&
+          data.request_body_limit_max_bytes > 0) ||
         (data.type === 57 && data.codex_folded_sse_enabled);
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
@@ -2584,6 +2602,12 @@ const EditChannelModal = (props) => {
         settings.claude_beta_query = localInputs.claude_beta_query === true;
       }
     }
+    if (localInputs.type === 1 || localInputs.type === 3) {
+      settings.strip_codex_encrypted_context =
+        localInputs.strip_codex_encrypted_context === true;
+    } else if ('strip_codex_encrypted_context' in settings) {
+      delete settings.strip_codex_encrypted_context;
+    }
     if (localInputs.type === 57) {
       settings.codex_folded_sse_enabled =
         localInputs.codex_folded_sse_enabled === true;
@@ -2624,6 +2648,45 @@ const EditChannelModal = (props) => {
     }
     settings.auxiliary_request_header_policy_enabled =
       localInputs.auxiliary_request_header_policy_enabled !== false;
+
+    const requestBodyLimitMaxBytes = Math.trunc(
+      Number(localInputs.request_body_limit_max_bytes || 0),
+    );
+    if (
+      Number.isFinite(requestBodyLimitMaxBytes) &&
+      requestBodyLimitMaxBytes > 0
+    ) {
+      const currentLimit =
+        settings.request_body_limit &&
+        typeof settings.request_body_limit === 'object' &&
+        !Array.isArray(settings.request_body_limit)
+          ? settings.request_body_limit
+          : {};
+      const valueChanged =
+        Number(currentLimit.max_bytes) !== requestBodyLimitMaxBytes;
+      settings.request_body_limit = {
+        ...currentLimit,
+        max_bytes: requestBodyLimitMaxBytes,
+        observed_at:
+          !valueChanged && typeof currentLimit.observed_at === 'number'
+            ? currentLimit.observed_at
+            : Math.floor(Date.now() / 1000),
+        source:
+          !valueChanged &&
+          typeof currentLimit.source === 'string' &&
+          currentLimit.source.trim()
+            ? currentLimit.source
+            : 'manual',
+        reason:
+          !valueChanged &&
+          typeof currentLimit.reason === 'string' &&
+          currentLimit.reason.trim()
+            ? currentLimit.reason
+            : 'manual override',
+      };
+    } else if ('request_body_limit' in settings) {
+      delete settings.request_body_limit;
+    }
     localInputs.settings = JSON.stringify(settings);
 
     // 清理不需要发送到后端的字段
@@ -2643,6 +2706,7 @@ const EditChannelModal = (props) => {
     delete localInputs.disable_store;
     delete localInputs.allow_safety_identifier;
     delete localInputs.allow_include_obfuscation;
+    delete localInputs.strip_codex_encrypted_context;
     delete localInputs.codex_folded_sse_enabled;
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
@@ -2661,6 +2725,7 @@ const EditChannelModal = (props) => {
     delete localInputs.upstream_model_update_last_check_time;
     delete localInputs.upstream_model_update_last_detected_models;
     delete localInputs.upstream_model_update_ignored_models;
+    delete localInputs.request_body_limit_max_bytes;
     delete localInputs.auxiliary_request_header_policy_enabled;
     if (legacyRouteFieldsReadOnly) {
       delete localInputs.priority;
@@ -3112,6 +3177,34 @@ const EditChannelModal = (props) => {
                   : 'rotate(-90deg)';
             const advancedSettingsContent = (
               <div className='space-y-4'>
+                <div className='pb-3 border-b border-gray-100'>
+                  <Text className='text-sm font-medium text-gray-500 mb-3 block'>
+                    {t('渠道请求体大小限制')}
+                  </Text>
+                  <Form.InputNumber
+                    field='request_body_limit_max_bytes'
+                    label={t('请求体大小限制（字节）')}
+                    min={0}
+                    precision={0}
+                    value={Math.max(
+                      0,
+                      Math.trunc(
+                        Number(inputs.request_body_limit_max_bytes || 0),
+                      ),
+                    )}
+                    onChange={(value) =>
+                      handleChannelOtherSettingsChange(
+                        'request_body_limit_max_bytes',
+                        Number.isFinite(Number(value))
+                          ? Math.max(0, Math.trunc(Number(value)))
+                          : 0,
+                      )
+                    }
+                    extraText={t(
+                      '设为 0 删除渠道限制；启用全局防护后，上游 413 响应可以自动更新该值。',
+                    )}
+                  />
+                </div>
                 {inputs.type === 57 && (
                   <div className='pb-3 border-b border-gray-100'>
                     <Form.Switch
@@ -3128,6 +3221,24 @@ const EditChannelModal = (props) => {
                       extraText={t(
                         '启用 Codex Responses 流式推理截断续写折叠。默认关闭，仅作用于 Codex SSE，不作用于 WebSocket 或 compact。',
                       )}
+                    />
+                  </div>
+                )}
+                {(inputs.type === 1 || inputs.type === 3) && (
+                  <div className='pb-3 border-b border-gray-100'>
+                    <Form.Switch
+                      field='strip_codex_encrypted_context'
+                      label={t('清理 Codex 加密上下文')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      checked={inputs.strip_codex_encrypted_context === true}
+                      onChange={(value) =>
+                        handleChannelOtherSettingsChange(
+                          'strip_codex_encrypted_context',
+                          value === true,
+                        )
+                      }
+                      extraText={t('转发 Responses 请求前移除加密推理上下文。')}
                     />
                   </div>
                 )}
